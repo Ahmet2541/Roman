@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roman Yazım Asistanı</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <button id="mobileMenuToggle" class="mobile-menu-toggle" aria-label="Menüyü aç/kapat">☰</button>
+    <div id="sidebarOverlay" class="sidebar-overlay"></div>
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">Roman Yazım Asistanı</div>
+      <div class="search-box">
+        <input type="text" id="globalSearch" placeholder="Ara: bir isim yaz…">
+      </div>
+      <nav id="navMenu">
+        <button class="nav-item" data-view="roman">Roman</button>
+        <button class="nav-item" data-view="character">Kişiler</button>
+        <button class="nav-item" data-view="place">Mekanlar</button>
+        <button class="nav-item" data-view="event">Olaylar / Zaman Çizelgesi</button>
+        <button class="nav-item" data-view="relationships">İlişki Haritası</button>
+        <button class="nav-item" data-view="object">Nesneler</button>
+        <button class="nav-item" data-view="foreshadowing">İpuçları</button>
+        <button class="nav-item" data-view="term">Terimler</button>
+        <button class="nav-item" data-view="rule">Roman Kuralları</button>
+        <button class="nav-item" data-view="fullscan">Tutarlılık Taraması</button>
+        <button class="nav-item" data-view="import">İçe Aktar</button>
+      </nav>
+      <div class="sidebar-footer">
+        <button id="logoutBtn">Çıkış yap</button>
+      </div>
+    </aside>
+    <main class="main" id="mainContent">
+      <!-- görünümler buraya JS ile basılır -->
+    </main>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

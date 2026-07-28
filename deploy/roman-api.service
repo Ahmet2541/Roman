@@ -1,0 +1,26 @@
+# systemd servis dosyası - uygulamayı arka planda sürekli çalışır tutar,
+# sunucu yeniden başlasa bile otomatik açılır, çökerse otomatik yeniden başlar.
+#
+# Kurulum (Ubuntu VPS örneği):
+#   sudo cp deploy/roman-api.service /etc/systemd/system/roman-api.service
+#   # Aşağıdaki /home/kullanici/roman-api yollarını kendi yoluna göre düzenle
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now roman-api
+#   sudo systemctl status roman-api      # çalışıyor mu kontrol et
+#   sudo journalctl -u roman-api -f      # canlı log takibi
+
+[Unit]
+Description=Roman Yazim Asistani API
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/home/kullanici/roman-api
+Environment="PATH=/home/kullanici/roman-api/venv/bin"
+ExecStart=/home/kullanici/roman-api/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

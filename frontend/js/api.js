@@ -1,0 +1,39 @@
+const TOKEN_KEY = 'roman_token';
+
+function getToken() { return localStorage.getItem(TOKEN_KEY); }
+function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
+function clearToken() { localStorage.removeItem(TOKEN_KEY); }
+
+async function apiFetch(path, opts = {}) {
+  const token = getToken();
+  const headers = opts.headers ? { ...opts.headers } : {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  if (opts.json !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(opts.json);
+  }
+
+  const res = await fetch(path, { method: opts.method || 'GET', headers, body: opts.body });
+
+  if (res.status === 401) {
+    clearToken();
+    window.location.href = '/app/login.html';
+    throw new Error('Oturum sona erdi, tekrar giriş yapmalısın.');
+  }
+  if (!res.ok) {
+    let detail = `İstek başarısız (${res.status})`;
+    try { const data = await res.json(); if (data.detail) detail = data.detail; } catch (e) { /* ignore */ }
+    throw new Error(detail);
+  }
+  if (res.status === 204) return null;
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+const api = {
+  get: (path) => apiFetch(path),
+  post: (path, json) => apiFetch(path, { method: 'POST', json }),
+  put: (path, json) => apiFetch(path, { method: 'PUT', json }),
+  del: (path) => apiFetch(path, { method: 'DELETE' }),
+};
