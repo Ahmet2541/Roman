@@ -9,7 +9,7 @@ from ..auth import get_current_user
 from .. import models, schemas
 from ..mentions import detect_and_save_mentions
 from ..entities import ENTITY_MODELS
-from ..import_parser import parse_manuscript, split_paragraphs
+from ..import_parser import parse_manuscript, split_paragraphs, parse_docx, decode_text_bytes
 from ..qwen_client import summarize_chapter, suggest_entities_for_chapter
 from ..ratelimit import rate_limit
 
@@ -348,12 +348,28 @@ async def import_manuscript(
     file: UploadFile = File(...),
     db: Session = Depends(get_db), _user=Depends(get_current_user),
 ):
-    """Elinde zaten yazılmış bir metni (.txt) yükle - 'Bölüm N' başlıklarına
-    göre otomatik bölüm/paragraf oluşturur ve o an menülerde kayıtlı
-    karakter/mekan/olay/nesne isimlerini paragraflarda arar. Aynı numaralı
-    bölüm/paragraf zaten varsa üzerine yazılır (idempotent import)."""
-    raw = (await file.read()).decode("utf-8", errors="replace")
-    parsed = parse_manuscript(raw)
+    """Elinde zaten yazılmış bir metni (.txt veya .docx) yükle.
+
+    .txt dosyalarında 'Bölüm N' başlıklarına göre; .docx dosyalarında ise
+    Word'ün 'Başlık 1' / 'Başlık 2' stillerine göre otomatik bölüm/paragraf
+    oluşturur ve o an menülerde kayıtlı karakter/mekan/olay/nesne isimlerini
+    paragraflarda arar. Aynı numaralı bölüm/paragraf zaten varsa üzerine
+    yazılır (idempotent import)."""
+    raw = await file.read()
+    filename = (file.filename or "").lower()
+
+    if filename.endswith(".docx"):
+        docx_chapters = parse_docx(raw)
+        parsed = [
+            {"number": c["number"], "title": c["title"], "paragraphs": c["paragraphs"]}
+            for c in docx_chapters
+        ]
+    else:
+        text = decode_text_bytes(raw)
+        parsed = [
+            {"number": c["number"], "title": c["title"], "paragraphs": split_paragraphs(c["text"])}
+            for c in parse_manuscript(text)
+        ]
 
     imported = []
     for chap in parsed:
@@ -367,7 +383,7 @@ async def import_manuscript(
         db.commit()
         db.refresh(chapter)
 
-        paragraphs = split_paragraphs(chap["text"])
+        paragraphs = chap["paragraphs"]
         for idx, text in enumerate(paragraphs, start=1):
             paragraph = (
                 db.query(models.Paragraph)

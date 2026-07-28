@@ -617,8 +617,8 @@ function renderImportView() {
   main().innerHTML = `
     <h1 class="view-title">İçe Aktar</h1>
     <div class="panel">
-      <p style="font-size:13.5px;color:var(--text-muted);">Elinde zaten yazılmış bir .txt dosyası varsa yükle — "Bölüm N" başlıklarına göre otomatik olarak bölüm/paragraf oluşturur ve mevcut menülerdeki isimleri paragraflarda arar. İçe aktarma otomatik olarak yeni karakter/mekan oluşturmaz; her bölüm için "AI ile varlık öner" ile Qwen'e henüz kayıtlı olmayan adayları buldurup onaylayarak ekleyebilirsin.</p>
-      <div class="field"><input type="file" id="importFile" accept=".txt"></div>
+      <p style="font-size:13.5px;color:var(--text-muted);">Elinde zaten yazılmış bir .txt ya da .docx dosyası varsa yükle. .txt dosyalarında "Bölüm N" başlıklarına göre; .docx dosyalarında ise Word'deki "Başlık 1" (bölüm) / "Başlık 2" (alt başlık) stillerine göre otomatik olarak bölüm/paragraf oluşturur ve mevcut menülerdeki isimleri paragraflarda arar. .docx için başlıkların gerçekten Word Stiller panelinden "Başlık 1"/"Başlık 2" olarak işaretlenmiş olması gerekir. İçe aktarma otomatik olarak yeni karakter/mekan oluşturmaz; her bölüm için "AI ile varlık öner" ile Qwen'e henüz kayıtlı olmayan adayları buldurup onaylayarak ekleyebilirsin.</p>
+      <div class="field"><input type="file" id="importFile" accept=".txt,.docx"></div>
       <button class="btn btn-primary" id="importBtn">Yükle ve İçe Aktar</button>
       <div id="importResult"></div>
       <hr style="margin:22px 0;border:none;border-top:1px solid var(--border);">
