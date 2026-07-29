@@ -11,4 +11,3 @@ openai
 pydantic-settings
 cryptography
 alembic
-python-docx

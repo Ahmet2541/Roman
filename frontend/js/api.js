@@ -1,13 +1,23 @@
 const TOKEN_KEY = 'roman_token';
+const NOVEL_KEY = 'roman_novel_id';
 
 function getToken() { return localStorage.getItem(TOKEN_KEY); }
 function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
 function clearToken() { localStorage.removeItem(TOKEN_KEY); }
 
+function getNovelId() { return localStorage.getItem(NOVEL_KEY); }
+function setNovelId(id) { localStorage.setItem(NOVEL_KEY, String(id)); }
+function clearNovelId() { localStorage.removeItem(NOVEL_KEY); }
+
 async function apiFetch(path, opts = {}) {
   const token = getToken();
   const headers = opts.headers ? { ...opts.headers } : {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  // /novels endpoint'i romandan BAĞIMSIZ çalışır (roman seçmeden önce de
+  // listelenebilmeli/oluşturulabilmeli) - o yüzden ona header eklemiyoruz.
+  const novelId = getNovelId();
+  if (novelId && !path.startsWith('/novels')) headers['X-Novel-Id'] = novelId;
 
   if (opts.json !== undefined) {
     headers['Content-Type'] = 'application/json';

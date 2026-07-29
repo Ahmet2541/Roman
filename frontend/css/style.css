@@ -246,3 +246,27 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   .entity-row { flex-direction: column; align-items: flex-start; gap: 8px; }
   .entity-row .actions { align-self: flex-end; }
 }
+
+/* AI sohbet modu */
+.ai-mode-tabs .ai-mode-btn.active { background: var(--gold-dim); font-weight: 600; }
+.ai-chat-messages { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.ai-chat-bubble { padding: 8px 10px; border-radius: 8px; font-size: 13px; }
+.ai-chat-bubble.user { background: var(--paper-dim); align-self: flex-end; max-width: 90%; }
+.ai-chat-bubble.assistant { background: #fff; border: 1px solid var(--border); align-self: flex-start; max-width: 95%; }
+
+/* Roman seçim ekranı */
+.novel-select-overlay {
+  position: fixed; inset: 0; background: var(--paper, #f7f5f0);
+  z-index: 1000; display: flex; align-items: center; justify-content: center;
+}
+.novel-select-box {
+  background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 28px 32px; width: 90%; max-width: 420px;
+}
+.novel-select-box h2 { margin-top: 0; }
+.novel-list { display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; }
+.novel-list-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+}
+.novel-list-item:hover { background: var(--paper-dim); }

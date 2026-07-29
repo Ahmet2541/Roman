@@ -9,24 +9,27 @@ from ..auth import get_current_user
 from .. import models, schemas
 from ..mentions import detect_and_save_mentions
 from ..entities import ENTITY_MODELS
-from ..import_parser import parse_manuscript, split_paragraphs, parse_docx, decode_text_bytes
+from ..import_parser import parse_manuscript, split_paragraphs
 from ..qwen_client import summarize_chapter, suggest_entities_for_chapter
 from ..ratelimit import rate_limit
+from ..novel_context import get_novel_id
 
 router = APIRouter(prefix="/chapters", tags=["Bölümler"])
 logger = logging.getLogger("roman_api.chapters")
 
 
 @router.get("/", response_model=List[schemas.ChapterListOut])
-def list_chapters(db: Session = Depends(get_db), _user=Depends(get_current_user)):
-    return db.query(models.Chapter).order_by(models.Chapter.number).all()
+def list_chapters(db: Session = Depends(get_db), _user=Depends(get_current_user), novel_id: int = Depends(get_novel_id)):
+    return db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).order_by(models.Chapter.number).all()
 
 
 @router.post("/", response_model=schemas.ChapterOut, status_code=201)
-def create_chapter(payload: schemas.ChapterCreate, db: Session = Depends(get_db), _user=Depends(get_current_user)):
-    if db.query(models.Chapter).filter(models.Chapter.number == payload.number).first():
-        raise HTTPException(400, "Bu numarada bir bölüm zaten var")
-    chapter = models.Chapter(number=payload.number, title=payload.title)
+def create_chapter(payload: schemas.ChapterCreate, db: Session = Depends(get_db), _user=Depends(get_current_user), novel_id: int = Depends(get_novel_id)):
+    if payload.kind not in ("chapter", "part", "subtitle"):
+        raise HTTPException(400, "kind sadece 'chapter', 'part' ya da 'subtitle' olabilir")
+    if db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id, models.Chapter.number == payload.number).first():
+        raise HTTPException(400, "Bu numarada bir bölüm/başlık zaten var")
+    chapter = models.Chapter(novel_id=novel_id, number=payload.number, title=payload.title, kind=payload.kind)
     db.add(chapter)
     db.commit()
     db.refresh(chapter)
@@ -34,9 +37,11 @@ def create_chapter(payload: schemas.ChapterCreate, db: Session = Depends(get_db)
 
 
 @router.get("/stats", response_model=schemas.WordCountStats)
-def word_count_stats(db: Session = Depends(get_db), _user=Depends(get_current_user)):
-    """Toplam ve bölüm başına kelime sayısı."""
-    chapters = db.query(models.Chapter).order_by(models.Chapter.number).all()
+def word_count_stats(db: Session = Depends(get_db), _user=Depends(get_current_user), novel_id: int = Depends(get_novel_id)):
+    """Toplam ve bölüm başına kelime sayısı. Başlık/alt başlık girdileri
+    (kind != 'chapter') paragrafsız olduğu için doğal olarak 0 kelime
+    katkısı yapar - ayrıca filtrelemeye gerek yok."""
+    chapters = db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).order_by(models.Chapter.number).all()
     per_chapter = []
     total = 0
     for c in chapters:
@@ -52,6 +57,7 @@ def search(
     entity_type: Optional[str] = None,
     entity_id: Optional[int] = None,
     db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
 ):
     """'Ahmet' yazınca ya da bir karakter/mekan/olay id'si vererek, o varlığın
     geçtiği tüm (bölüm, paragraf) konumlarını bulur - solda arama kutusunun
@@ -71,6 +77,10 @@ def search(
     kelime/ifade de bulunabilir; mentions sistemi sadece "bu isim hangi
     varlığa ait" bilgisini ekler, arama kapsamını SINIRLAMAZ.
 
+    ÖNEMLİ (3): tüm sonuçlar aktif romana (novel_id) göre filtrelenir -
+    hem mention hem serbest metin taraması SADECE bu romanın bölümlerine
+    bakar, başka romanların içeriği asla sızmaz.
+
     Not: hem entity_name hem paragraf metni veritabanında şifreli tutulduğu
     için arama SQL ILIKE yerine kayıtlar çekilip ORM şeffaf şekilde şifreyi
     çözdükten sonra Python tarafında yapılır. Kişisel bir roman ölçeğinde bu
@@ -81,7 +91,9 @@ def search(
     if entity_type and entity_id:
         rows = (
             db.query(models.Mention)
-            .filter(models.Mention.entity_type == entity_type, models.Mention.entity_id == entity_id)
+            .join(models.Paragraph, models.Mention.paragraph_id == models.Paragraph.id)
+            .join(models.Chapter, models.Paragraph.chapter_id == models.Chapter.id)
+            .filter(models.Mention.entity_type == entity_type, models.Mention.entity_id == entity_id, models.Chapter.novel_id == novel_id)
             .order_by(models.Mention.id)
             .all()
         )
@@ -103,7 +115,14 @@ def search(
     q_lower = q.lower()
 
     # 1) Kayıtlı varlık isimleriyle eşleşen mention'lar (ör. "Ahmet" -> KİŞİ)
-    mention_rows = db.query(models.Mention).order_by(models.Mention.id).all()
+    mention_rows = (
+        db.query(models.Mention)
+        .join(models.Paragraph, models.Mention.paragraph_id == models.Paragraph.id)
+        .join(models.Chapter, models.Paragraph.chapter_id == models.Chapter.id)
+        .filter(models.Chapter.novel_id == novel_id)
+        .order_by(models.Mention.id)
+        .all()
+    )
     seen_paragraph_entity = set()
     for m in mention_rows:
         if q_lower not in m.entity_name.lower():
@@ -127,7 +146,13 @@ def search(
     # "isim" listesiyle sınırlı kalmaz. Zaten yukarıda entity eşleşmesi
     # olarak listelenmiş bir paragraf burada TEKRAR gösterilmez.
     already_flagged_paragraphs = {pid for (pid, _, _) in seen_paragraph_entity}
-    all_paragraphs = db.query(models.Paragraph).order_by(models.Paragraph.id).all()
+    all_paragraphs = (
+        db.query(models.Paragraph)
+        .join(models.Chapter, models.Paragraph.chapter_id == models.Chapter.id)
+        .filter(models.Chapter.novel_id == novel_id)
+        .order_by(models.Paragraph.id)
+        .all()
+    )
     for para in all_paragraphs:
         if para.id in already_flagged_paragraphs:
             continue
@@ -149,12 +174,13 @@ def search(
 def generate_chapter_summary(
     chapter_id: int, db: Session = Depends(get_db),
     _user=Depends(rate_limit(max_calls=15, window_seconds=60, label="bölüm özeti")),
+    novel_id: int = Depends(get_novel_id),
 ):
     """Bölümün paragraflarından Qwen ile bir özet taslağı üretir. DOĞRUDAN
     kaydedilmez - kullanıcı beğenirse mevcut PUT /chapters/{chapter_id}
     (summary alanıyla) kaydeder. Kaydedilen özet, fihrist katmanı üzerinden
     tüm diğer AI isteklerine (assist, full-scan) otomatik olarak yansır."""
-    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
     if not chapter:
         raise HTTPException(404, "Bölüm bulunamadı")
     if not chapter.paragraphs:
@@ -175,13 +201,14 @@ def generate_chapter_summary(
 def suggest_chapter_entities(
     chapter_id: int, db: Session = Depends(get_db),
     _user=Depends(rate_limit(max_calls=10, window_seconds=60, label="varlık önerisi")),
+    novel_id: int = Depends(get_novel_id),
 ):
     """Hazır yazılmış/içe aktarılmış bir bölümü tarayıp henüz menülerde
     kayıtlı olmayan karakter/mekan/olay/nesne/ipucu/terim adayları önerir.
     HİÇBİR ŞEY doğrudan kaydedilmez - dönen liste, /ai/assist'teki
     new_entity_suggestions ile AYNI formatta olduğu için mevcut
     /ai/approve-suggestions ile onaylanıp kaydedilir."""
-    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
     if not chapter:
         raise HTTPException(404, "Bölüm bulunamadı")
     if not chapter.paragraphs:
@@ -199,19 +226,22 @@ def suggest_chapter_entities(
 
 
 @router.get("/{chapter_id}", response_model=schemas.ChapterOut)
-def get_chapter(chapter_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)):
-    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
+def get_chapter(chapter_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user), novel_id: int = Depends(get_novel_id)):
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
     if not chapter:
         raise HTTPException(404, "Bölüm bulunamadı")
     return chapter
 
 
 @router.put("/{chapter_id}", response_model=schemas.ChapterOut)
-def update_chapter(chapter_id: int, payload: schemas.ChapterUpdate, db: Session = Depends(get_db), _user=Depends(get_current_user)):
-    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
+def update_chapter(chapter_id: int, payload: schemas.ChapterUpdate, db: Session = Depends(get_db), _user=Depends(get_current_user), novel_id: int = Depends(get_novel_id)):
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
     if not chapter:
         raise HTTPException(404, "Bölüm bulunamadı")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if "kind" in data and data["kind"] not in ("chapter", "part", "subtitle"):
+        raise HTTPException(400, "kind sadece 'chapter', 'part' ya da 'subtitle' olabilir")
+    for field, value in data.items():
         setattr(chapter, field, value)
     db.commit()
     db.refresh(chapter)
@@ -219,8 +249,8 @@ def update_chapter(chapter_id: int, payload: schemas.ChapterUpdate, db: Session 
 
 
 @router.delete("/{chapter_id}", status_code=204)
-def delete_chapter(chapter_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)):
-    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
+def delete_chapter(chapter_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user), novel_id: int = Depends(get_novel_id)):
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
     if not chapter:
         raise HTTPException(404, "Bölüm bulunamadı")
     db.delete(chapter)
@@ -232,10 +262,11 @@ def delete_chapter(chapter_id: int, db: Session = Depends(get_db), _user=Depends
 def upsert_paragraph(
     chapter_id: int, number: int, payload: schemas.ParagraphCreate,
     db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
 ):
     """Paragrafı oluşturur ya da günceller, ardından o paragrafta geçen
     karakter/mekan/olay/nesne isimlerini otomatik tespit edip indeksler."""
-    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
     if not chapter:
         raise HTTPException(404, "Bölüm bulunamadı")
 
@@ -263,9 +294,13 @@ def upsert_paragraph(
 def paragraph_history(
     chapter_id: int, number: int,
     db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
 ):
     """Bu paragrafın önceki (üzerine yazılmış) hallerini en yeniden en
     eskiye doğru listeler."""
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
     paragraph = (
         db.query(models.Paragraph)
         .filter(models.Paragraph.chapter_id == chapter_id, models.Paragraph.number == number)
@@ -280,9 +315,13 @@ def paragraph_history(
 def restore_paragraph_version(
     chapter_id: int, number: int, version_id: int,
     db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
 ):
     """Paragrafı geçmişteki bir versiyona geri döndürür. Şu anki hal de
     kaybolmasın diye önce mevcut metin geçmişe kaydedilir."""
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
     paragraph = (
         db.query(models.Paragraph)
         .filter(models.Paragraph.chapter_id == chapter_id, models.Paragraph.number == number)
@@ -309,7 +348,11 @@ def restore_paragraph_version(
 def delete_paragraph(
     chapter_id: int, number: int,
     db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
 ):
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
     paragraph = (
         db.query(models.Paragraph)
         .filter(models.Paragraph.chapter_id == chapter_id, models.Paragraph.number == number)
@@ -326,10 +369,14 @@ def delete_paragraph(
 def toggle_style_sample(
     chapter_id: int, number: int,
     db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
 ):
     """Bu paragrafı 'yazarın kendi üslup örneği' olarak işaretler/işareti
     kaldırır. İşaretli paragraflar her AI isteğinde otomatik olarak stil
     referansı olarak Qwen'e gönderilir (bkz. qwen_client.build_style_layer)."""
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
     paragraph = (
         db.query(models.Paragraph)
         .filter(models.Paragraph.chapter_id == chapter_id, models.Paragraph.number == number)
@@ -347,43 +394,28 @@ def toggle_style_sample(
 async def import_manuscript(
     file: UploadFile = File(...),
     db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
 ):
-    """Elinde zaten yazılmış bir metni (.txt veya .docx) yükle.
-
-    .txt dosyalarında 'Bölüm N' başlıklarına göre; .docx dosyalarında ise
-    Word'ün 'Başlık 1' / 'Başlık 2' stillerine göre otomatik bölüm/paragraf
-    oluşturur ve o an menülerde kayıtlı karakter/mekan/olay/nesne isimlerini
-    paragraflarda arar. Aynı numaralı bölüm/paragraf zaten varsa üzerine
-    yazılır (idempotent import)."""
-    raw = await file.read()
-    filename = (file.filename or "").lower()
-
-    if filename.endswith(".docx"):
-        docx_chapters = parse_docx(raw)
-        parsed = [
-            {"number": c["number"], "title": c["title"], "paragraphs": c["paragraphs"]}
-            for c in docx_chapters
-        ]
-    else:
-        text = decode_text_bytes(raw)
-        parsed = [
-            {"number": c["number"], "title": c["title"], "paragraphs": split_paragraphs(c["text"])}
-            for c in parse_manuscript(text)
-        ]
+    """Elinde zaten yazılmış bir metni (.txt) yükle - 'Bölüm N' başlıklarına
+    göre otomatik bölüm/paragraf oluşturur ve o an menülerde kayıtlı
+    karakter/mekan/olay/nesne isimlerini paragraflarda arar. Aynı numaralı
+    bölüm/paragraf zaten varsa üzerine yazılır (idempotent import)."""
+    raw = (await file.read()).decode("utf-8", errors="replace")
+    parsed = parse_manuscript(raw)
 
     imported = []
     for chap in parsed:
-        chapter = db.query(models.Chapter).filter(models.Chapter.number == chap["number"]).first()
+        chapter = db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id, models.Chapter.number == chap["number"]).first()
         if chapter:
             if chap["title"]:
                 chapter.title = chap["title"]
         else:
-            chapter = models.Chapter(number=chap["number"], title=chap["title"])
+            chapter = models.Chapter(novel_id=novel_id, number=chap["number"], title=chap["title"])
             db.add(chapter)
         db.commit()
         db.refresh(chapter)
 
-        paragraphs = chap["paragraphs"]
+        paragraphs = split_paragraphs(chap["text"])
         for idx, text in enumerate(paragraphs, start=1):
             paragraph = (
                 db.query(models.Paragraph)
@@ -405,11 +437,16 @@ async def import_manuscript(
 
 
 @router.post("/reindex-mentions")
-def reindex_mentions(db: Session = Depends(get_db), _user=Depends(get_current_user)):
+def reindex_mentions(db: Session = Depends(get_db), _user=Depends(get_current_user), novel_id: int = Depends(get_novel_id)):
     """Yeni bir karakter/mekan/olay eklediğinde ya da bir menü kaydının
     ismini değiştirdiğinde, roman boyunca geçmişe dönük olarak tüm
     paragrafları yeniden tarayıp mentions indeksini günceller."""
-    paragraphs = db.query(models.Paragraph).all()
+    paragraphs = (
+        db.query(models.Paragraph)
+        .join(models.Chapter, models.Paragraph.chapter_id == models.Chapter.id)
+        .filter(models.Chapter.novel_id == novel_id)
+        .all()
+    )
     for p in paragraphs:
         detect_and_save_mentions(db, p)
     return {"reindexed_paragraphs": len(paragraphs)}

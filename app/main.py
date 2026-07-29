@@ -10,6 +10,7 @@ from .database import Base, engine, SessionLocal
 from . import auth
 from .config import settings
 from .encryption import get_fernet
+from .migrations import run_startup_migrations
 from .routers.menus import ALL_MENU_ROUTERS
 from .routers.chapters import router as chapters_router
 from .routers.ai import router as ai_router
@@ -17,6 +18,7 @@ from .routers.auth_router import router as auth_router
 from .routers.events import router as events_router
 from .routers.relationships import router as relationships_router
 from .routers.progressions import router as progressions_router
+from .routers.novels import router as novels_router
 from .routers.admin import router as admin_router
 
 # ---- Loglama: sunucu tarafında bir şey ters giderse görebilmek için ----
@@ -41,6 +43,7 @@ except Exception as exc:
     raise SystemExit(f"\n[BAŞLATMA HATASI] {exc}\n")
 
 Base.metadata.create_all(bind=engine)
+run_startup_migrations(engine)
 
 with SessionLocal() as db:
     auth.ensure_admin_user(db)
@@ -75,6 +78,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(novels_router)
 for r in ALL_MENU_ROUTERS:
     app.include_router(r)
 app.include_router(events_router)

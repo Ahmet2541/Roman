@@ -229,7 +229,14 @@ async function renderRomanView() {
     </div>
     <div class="toolbar">
       <div></div>
-      <button class="btn btn-primary" id="newChapterBtn">+ Yeni Bölüm</button>
+      <div style="position:relative;">
+        <button class="btn btn-primary" id="newChapterBtn">+ Yeni</button>
+        <div id="newChapterMenu" style="display:none;position:absolute;right:0;top:110%;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.08);z-index:10;min-width:180px;">
+          <button class="btn btn-sm" data-kind="chapter" style="display:block;width:100%;text-align:left;border:none;border-radius:0;">Yeni Bölüm</button>
+          <button class="btn btn-sm" data-kind="part" style="display:block;width:100%;text-align:left;border:none;border-radius:0;">Yeni Başlık (Kısım)</button>
+          <button class="btn btn-sm" data-kind="subtitle" style="display:block;width:100%;text-align:left;border:none;border-radius:0;">Yeni Alt Başlık</button>
+        </div>
+      </div>
     </div>
     <div class="roman-layout">
       <div class="chapter-list" id="chapterList"><div class="empty-state">Yükleniyor…</div></div>
@@ -237,7 +244,21 @@ async function renderRomanView() {
       <div class="side-panel" id="aiPanel"></div>
     </div>`;
 
-  document.getElementById('newChapterBtn').addEventListener('click', createChapterPrompt);
+  document.getElementById('newChapterBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const menu = document.getElementById('newChapterMenu');
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+  });
+  document.querySelectorAll('#newChapterMenu button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('newChapterMenu').style.display = 'none';
+      createChapterPrompt(btn.dataset.kind);
+    });
+  });
+  document.addEventListener('click', () => {
+    const menu = document.getElementById('newChapterMenu');
+    if (menu) menu.style.display = 'none';
+  });
   await loadChapterList();
   loadWordCount();
 }
@@ -250,18 +271,30 @@ async function loadWordCount() {
   } catch (err) { /* sessizce geç */ }
 }
 
-async function loadChapterList(selectId) {
+async function loadChapterList(selectId, skipSelect) {
   const listEl = document.getElementById('chapterList');
   try {
     const chapters = await api.get('/chapters/');
     if (!chapters.length) {
       listEl.innerHTML = `<div class="empty-state">Henüz bölüm yok.</div>`;
-      renderAiPanel(null);
+      if (!skipSelect) renderAiPanel(null);
       return;
     }
     listEl.innerHTML = chapters.map(c => {
+      if (c.kind === 'part') {
+        return `<div class="chapter-item chapter-part-divider" data-id="${c.id}" style="cursor:default;background:var(--paper-dim);">
+          <div style="flex:1;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;font-size:12.5px;">${escapeHtml(c.title)}</div>
+          <button class="btn-icon-sm del-chapter-btn" data-id="${c.id}" title="Sil">✕</button>
+        </div>`;
+      }
+      if (c.kind === 'subtitle') {
+        return `<div class="chapter-item chapter-subtitle-divider" data-id="${c.id}" style="cursor:default;">
+          <div style="flex:1;font-style:italic;font-size:12.5px;color:var(--text-muted);padding-left:12px;">${escapeHtml(c.title)}</div>
+          <button class="btn-icon-sm del-chapter-btn" data-id="${c.id}" title="Sil">✕</button>
+        </div>`;
+      }
       const preview = c.summary ? c.summary.slice(0, 80) + (c.summary.length > 80 ? '…' : '') : '';
-      return `<div class="chapter-item" data-id="${c.id}" title="${escapeHtml(c.summary || 'Henüz özet yok')}">
+      return `<div class="chapter-item${currentChapter && String(currentChapter.id) === String(c.id) ? ' active' : ''}" data-id="${c.id}" title="${escapeHtml(c.summary || 'Henüz özet yok')}">
         <div style="flex:1;min-width:0;">
           <span>Bölüm ${c.number}${c.title ? ' — ' + escapeHtml(c.title) : ''}</span>
           ${preview ? `<div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(preview)}</div>` : ''}
@@ -272,6 +305,13 @@ async function loadChapterList(selectId) {
     listEl.querySelectorAll('.chapter-item').forEach(el => {
       el.addEventListener('click', (e) => {
         if (e.target.closest('.del-chapter-btn')) return;
+        const c = chapters.find(x => String(x.id) === el.dataset.id);
+        if (c && c.kind !== 'chapter') {
+          const newTitle = prompt('Metni düzenle:', c.title);
+          if (newTitle === null || !newTitle.trim()) return;
+          api.put(`/chapters/${c.id}`, { title: newTitle.trim() }).then(() => loadChapterList(currentChapter ? currentChapter.id : undefined)).catch(err => alert(err.message));
+          return;
+        }
         selectChapter(el.dataset.id);
       });
     });
@@ -285,18 +325,37 @@ async function loadChapterList(selectId) {
         } catch (err) { alert(err.message); }
       });
     });
-    selectChapter(selectId || chapters[0].id);
+    if (skipSelect) return;
+    const firstRealChapter = chapters.find(c => c.kind === 'chapter');
+    if (selectId || firstRealChapter) selectChapter(selectId || firstRealChapter.id);
   } catch (err) {
     listEl.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   }
 }
 
-async function createChapterPrompt() {
-  const number = prompt('Bölüm numarası:');
+async function refreshAfterChatActions() {
+  // Fihristi yenile ama AI panelini/sohbet geçmişini SIFIRLAMA - selectChapter
+  // yerine sadece liste HTML'ini ve (varsa) okuyucuyu güncelliyoruz.
+  await loadChapterList(undefined, true);
+  loadWordCount();
+  if (currentChapter) {
+    try {
+      const refreshed = await api.get(`/chapters/${currentChapter.id}`);
+      currentChapter = refreshed;
+      renderReader(refreshed);
+    } catch (err) { /* sessizce geç */ }
+  }
+}
+
+async function createChapterPrompt(kind) {
+  kind = kind || 'chapter';
+  const kindLabel = kind === 'part' ? 'Başlık (Kısım)' : kind === 'subtitle' ? 'Alt Başlık' : 'Bölüm';
+  const number = prompt(`${kindLabel} sırası (fihristteki sırasını belirler):`);
   if (!number) return;
-  const title = prompt('Bölüm başlığı (opsiyonel):') || '';
+  const title = prompt(`${kindLabel} metni${kind === 'chapter' ? ' (opsiyonel)' : ''}:`) || '';
+  if (kind !== 'chapter' && !title.trim()) { alert(`${kindLabel} için bir metin gerekli.`); return; }
   try {
-    const chapter = await api.post('/chapters/', { number: parseInt(number, 10), title });
+    const chapter = await api.post('/chapters/', { number: parseInt(number, 10), title, kind });
     await loadChapterList(chapter.id);
   } catch (err) { alert(err.message); }
 }
@@ -529,16 +588,128 @@ async function renderAiPanel(chapter) {
     panel.innerHTML = `
       <h3>AI Yazım Desteği</h3>
       <div class="entity-picker">${pickerHtml || '<div class="empty-state">Henüz kayıt yok</div>'}</div>
-      <div class="field"><label>Talimat</label><textarea id="aiInstruction" placeholder="Örn: Ahmet'in limana varışını anlatan bir paragraf yaz"></textarea></div>
-      <button class="btn btn-primary" id="aiAssistBtn" style="width:100%;">Oluştur / Düzenle</button>
-      <button class="btn btn-sm" id="previewContextBtn" style="width:100%;margin-top:6px;">Bağlamı Önizle (AI'ya ne gidiyor?)</button>
-      <div id="contextPreviewContainer"></div>
-      <div id="aiResultContainer"></div>`;
 
+      <div class="ai-mode-tabs" style="display:flex;gap:6px;margin:10px 0 8px;">
+        <button class="btn btn-sm ai-mode-btn active" data-mode="chat">Sohbet</button>
+        <button class="btn btn-sm ai-mode-btn" data-mode="instruct">Talimat</button>
+      </div>
+
+      <div id="aiChatMode">
+        <div id="aiChatMessages" class="ai-chat-messages"></div>
+        <div style="display:flex;gap:6px;">
+          <textarea id="aiChatInput" placeholder="Ör: Ahmet için bir sahne fikrin var mı?" style="flex:1;min-height:44px;"></textarea>
+          <button class="btn btn-primary" id="aiChatSendBtn">Gönder</button>
+        </div>
+        <button class="btn btn-sm" id="clearChatBtn" style="margin-top:6px;">Sohbeti temizle</button>
+      </div>
+
+      <div id="aiInstructMode" style="display:none;">
+        <div class="field"><label>Talimat</label><textarea id="aiInstruction" placeholder="Örn: Ahmet'in limana varışını anlatan bir paragraf yaz"></textarea></div>
+        <button class="btn btn-primary" id="aiAssistBtn" style="width:100%;">Oluştur / Düzenle</button>
+        <div id="aiResultContainer"></div>
+      </div>
+
+      <button class="btn btn-sm" id="previewContextBtn" style="width:100%;margin-top:10px;">Bağlamı Önizle (AI'ya ne gidiyor?)</button>
+      <div id="contextPreviewContainer"></div>`;
+
+    aiChatMessages = [];
+    renderChatMessages();
+
+    panel.querySelectorAll('.ai-mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        panel.querySelectorAll('.ai-mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('aiChatMode').style.display = btn.dataset.mode === 'chat' ? 'block' : 'none';
+        document.getElementById('aiInstructMode').style.display = btn.dataset.mode === 'instruct' ? 'block' : 'none';
+      });
+    });
+
+    document.getElementById('aiChatSendBtn').addEventListener('click', () => sendChatMessage(chapter));
+    document.getElementById('aiChatInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(chapter); }
+    });
+    document.getElementById('clearChatBtn').addEventListener('click', () => {
+      aiChatMessages = [];
+      renderChatMessages();
+    });
     document.getElementById('aiAssistBtn').addEventListener('click', () => runAiAssist(chapter));
     document.getElementById('previewContextBtn').addEventListener('click', () => runContextPreview(chapter));
   } catch (err) {
     panel.innerHTML = `<h3>AI Yazım Desteği</h3><div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+let aiChatMessages = [];
+
+function getSelectedEntities() {
+  return Array.from(document.querySelectorAll('.entity-check:checked')).map(cb => ({
+    entity_type: cb.dataset.type, entity_id: parseInt(cb.dataset.id, 10),
+  }));
+}
+
+function renderChatMessages() {
+  const el = document.getElementById('aiChatMessages');
+  if (!el) return;
+  if (!aiChatMessages.length) {
+    el.innerHTML = '<div class="empty-state" style="padding:10px 0;">Bölümle ilgili ne konuşmak istersin? Fikir sorabilir, bir sahne yazmasını isteyebilir ya da yazdığın bir kısmı tartışabilirsin.</div>';
+    return;
+  }
+  el.innerHTML = aiChatMessages.map((m, i) => `
+    <div class="ai-chat-bubble ${m.role}">
+      ${m.actions && m.actions.length ? `<div style="font-size:11px;color:#2f6b3a;background:#eef7ef;border-radius:6px;padding:4px 6px;margin-bottom:6px;">✓ ${m.actions.map(escapeHtml).join(' · ')}</div>` : ''}
+      <div style="white-space:pre-wrap;">${escapeHtml(m.content)}</div>
+      ${m.role === 'assistant' ? `<button class="btn btn-sm insert-to-paragraph-btn" data-idx="${i}" style="margin-top:6px;">Bölüme paragraf olarak ekle</button>` : ''}
+    </div>`).join('');
+  el.querySelectorAll('.insert-to-paragraph-btn').forEach(btn => {
+    btn.addEventListener('click', () => insertChatReplyAsParagraph(aiChatMessages[parseInt(btn.dataset.idx, 10)].content));
+  });
+  el.scrollTop = el.scrollHeight;
+}
+
+function insertChatReplyAsParagraph(text) {
+  if (!currentChapter) { alert('Önce sol taraftan bir bölüm seç.'); return; }
+  const nextNumber = currentChapter.paragraphs.length ? Math.max(...currentChapter.paragraphs.map(p => p.number)) + 1 : 1;
+  addEmptyParagraphBlock(nextNumber);
+  const el = document.querySelector(`.paragraph-text[data-number="${nextNumber}"]`);
+  if (el) el.innerText = text;
+}
+
+async function sendChatMessage(chapter) {
+  const input = document.getElementById('aiChatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  const selected = getSelectedEntities();
+
+  aiChatMessages.push({ role: 'user', content: text });
+  input.value = '';
+  renderChatMessages();
+
+  const messagesEl = document.getElementById('aiChatMessages');
+  const thinking = document.createElement('div');
+  thinking.className = 'empty-state';
+  thinking.id = 'chatThinking';
+  thinking.textContent = 'Yazıyor…';
+  messagesEl.appendChild(thinking);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  document.getElementById('aiChatSendBtn').disabled = true;
+
+  try {
+    const payload = {
+      chapter_number: chapter ? chapter.number : 0,
+      selected_entities: selected,
+      messages: aiChatMessages,
+    };
+    const result = await api.post('/ai/chat', payload);
+    aiChatMessages.push({ role: 'assistant', content: result.reply, actions: result.actions_taken || [] });
+    renderChatMessages();
+    if (result.actions_taken && result.actions_taken.length) {
+      await refreshAfterChatActions();
+    }
+  } catch (err) {
+    document.getElementById('chatThinking')?.remove();
+    alert(err.message);
+  } finally {
+    document.getElementById('aiChatSendBtn').disabled = false;
   }
 }
 
@@ -617,8 +788,8 @@ function renderImportView() {
   main().innerHTML = `
     <h1 class="view-title">İçe Aktar</h1>
     <div class="panel">
-      <p style="font-size:13.5px;color:var(--text-muted);">Elinde zaten yazılmış bir .txt ya da .docx dosyası varsa yükle. .txt dosyalarında "Bölüm N" başlıklarına göre; .docx dosyalarında ise Word'deki "Başlık 1" (bölüm) / "Başlık 2" (alt başlık) stillerine göre otomatik olarak bölüm/paragraf oluşturur ve mevcut menülerdeki isimleri paragraflarda arar. .docx için başlıkların gerçekten Word Stiller panelinden "Başlık 1"/"Başlık 2" olarak işaretlenmiş olması gerekir. İçe aktarma otomatik olarak yeni karakter/mekan oluşturmaz; her bölüm için "AI ile varlık öner" ile Qwen'e henüz kayıtlı olmayan adayları buldurup onaylayarak ekleyebilirsin.</p>
-      <div class="field"><input type="file" id="importFile" accept=".txt,.docx"></div>
+      <p style="font-size:13.5px;color:var(--text-muted);">Elinde zaten yazılmış bir .txt dosyası varsa yükle — "Bölüm N" başlıklarına göre otomatik olarak bölüm/paragraf oluşturur ve mevcut menülerdeki isimleri paragraflarda arar. İçe aktarma otomatik olarak yeni karakter/mekan oluşturmaz; her bölüm için "AI ile varlık öner" ile Qwen'e henüz kayıtlı olmayan adayları buldurup onaylayarak ekleyebilirsin.</p>
+      <div class="field"><input type="file" id="importFile" accept=".txt"></div>
       <button class="btn btn-primary" id="importBtn">Yükle ve İçe Aktar</button>
       <div id="importResult"></div>
       <hr style="margin:22px 0;border:none;border-top:1px solid var(--border);">
@@ -637,7 +808,7 @@ function renderImportView() {
     try {
       const res = await fetch('/chapters/import', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${getToken()}` },
+        headers: { 'Authorization': `Bearer ${getToken()}`, 'X-Novel-Id': getNovelId() },
         body: formData,
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.detail || 'Yükleme başarısız'); }
@@ -1073,9 +1244,104 @@ async function renderSearchResults(q) {
 // Başlangıç
 // ---------------------------------------------------------------------
 
-if (!getToken()) {
-  window.location.href = '/app/login.html';
-} else {
+// ---------------------------------------------------------------------
+// Roman seçimi
+// ---------------------------------------------------------------------
+
+async function loadAndRenderNovelList() {
+  const listEl = document.getElementById('novelList');
+  listEl.innerHTML = '<div class="empty-state">Yükleniyor…</div>';
+  const novels = await api.get('/novels/');
+  if (!novels.length) {
+    listEl.innerHTML = '<div class="empty-state">Henüz roman yok - aşağıdan ilkini oluştur.</div>';
+    return novels;
+  }
+  listEl.innerHTML = novels.map(n => `
+    <div class="novel-list-item" data-id="${n.id}">
+      <span>${escapeHtml(n.name)}</span>
+      <div class="actions">
+        <button class="btn btn-sm rename-novel-btn" data-id="${n.id}" data-name="${escapeHtml(n.name)}">Yeniden adlandır</button>
+        <button class="btn btn-sm btn-danger delete-novel-btn" data-id="${n.id}">Sil</button>
+      </div>
+    </div>`).join('');
+
+  listEl.querySelectorAll('.novel-list-item').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.actions')) return;
+      selectNovelAndStart(el.dataset.id);
+    });
+  });
+  listEl.querySelectorAll('.rename-novel-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const newName = prompt('Yeni roman adı:', btn.dataset.name);
+      if (!newName || !newName.trim()) return;
+      await api.put(`/novels/${btn.dataset.id}`, { name: newName.trim() });
+      loadAndRenderNovelList();
+    });
+  });
+  listEl.querySelectorAll('.delete-novel-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('Bu romanı ve İÇİNDEKİ TÜM VERİYİ (karakterler, bölümler, her şey) kalıcı olarak silmek istediğine emin misin? Bu işlem geri alınamaz.')) return;
+      await api.del(`/novels/${btn.dataset.id}`);
+      if (getNovelId() === btn.dataset.id) clearNovelId();
+      loadAndRenderNovelList();
+    });
+  });
+  return novels;
+}
+
+function selectNovelAndStart(novelId) {
+  setNovelId(novelId);
+  window.location.reload();
+}
+
+function showNovelSelectScreen() {
+  document.getElementById('novelSelectOverlay').style.display = 'flex';
+  loadAndRenderNovelList();
+  document.getElementById('createNovelBtn').addEventListener('click', async () => {
+    const input = document.getElementById('newNovelName');
+    const name = input.value.trim();
+    if (!name) return;
+    const novel = await api.post('/novels/', { name });
+    selectNovelAndStart(novel.id);
+  });
+}
+
+async function initApp() {
+  if (!getToken()) {
+    window.location.href = '/app/login.html';
+    return;
+  }
+
+  const novelId = getNovelId();
+  if (!novelId) {
+    showNovelSelectScreen();
+    return;
+  }
+
+  // Kayıtlı roman hâlâ var mı diye doğrula (silinmiş olabilir)
+  let novels;
+  try {
+    novels = await api.get('/novels/');
+  } catch (err) {
+    showNovelSelectScreen();
+    return;
+  }
+  const activeNovel = novels.find(n => String(n.id) === String(novelId));
+  if (!activeNovel) {
+    clearNovelId();
+    showNovelSelectScreen();
+    return;
+  }
+
+  document.getElementById('activeNovelName').textContent = activeNovel.name;
+  document.getElementById('switchNovelBtn').addEventListener('click', () => {
+    clearNovelId();
+    window.location.reload();
+  });
+
   document.querySelectorAll('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => {
       switchView(btn.dataset.view);
@@ -1099,3 +1365,5 @@ if (!getToken()) {
   });
   switchView('roman');
 }
+
+initApp();

@@ -16,6 +16,19 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
 
 
+class Novel(Base):
+    """Bir 'roman' - artık sistemde birden fazla roman tutulabiliyor.
+    Karakter/mekan/olay/nesne/ipucu/terim/kural/bölüm/progression/ilişki
+    tablolarının HEPSİ novel_id ile bir romana bağlıdır (bkz. ilgili
+    modellerdeki novel_id sütunu). Kullanıcı arayüzde aktif romanı seçer,
+    frontend her istekte X-Novel-Id header'ıyla gönderir (bkz.
+    novel_context.get_novel_id)."""
+    __tablename__ = "novels"
+    id = Column(Integer, primary_key=True)
+    name = Column(EncryptedString, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 # ---- Ortak menü tabloları -------------------------------------------------
 # Kişiler, Mekanlar, Olaylar, Nesneler, İpuçları, Terimler ve Roman Kuralları
 # hepsi aynı basit şekle sahip: isim + açıklama + notlar.
@@ -25,10 +38,19 @@ class User(Base):
 # şifreli tutulur - .env'deki DB_ENCRYPTION_KEY olmadan veritabanı dosyası
 # tek başına ele geçirilse bile hiçbir isim/metin okunamaz. ORM üzerinden
 # okurken/yazarken tamamen şeffaf çalışır, uygulama kodu fark etmez.
+#
+# novel_id: hangi romana ait olduğu. Eski (tek roman dönemi) veriler için
+# nullable=True bırakıldı - mevcut Railway veritabanı bu sütunu hiç
+# içermiyordu; uygulama açılışında migrations.py bu sütunu ekleyip mevcut
+# tüm satırları otomatik oluşturulan "Roman 1" romanına bağlıyor (bkz.
+# main.py -> run_startup_migrations). API katmanında novel_id HER ZAMAN
+# zorunludur (bkz. novel_context.get_novel_id) - DB'de nullable olması
+# sadece geriye dönük uyumluluk/migration kolaylığı içindir.
 
 class Character(Base):
     __tablename__ = "characters"
     id = Column(Integer, primary_key=True)
+    novel_id = Column(Integer, ForeignKey("novels.id"), nullable=True)
     name = Column(EncryptedString, nullable=False)
     description = Column(EncryptedString, default="")
     notes = Column(EncryptedString, default="")
@@ -42,6 +64,7 @@ class CharacterRelationship(Base):
     İlişki haritası bu tablodan üretilir."""
     __tablename__ = "character_relationships"
     id = Column(Integer, primary_key=True)
+    novel_id = Column(Integer, ForeignKey("novels.id"), nullable=True)
     character_a_id = Column(Integer, ForeignKey("characters.id"), nullable=False)
     character_b_id = Column(Integer, ForeignKey("characters.id"), nullable=False)
     label = Column(EncryptedString, default="")
@@ -52,6 +75,7 @@ class CharacterRelationship(Base):
 class Place(Base):
     __tablename__ = "places"
     id = Column(Integer, primary_key=True)
+    novel_id = Column(Integer, ForeignKey("novels.id"), nullable=True)
     name = Column(EncryptedString, nullable=False)
     description = Column(EncryptedString, default="")
     notes = Column(EncryptedString, default="")
@@ -66,6 +90,7 @@ class Event(Base):
     kullanılır (aynı anda aynı karakter farklı yerde olamaz)."""
     __tablename__ = "events"
     id = Column(Integer, primary_key=True)
+    novel_id = Column(Integer, ForeignKey("novels.id"), nullable=True)
     name = Column(EncryptedString, nullable=False)
     description = Column(EncryptedString, default="")
     notes = Column(EncryptedString, default="")
@@ -81,6 +106,7 @@ class Object(Base):
     """Nesneler / önemli eşyalar."""
     __tablename__ = "objects"
     id = Column(Integer, primary_key=True)
+    novel_id = Column(Integer, ForeignKey("novels.id"), nullable=True)
     name = Column(EncryptedString, nullable=False)
     description = Column(EncryptedString, default="")
     notes = Column(EncryptedString, default="")
@@ -92,6 +118,7 @@ class Foreshadowing(Base):
     """İpuçları / öngörüler takibi."""
     __tablename__ = "foreshadowings"
     id = Column(Integer, primary_key=True)
+    novel_id = Column(Integer, ForeignKey("novels.id"), nullable=True)
     name = Column(EncryptedString, nullable=False)
     description = Column(EncryptedString, default="")
     status = Column(String(50), default="açık")  # açık | kapandı - içerik değil, düz kalabilir
@@ -104,6 +131,7 @@ class GlossaryTerm(Base):
     """Terimler sözlüğü."""
     __tablename__ = "glossary_terms"
     id = Column(Integer, primary_key=True)
+    novel_id = Column(Integer, ForeignKey("novels.id"), nullable=True)
     name = Column(EncryptedString, nullable=False)
     description = Column(EncryptedString, default="")
     notes = Column(EncryptedString, default="")
@@ -116,6 +144,7 @@ class Rule(Base):
     tam olarak dahil edilir, bölüme özel filtrelemeye tabi değildir."""
     __tablename__ = "rules"
     id = Column(Integer, primary_key=True)
+    novel_id = Column(Integer, ForeignKey("novels.id"), nullable=True)
     title = Column(EncryptedString, nullable=False)
     description = Column(EncryptedString, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -125,13 +154,25 @@ class Rule(Base):
 # ---- Roman metni: Bölümler / Paragraflar ----------------------------------
 
 class Chapter(Base):
+    """kind: 'chapter' (normal bölüm, paragrafları olur) | 'part' (KISIM /
+    büyük başlık - ör. 'BİRİNCİ KISIM') | 'subtitle' (alt başlık - bir
+    bölüm grubunun içindeki daha küçük ayraç). 'part' ve 'subtitle'
+    girdilerinin paragrafı olmaz, sadece fihristte/okuyucuda bir ayraç
+    satırı olarak görünürler ve AI bağlam katmanlarına (fihrist özeti,
+    full-scan) dahil EDİLMEZLER - çünkü içerikleri yok, sadece yapı.
+    number, TÜM girdiler (bölüm+başlık+alt başlık) arasındaki sırayı
+    belirler - "bölüm numarası" değil "sıra" olarak düşünülmeli."""
     __tablename__ = "chapters"
     id = Column(Integer, primary_key=True)
-    number = Column(Integer, nullable=False, unique=True)
+    novel_id = Column(Integer, ForeignKey("novels.id"), nullable=True)
+    number = Column(Integer, nullable=False)
+    kind = Column(String(20), nullable=False, default="chapter")  # chapter | part | subtitle
     title = Column(EncryptedString, default="")
     summary = Column(EncryptedString, default="")  # Qwen tarafından üretilip onaylanan özet
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("novel_id", "number", name="uq_novel_chapter_number"),)
 
     paragraphs = relationship(
         "Paragraph", back_populates="chapter",
@@ -180,6 +221,7 @@ class Progression(Base):
     chapter_number boş bırakılabilir (henüz belli bir bölüme bağlanmamış not)."""
     __tablename__ = "progressions"
     id = Column(Integer, primary_key=True)
+    novel_id = Column(Integer, ForeignKey("novels.id"), nullable=True)
     entity_type = Column(String(30), nullable=False)
     entity_id = Column(Integer, nullable=False)
     chapter_number = Column(Integer, nullable=True)

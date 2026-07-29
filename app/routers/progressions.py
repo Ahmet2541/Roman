@@ -15,6 +15,7 @@ from ..database import get_db
 from ..auth import get_current_user
 from .. import models, schemas
 from ..entities import ENTITY_MODELS
+from ..novel_context import get_novel_id
 
 router = APIRouter(prefix="/progressions", tags=["Gelişim Çizelgesi"])
 
@@ -25,8 +26,9 @@ def list_progressions(
     entity_id: Optional[int] = None,
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
 ):
-    query = db.query(models.Progression)
+    query = db.query(models.Progression).filter(models.Progression.novel_id == novel_id)
     if entity_type:
         query = query.filter(models.Progression.entity_type == entity_type)
     if entity_id is not None:
@@ -43,14 +45,16 @@ def create_progression(
     payload: schemas.ProgressionCreate,
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
 ):
     if payload.entity_type not in ENTITY_MODELS:
         raise HTTPException(400, "Geçersiz entity_type")
     model = ENTITY_MODELS[payload.entity_type]
-    if not db.query(model).filter(model.id == payload.entity_id).first():
+    if not db.query(model).filter(model.id == payload.entity_id, model.novel_id == novel_id).first():
         raise HTTPException(404, "İlgili kayıt bulunamadı")
 
     item = models.Progression(
+        novel_id=novel_id,
         entity_type=payload.entity_type,
         entity_id=payload.entity_id,
         chapter_number=payload.chapter_number,
@@ -67,8 +71,9 @@ def delete_progression(
     progression_id: int,
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
 ):
-    item = db.query(models.Progression).filter(models.Progression.id == progression_id).first()
+    item = db.query(models.Progression).filter(models.Progression.id == progression_id, models.Progression.novel_id == novel_id).first()
     if not item:
         raise HTTPException(404, "Kayıt bulunamadı")
     db.delete(item)

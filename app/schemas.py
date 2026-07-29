@@ -185,11 +185,13 @@ class ParagraphVersionOut(BaseModel):
 class ChapterCreate(BaseModel):
     number: int
     title: str = ""
+    kind: str = "chapter"  # chapter | part | subtitle
 
 
 class ChapterUpdate(BaseModel):
     title: Optional[str] = None
     summary: Optional[str] = None
+    kind: Optional[str] = None
 
 
 class ChapterOut(BaseModel):
@@ -197,17 +199,21 @@ class ChapterOut(BaseModel):
     id: int
     number: int
     title: str
+    kind: str
     summary: str
     paragraphs: List[ParagraphOut] = []
 
 
 class ChapterListOut(BaseModel):
     """Fihrist satırı. summary burada dönüyor çünkü fihrist artık sadece bir
-    liste değil - romanın merkezi özet katmanının dışa açılan yüzü."""
+    liste değil - romanın merkezi özet katmanının dışa açılan yüzü. kind,
+    bunun normal bir bölüm mü yoksa bir başlık/alt başlık ayracı mı
+    olduğunu belirtir."""
     model_config = ConfigDict(from_attributes=True)
     id: int
     number: int
     title: str
+    kind: str
     summary: str
 
 
@@ -251,6 +257,24 @@ class AiAssistResponse(BaseModel):
 
 class ApproveSuggestionsRequest(BaseModel):
     suggestions: List[AiSuggestion]
+
+
+# ---- AI Sohbet Modu (çok turlu, talimat->sonuç yerine ileri-geri) --------
+
+class ChatMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+
+
+class AiChatRequest(BaseModel):
+    chapter_number: Optional[int] = None
+    selected_entities: List[EntityRef] = []
+    messages: List[ChatMessage]
+
+
+class AiChatResponse(BaseModel):
+    reply: str
+    actions_taken: List[str] = []
 
 
 # ---- AI bağlam önizleme ("prompt preview") ---------------------------------

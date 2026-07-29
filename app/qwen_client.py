@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from . import models
 from .entities import ENTITY_MODELS, ENTITY_LABELS_TR
+from .mentions import detect_and_save_mentions
 
 _client = None
 
@@ -24,8 +25,8 @@ def get_client() -> OpenAI:
 # SABİT KATMAN: Roman kuralları. Her istekte tam ve değişmeden dahil edilir.
 # ---------------------------------------------------------------------------
 
-def build_fixed_layer(db: Session) -> str:
-    rules = db.query(models.Rule).all()
+def build_fixed_layer(db: Session, novel_id: int) -> str:
+    rules = db.query(models.Rule).filter(models.Rule.novel_id == novel_id).all()
     if not rules:
         return ""
     lines = ["ROMAN KURALLARI (bunlar asla ihlal edilemez, her bölümde geçerlidir):"]
@@ -44,10 +45,10 @@ def build_fixed_layer(db: Session) -> str:
 # teşvik eder.
 # ---------------------------------------------------------------------------
 
-def build_index_layer(db: Session, exclude_chapter_number: int | None = None) -> str:
+def build_index_layer(db: Session, novel_id: int, exclude_chapter_number: int | None = None) -> str:
     chapters = (
         db.query(models.Chapter)
-        .filter(models.Chapter.summary != "")
+        .filter(models.Chapter.novel_id == novel_id, models.Chapter.kind == "chapter", models.Chapter.summary != "")
         .order_by(models.Chapter.number)
         .all()
     )
@@ -66,7 +67,7 @@ def build_index_layer(db: Session, exclude_chapter_number: int | None = None) ->
 # + bu varlıkların geçtiği en alakalı geçmiş paragraflar.
 # ---------------------------------------------------------------------------
 
-def build_dynamic_layer(db: Session, selected_entities: list, max_paragraphs_per_entity: int = 3) -> str:
+def build_dynamic_layer(db: Session, novel_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3) -> str:
     if not selected_entities:
         return ""
 
@@ -75,7 +76,7 @@ def build_dynamic_layer(db: Session, selected_entities: list, max_paragraphs_per
         model = ENTITY_MODELS.get(ref.entity_type)
         if model is None:
             continue
-        record = db.query(model).filter(model.id == ref.entity_id).first()
+        record = db.query(model).filter(model.id == ref.entity_id, model.novel_id == novel_id).first()
         if record is None:
             continue
 
@@ -122,10 +123,11 @@ def build_dynamic_layer(db: Session, selected_entities: list, max_paragraphs_per
 # tutarlı olmalı, bölüme özel değil.
 # ---------------------------------------------------------------------------
 
-def build_style_layer(db: Session, max_samples: int = 5) -> str:
+def build_style_layer(db: Session, novel_id: int, max_samples: int = 5) -> str:
     samples = (
         db.query(models.Paragraph)
-        .filter(models.Paragraph.is_style_sample == True)  # noqa: E712
+        .join(models.Chapter, models.Paragraph.chapter_id == models.Chapter.id)
+        .filter(models.Paragraph.is_style_sample == True, models.Chapter.novel_id == novel_id)  # noqa: E712
         .order_by(models.Paragraph.id.desc())
         .limit(max_samples)
         .all()
@@ -138,14 +140,14 @@ def build_style_layer(db: Session, max_samples: int = 5) -> str:
     return "\n".join(lines)
 
 
-def build_context(db: Session, selected_entities: list, chapter_number: int | None = None) -> str:
+def build_context(db: Session, novel_id: int, selected_entities: list, chapter_number: int | None = None) -> str:
     """chapter_number verilirse (o an üzerinde çalışılan bölüm), fihrist
     katmanında o bölüm dışlanır - bir bölümün kendi özetini kendi context'i
     olarak görmesi anlamsız, gerçek metin zaten mevcut_text/dynamic layer'da."""
-    fixed = build_fixed_layer(db)
-    index = build_index_layer(db, exclude_chapter_number=chapter_number)
-    style = build_style_layer(db)
-    dynamic = build_dynamic_layer(db, selected_entities)
+    fixed = build_fixed_layer(db, novel_id)
+    index = build_index_layer(db, novel_id, exclude_chapter_number=chapter_number)
+    style = build_style_layer(db, novel_id)
+    dynamic = build_dynamic_layer(db, novel_id, selected_entities)
     return "\n\n".join(part for part in [fixed, index, style, dynamic] if part)
 
 
@@ -217,7 +219,7 @@ def suggest_entities_for_chapter(db: Session, chapter: "models.Chapter") -> list
     existing_lines = []
     for entity_type, model in ENTITY_MODELS.items():
         label = ENTITY_LABELS_TR.get(entity_type, entity_type)
-        for record in db.query(model).all():
+        for record in db.query(model).filter(model.novel_id == chapter.novel_id).all():
             existing_lines.append(f"{label}: {record.name}")
 
     chapter_text = "\n".join(f"[Paragraf {p.number}] {p.text}" for p in chapter.paragraphs)
@@ -255,6 +257,171 @@ def suggest_entities_for_chapter(db: Session, chapter: "models.Chapter") -> list
             continue
         filtered.append({"entity_type": s["entity_type"], "name": name, "description": s.get("description", "")})
     return filtered
+
+
+# ---------------------------------------------------------------------------
+# SOHBET MODU: /ai/assist'in aksine tek seferlik "talimat -> yapılandırılmış
+# JSON sonuç" değil, kullanıcıyla ileri-geri mesajlaşan bir yazı arkadaşı.
+# JSON zorunluluğu kasıtlı olarak KALDIRILDI - katı format modelin doğal,
+# sıcak, fikir üreten bir üslupla yazmasını engelliyordu ("ruhsuz" hissi
+# büyük ölçüde buradan geliyordu). Qwen'in kendi hafızası olmadığı için
+# context + konuşma geçmişi HER mesajda yeniden gönderilir.
+# ---------------------------------------------------------------------------
+
+CHAT_SYSTEM_PROMPT = """Sen kullanıcının roman yazım sürecine EŞLİK EDEN,
+samimi ve içten bir yazı arkadaşısın - kuru, mekanik bir asistan değilsin.
+Kullanıcıyla bölüm/paragraf/karakter fikirleri üzerine doğal bir sohbet
+yürüt: fikir üret, öneri getir, merak ettiğini sor, gerektiğinde kendi
+görüşünü de belirt ("Bence bu sahnede...", "Şunu da düşünebiliriz...",
+"Açıkçası şu kısım biraz zayıf kalmış olabilir...").
+
+ELİNDE İKİ ARAÇ VAR: create_chapter (yeni bölüm açar) ve write_paragraph
+(bir bölümde paragraf yazar/GÜNCELLER - var olan paragraf numarası
+verirsen üzerine yazılır, eski hali otomatik geçmişe kaydedilir, kaybolmaz).
+Kullanıcı "şu bölümü yaz", "yeni bölüm aç", "şu paragrafı değiştir/
+güncelle" gibi somut bir istekte bulunduğunda bu araçları DOĞRUDAN kullan -
+"yazayım mı?" diye sormana gerek yok, iste ve yaz. Ama kullanıcı sadece
+fikir soruyorsa ya da sohbet ediyorsa araç çağırma, normal cevap ver.
+
+Aşağıda sana romanın bağlamı (kurallar, fihrist özetleri, seçili
+karakter/mekan/olay bilgileri, gelişim çizelgeleri) verilecek. Roman
+gerçekleriyle (kim kim, ne olmuş, kurallar) ÇELİŞME - ama üslup, ton ve
+öneri konusunda özgürsün, robotik bir onay makinesi gibi davranma.
+
+Araç çağırmadığın normal cevaplarını SADECE düz, doğal metin olarak ver -
+JSON, madde işareti başlığı ya da yapılandırılmış format KULLANMA. Gerçek
+bir insan yazı arkadaşı gibi yaz."""
+
+CHAT_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "create_chapter",
+            "description": "Romana yeni bir bölüm ekler. Kullanıcı 'yeni bölüm aç/oluştur' dediğinde ya da henüz var olmayan bir bölümü yazman istendiğinde önce bunu çağır.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "number": {"type": "integer", "description": "Bölümün fihristteki sıra numarası"},
+                    "title": {"type": "string", "description": "Bölüm başlığı (opsiyonel, boş bırakılabilir)"},
+                },
+                "required": ["number"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_paragraph",
+            "description": "Belirtilen bölümde bir paragraf yazar ya da (aynı paragraf numarası verilirse) var olanı GÜNCELLER/üzerine yazar - eski hali otomatik olarak versiyon geçmişine kaydedilir, kaybolmaz. Bölüm önceden var olmalı, yoksa önce create_chapter çağır.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "chapter_number": {"type": "integer", "description": "Hangi bölüme yazılacak"},
+                    "paragraph_number": {"type": "integer", "description": "Paragraf sırası - var olan bir numara verilirse ÜZERİNE YAZILIR"},
+                    "text": {"type": "string", "description": "Paragrafın tam metni"},
+                },
+                "required": ["chapter_number", "paragraph_number", "text"],
+            },
+        },
+    },
+]
+
+
+def _execute_chat_tool(db: Session, novel_id: int, name: str, args: dict) -> dict:
+    """Qwen'in çağırdığı aracı gerçekten çalıştırır (DB'ye yazar). Sonuç
+    hem Qwen'e (tool sonucu olarak, bir sonraki adımı planlaması için) hem
+    de kullanıcıya (actions_taken listesi, bkz. chat_with_qwen) gider."""
+    if name == "create_chapter":
+        number = args.get("number")
+        if db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id, models.Chapter.number == number).first():
+            return {"error": f"Bölüm {number} zaten var", "action_summary": None}
+        chapter = models.Chapter(novel_id=novel_id, number=number, title=args.get("title", ""))
+        db.add(chapter)
+        db.commit()
+        db.refresh(chapter)
+        return {"success": True, "chapter_id": chapter.id, "action_summary": f"Bölüm {number} oluşturuldu"}
+
+    if name == "write_paragraph":
+        chapter_number = args.get("chapter_number")
+        paragraph_number = args.get("paragraph_number")
+        text = args.get("text", "")
+        chapter = db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id, models.Chapter.number == chapter_number).first()
+        if not chapter:
+            return {"error": f"Bölüm {chapter_number} bulunamadı - önce create_chapter çağır", "action_summary": None}
+
+        paragraph = db.query(models.Paragraph).filter(
+            models.Paragraph.chapter_id == chapter.id, models.Paragraph.number == paragraph_number
+        ).first()
+        was_update = paragraph is not None
+        if paragraph:
+            if paragraph.text != text:
+                db.add(models.ParagraphVersion(paragraph_id=paragraph.id, text=paragraph.text))
+            paragraph.text = text
+        else:
+            paragraph = models.Paragraph(chapter_id=chapter.id, number=paragraph_number, text=text)
+            db.add(paragraph)
+        db.commit()
+        db.refresh(paragraph)
+        detect_and_save_mentions(db, paragraph)
+
+        verb = "güncellendi" if was_update else "eklendi"
+        return {"success": True, "action_summary": f"Bölüm {chapter_number}, Paragraf {paragraph_number} {verb}"}
+
+    return {"error": f"Bilinmeyen araç: {name}", "action_summary": None}
+
+
+def chat_with_qwen(db: Session, novel_id: int, context: str, messages: list, max_tool_rounds: int = 5) -> tuple[str, list[str]]:
+    """Sohbet modu artık sadece metin üretmiyor - Qwen bölüm oluşturma ve
+    paragraf yazma/güncelleme araçlarını DOĞRUDAN çağırabiliyor. Döngü: Qwen
+    bir araç çağırırsa çalıştırılır, sonucu tekrar Qwen'e verilir, Qwen ya
+    başka bir araç çağırır ya da sohbete devam eder - max_tool_rounds bu
+    döngünün sonsuza gitmemesi için bir güvenlik sınırı.
+
+    Dönüş: (metin_cevabı, yapılan_işlemlerin_özet_listesi)"""
+    system_content = CHAT_SYSTEM_PROMPT
+    if context:
+        system_content += f"\n\nROMANIN BAĞLAMI:\n{context}"
+
+    chat_messages = [{"role": "system", "content": system_content}]
+    for m in messages:
+        role = getattr(m, "role", None) or m["role"]
+        content = getattr(m, "content", None) or m["content"]
+        chat_messages.append({"role": role, "content": content})
+
+    client = get_client()
+    actions_taken: list[str] = []
+
+    for _ in range(max_tool_rounds):
+        response = client.chat.completions.create(
+            model=settings.qwen_model,
+            messages=chat_messages,
+            tools=CHAT_TOOLS,
+        )
+        msg = response.choices[0].message
+        tool_calls = getattr(msg, "tool_calls", None)
+
+        if not tool_calls:
+            return (msg.content or "").strip(), actions_taken
+
+        chat_messages.append({
+            "role": "assistant",
+            "content": msg.content or "",
+            "tool_calls": [
+                {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                for tc in tool_calls
+            ],
+        })
+        for tc in tool_calls:
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            result = _execute_chat_tool(db, novel_id, tc.function.name, args)
+            if result.get("action_summary"):
+                actions_taken.append(result["action_summary"])
+            chat_messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result, ensure_ascii=False)})
+
+    return "Bir dizi işlem yaptım ama son mesajımı tamamlayamadım - üstte hangi bölüm/paragrafların değiştiğini görebilirsin.", actions_taken
 
 
 # ---------------------------------------------------------------------------
@@ -352,26 +519,34 @@ da yorum ekleme. Yanıtını SADECE aşağıdaki JSON formatında ver:
 Hiçbir tutarsızlık bulamazsan issues boş liste olsun."""
 
 
-def full_scan(db: Session, full_text_last_n: int = 3) -> dict:
+def full_scan(db: Session, novel_id: int, full_text_last_n: int = 3) -> dict:
     """Fihrist katmanı burada da merkezde: context penceresini aşmamak için
     sadece son full_text_last_n bölüm tam metniyle gönderilir, daha eski
     bölümler (özeti varsa) sadece özetiyle temsil edilir. Özeti olmayan eski
     bölümler yine de tam metinle gönderilir - hiçbir içerik sessizce
-    atlanmaz, sadece 'önce özet yaz' teşvik edilmiş olur."""
-    chapters = db.query(models.Chapter).order_by(models.Chapter.number).all()
+    atlanmaz, sadece 'önce özet yaz' teşvik edilmiş olur.
+
+    kind='part'/'subtitle' girdilerinin paragrafı yok, sadece yapısal bir
+    ayraç - bunlar içerik olarak taranmaz, sadece bir başlık satırı olarak
+    metne eklenir (Qwen'in roman yapısını - kısımları - görmesi için)."""
+    all_entries = db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).order_by(models.Chapter.number).all()
+    chapters = [c for c in all_entries if c.kind == "chapter"]
     if not chapters:
         return {"summary": "Henüz taranacak bölüm yok.", "issues": []}
 
     cutoff_number = chapters[max(0, len(chapters) - full_text_last_n)].number
 
-    parts = [build_fixed_layer(db)]
-    for chapter in chapters:
-        header = f"\n=== BÖLÜM {chapter.number}{' - ' + chapter.title if chapter.title else ''} ==="
-        if chapter.number < cutoff_number and chapter.summary:
-            parts.append(header + f"\n[ÖZET] {chapter.summary}")
+    parts = [build_fixed_layer(db, novel_id)]
+    for entry in all_entries:
+        if entry.kind != "chapter":
+            parts.append(f"\n### {entry.title or ('Ayraç ' + str(entry.number))} ###")
+            continue
+        header = f"\n=== BÖLÜM {entry.number}{' - ' + entry.title if entry.title else ''} ==="
+        if entry.number < cutoff_number and entry.summary:
+            parts.append(header + f"\n[ÖZET] {entry.summary}")
         else:
             parts.append(header)
-            for p in chapter.paragraphs:
+            for p in entry.paragraphs:
                 parts.append(f"[Paragraf {p.number}] {p.text}")
     manuscript_text = "\n".join(part for part in parts if part)
 

@@ -7,11 +7,27 @@
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+  <div id="novelSelectOverlay" class="novel-select-overlay" style="display:none;">
+    <div class="novel-select-box">
+      <h2>Roman Seç</h2>
+      <div id="novelList" class="novel-list"></div>
+      <div class="field" style="margin-top:16px;">
+        <label>Yeni roman oluştur</label>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="newNovelName" placeholder="Roman adı">
+          <button class="btn btn-primary" id="createNovelBtn">Oluştur</button>
+        </div>
+      </div>
+    </div>
+  </div>
   <div class="app-shell">
     <button id="mobileMenuToggle" class="mobile-menu-toggle" aria-label="Menüyü aç/kapat">☰</button>
     <div id="sidebarOverlay" class="sidebar-overlay"></div>
     <aside class="sidebar" id="sidebar">
       <div class="brand">Roman Yazım Asistanı</div>
+      <div style="padding:0 16px 12px;">
+        <button id="switchNovelBtn" class="btn btn-sm" style="width:100%;" title="Aktif romanı değiştir">📖 <span id="activeNovelName">Roman</span> — değiştir</button>
+      </div>
       <div class="search-box">
         <input type="text" id="globalSearch" placeholder="Ara: bir isim yaz…">
       </div>
