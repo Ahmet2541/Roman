@@ -20,9 +20,9 @@ def _str_to_ids(s: str) -> list:
 
 
 def _to_out(db: Session, event: models.Event) -> schemas.EventOut:
-    place = db.query(models.Place).filter(models.Place.id == event.place_id).first() if event.place_id else None
+    place = db.query(models.Place).filter(models.Place.id == event.place_id, models.Place.novel_id == event.novel_id).first() if event.place_id else None
     char_ids = _str_to_ids(event.character_ids)
-    chars = db.query(models.Character).filter(models.Character.id.in_(char_ids)).all() if char_ids else []
+    chars = db.query(models.Character).filter(models.Character.id.in_(char_ids), models.Character.novel_id == event.novel_id).all() if char_ids else []
     return schemas.EventOut(
         id=event.id, name=event.name, description=event.description, notes=event.notes,
         created_at=event.created_at, updated_at=event.updated_at,
@@ -42,6 +42,16 @@ def list_events(db: Session = Depends(get_db), _user=Depends(get_current_user), 
 
 @router.post("/", response_model=schemas.EventOut, status_code=201)
 def create_event(payload: schemas.EventCreate, db: Session = Depends(get_db), _user=Depends(get_current_user), novel_id: int = Depends(get_novel_id)):
+    if payload.place_id is not None:
+        if not db.query(models.Place).filter(models.Place.id == payload.place_id, models.Place.novel_id == novel_id).first():
+            raise HTTPException(404, "Mekan bulunamadı")
+    if payload.character_ids:
+        found = db.query(models.Character.id).filter(
+            models.Character.id.in_(payload.character_ids), models.Character.novel_id == novel_id
+        ).count()
+        if found != len(set(payload.character_ids)):
+            raise HTTPException(404, "Karakterlerden biri bulunamadı")
+
     event = models.Event(
         novel_id=novel_id,
         name=payload.name, description=payload.description, notes=payload.notes,
@@ -98,8 +108,18 @@ def update_event(event_id: int, payload: schemas.EventUpdate, db: Session = Depe
     if not event:
         raise HTTPException(404, "Olay bulunamadı")
     data = payload.model_dump(exclude_unset=True)
+    if data.get("place_id") is not None:
+        if not db.query(models.Place).filter(models.Place.id == data["place_id"], models.Place.novel_id == novel_id).first():
+            raise HTTPException(404, "Mekan bulunamadı")
     if "character_ids" in data:
-        event.character_ids = _ids_to_str(data.pop("character_ids"))
+        new_ids = data.pop("character_ids")
+        if new_ids:
+            found = db.query(models.Character.id).filter(
+                models.Character.id.in_(new_ids), models.Character.novel_id == novel_id
+            ).count()
+            if found != len(set(new_ids)):
+                raise HTTPException(404, "Karakterlerden biri bulunamadı")
+        event.character_ids = _ids_to_str(new_ids)
     for field, value in data.items():
         setattr(event, field, value)
     db.commit()

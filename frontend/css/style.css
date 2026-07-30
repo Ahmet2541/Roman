@@ -172,7 +172,7 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
 .paragraph-block { display: flex; gap: 14px; margin-bottom: 16px; align-items: flex-start; }
 .paragraph-number {
   font-family: var(--font-display); font-style: italic; color: var(--gold);
-  font-size: 15px; width: 22px; flex-shrink: 0; padding-top: 8px; text-align: right;
+  font-size: 15px; width: 40px; flex-shrink: 0; padding-top: 8px; text-align: right;
 }
 .paragraph-text {
   flex: 1; font-family: var(--font-body); font-size: 16px; line-height: 1.8;
@@ -270,3 +270,13 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
 }
 .novel-list-item:hover { background: var(--paper-dim); }
+
+/* Arka plan AI taraması bildirimleri */
+.ai-toast {
+  position: fixed; bottom: 24px; right: 24px; max-width: 320px;
+  background: #1b2230; color: #fff; padding: 12px 16px; border-radius: 8px;
+  font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,0.25); z-index: 2000;
+  opacity: 1; transition: opacity 0.4s, transform 0.4s;
+}
+.ai-toast-hide { opacity: 0; transform: translateY(8px); }
+.pending-ai-badge { color: var(--gold); font-size: 16px; margin-left: 6px; flex-shrink: 0; }

@@ -165,6 +165,52 @@ olayları açık ve net yaz. Yanıtını SADECE düz metin olarak ver, başlık,
 tırnak ya da markdown ekleme."""
 
 
+# ---------------------------------------------------------------------------
+# AI İLE PARAGRAF BÖLME: elinde net paragraf ayraçları (boş satır) olmayan,
+# tek blok hâlinde yapıştırılmış bir metni mantıklı paragraflara böler.
+# KRİTİK KURAL: tek kelime bile DEĞİŞTİRİLMEZ - sadece nereye paragraf
+# arası konacağına karar verir. Bu yüzden içe aktarma (import) sırasında
+# blank-line ayracı bulamayan uzun bölümlerde ve "büyük metin yapıştır"
+# özelliğinde kullanılır.
+# ---------------------------------------------------------------------------
+
+PARAGRAPH_SPLIT_SYSTEM_PROMPT = """Sen bir roman editörü asistanısın. Sana
+paragraf araları net olmayan (tek blok hâlinde) bir metin verilecek.
+Görevin bu metni mantıklı paragraflara bölmek - diyalog değişimi, sahne/
+zaman geçişi, yeni bir düşünce/eylem başlangıcı gibi doğal noktalarda böl.
+
+MUTLAK KURAL: Metnin TEK BİR KELİMESİNİ, noktalama işaretini bile
+DEĞİŞTİRME, EKLEME ya da ÇIKARMA - sadece paragraflara böl. Tüm
+paragrafları sırayla birleştirdiğimde orijinal metinle (sadece paragraf
+aralarındaki boşluklar hariç) BİREBİR aynı olmalı. Yorum, başlık, özet
+EKLEME.
+
+Yanıtını SADECE aşağıdaki JSON formatında ver:
+{"paragraphs": ["ilk paragraf metni", "ikinci paragraf metni", "..."]}"""
+
+
+def split_paragraphs_with_ai(raw_text: str) -> list[str]:
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": PARAGRAPH_SPLIT_SYSTEM_PROMPT},
+            {"role": "user", "content": raw_text},
+        ],
+    )
+    raw = response.choices[0].message.content
+    cleaned = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        # Qwen JSON dışına çıktıysa, en azından tek paragraf olarak dön -
+        # kullanıcı hiç kayıp yaşamasın, elle bölmeyi kendisi yapabilir.
+        return [raw_text.strip()] if raw_text.strip() else []
+
+    paragraphs = [p.strip() for p in data.get("paragraphs", []) if isinstance(p, str) and p.strip()]
+    return paragraphs or ([raw_text.strip()] if raw_text.strip() else [])
+
+
 def summarize_chapter(db: Session, chapter: "models.Chapter") -> str:
     text = "\n".join(f"[Paragraf {p.number}] {p.text}" for p in chapter.paragraphs)
     title_part = f" - {chapter.title}" if chapter.title else ""
@@ -260,6 +306,111 @@ def suggest_entities_for_chapter(db: Session, chapter: "models.Chapter") -> list
 
 
 # ---------------------------------------------------------------------------
+# GELİŞİM ÇIKARIMI (bölüm bazlı): bir bölümde geçen kişi/mekan/olay/nesne/
+# ipucu hakkında öğrenilen YENİ ya da DEĞİŞEN bilgiyi tespit edip Gelişim
+# Çizelgesi'ne (Progressions) taslak olarak önerir. Bu, romanın "haritası"nı
+# oluşturan mekanizmadır: 5. bölümde Vicdan hakkında öğrenilen bir şey, 12.
+# bölümde ona çelişecek bir şey yazılmasını önlemek için (build_dynamic_layer
+# üzerinden) otomatik olarak sonraki AI isteklerine giriyor. HİÇBİR ŞEY
+# burada doğrudan kaydedilmez - onay akışı /progressions/ ile aynı (POST).
+# ---------------------------------------------------------------------------
+
+PROGRESSION_EXTRACTION_SYSTEM_PROMPT = """Sen bir roman editörü asistanısın.
+Sana bir bölümün metni ve bu bölümde geçen kişi/mekan/olay/nesne/ipucu
+kayıtlarının HÂLİHAZIRDA bilinen açıklamaları verilecek. Görevin, bu
+bölümün her varlık hakkında YENİ ya da DEĞİŞEN ne öğrettiğini bulmak -
+zaten bilinenin tekrarı olan bilgiyi ATLA.
+
+Kurallar:
+- Sadece GERÇEKTEN yeni/değişen bilgi için not yaz (ör. bir sır ortaya
+  çıktı, bir ilişki değişti, bir özellik/durum güncellendi, önemli bir
+  olay yaşadı). "Bahsedildi" diye not yazma - bilgi içeriği önemli.
+- Her not 1 cümle, net ve kısa olsun - bu not ileride başka bölümler
+  yazılırken bağlam olarak kullanılacak.
+- Emin olmadığın ya da önemsiz gördüğün varlıklar için not üretme.
+- Sadece sana verilen varlık listesindeki (entity_type + entity_id
+  eşleşen) kayıtlar için öneri yap, yeni varlık uydurma.
+
+Yanıtını SADECE aşağıdaki JSON formatında ver:
+{
+  "updates": [
+    {"entity_type": "character", "entity_id": 3, "note": "..."}
+  ]
+}
+Yeni/değişen bilgi yoksa updates boş liste olsun."""
+
+
+def suggest_progressions_for_chapter(db: Session, chapter: "models.Chapter") -> list[dict]:
+    mentions = (
+        db.query(models.Mention)
+        .join(models.Paragraph, models.Mention.paragraph_id == models.Paragraph.id)
+        .filter(models.Paragraph.chapter_id == chapter.id)
+        .all()
+    )
+    seen = {}
+    for m in mentions:
+        seen[(m.entity_type, m.entity_id)] = m.entity_name
+    if not seen:
+        return []
+
+    entity_lines = []
+    entity_lookup = {}  # (type, id) -> name, mevcut kayıt gerçekten var mı doğrulamak için
+    for (entity_type, entity_id), name in seen.items():
+        model = ENTITY_MODELS.get(entity_type)
+        if model is None:
+            continue
+        record = db.query(model).filter(model.id == entity_id, model.novel_id == chapter.novel_id).first()
+        if record is None:
+            continue
+        label = ENTITY_LABELS_TR.get(entity_type, entity_type)
+        known = record.description or "(açıklama yok)"
+        entity_lines.append(f"- [{label}] id={entity_id} \"{name}\": bilinen: {known}")
+        entity_lookup[(entity_type, entity_id)] = name
+
+    if not entity_lines:
+        return []
+
+    chapter_text = "\n".join(f"[Paragraf {p.number}] {p.text}" for p in chapter.paragraphs)
+    title_part = f" - {chapter.title}" if chapter.title else ""
+    user_message = (
+        "BU BÖLÜMDE GEÇEN VARLIKLAR VE HÂLİHAZIRDA BİLİNENLER:\n"
+        + "\n".join(entity_lines)
+        + f"\n\nBÖLÜM {chapter.number}{title_part} METNİ:\n{chapter_text}"
+    )
+
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": PROGRESSION_EXTRACTION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ],
+    )
+    raw = response.choices[0].message.content
+    cleaned = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return []
+
+    filtered = []
+    for u in data.get("updates", []):
+        if not isinstance(u, dict):
+            continue
+        key = (u.get("entity_type"), u.get("entity_id"))
+        if key not in entity_lookup:
+            continue
+        note = (u.get("note") or "").strip()
+        if not note:
+            continue
+        filtered.append({
+            "entity_type": key[0], "entity_id": key[1], "entity_name": entity_lookup[key],
+            "chapter_number": chapter.number, "note": note,
+        })
+    return filtered
+
+
+# ---------------------------------------------------------------------------
 # SOHBET MODU: /ai/assist'in aksine tek seferlik "talimat -> yapılandırılmış
 # JSON sonuç" değil, kullanıcıyla ileri-geri mesajlaşan bir yazı arkadaşı.
 # JSON zorunluluğu kasıtlı olarak KALDIRILDI - katı format modelin doğal,
@@ -275,13 +426,19 @@ yürüt: fikir üret, öneri getir, merak ettiğini sor, gerektiğinde kendi
 görüşünü de belirt ("Bence bu sahnede...", "Şunu da düşünebiliriz...",
 "Açıkçası şu kısım biraz zayıf kalmış olabilir...").
 
-ELİNDE İKİ ARAÇ VAR: create_chapter (yeni bölüm açar) ve write_paragraph
-(bir bölümde paragraf yazar/GÜNCELLER - var olan paragraf numarası
-verirsen üzerine yazılır, eski hali otomatik geçmişe kaydedilir, kaybolmaz).
-Kullanıcı "şu bölümü yaz", "yeni bölüm aç", "şu paragrafı değiştir/
-güncelle" gibi somut bir istekte bulunduğunda bu araçları DOĞRUDAN kullan -
-"yazayım mı?" diye sormana gerek yok, iste ve yaz. Ama kullanıcı sadece
-fikir soruyorsa ya da sohbet ediyorsa araç çağırma, normal cevap ver.
+ELİNDE DÖRT ARAÇ VAR: create_chapter (yeni bölüm açar), write_paragraph
+(bölüm+paragraf numarasıyla bir paragraf yazar/GÜNCELLER), ve
+get_paragraph_by_id + edit_paragraph_by_id (kullanıcının 'P2367' gibi
+verdiği GLOBAL paragraf numarasıyla çalışır - önce oku, sonra gerekirse
+düzenle). Kullanıcı 'P2367 betimleme eksik' gibi bir P-numarası verdiğinde
+DOĞRUDAN get_paragraph_by_id ile o paragrafı bul, oku, sonra isterse
+edit_paragraph_by_id ile düzelt - hangi bölümde olduğunu sormana gerek
+yok, araç bunu senin için buluyor. Var olan bir paragrafı güncellersen
+eski hali otomatik geçmişe kaydedilir, kaybolmaz. Kullanıcı "şu bölümü
+yaz", "yeni bölüm aç", "şu paragrafı değiştir/güncelle" gibi somut bir
+istekte bulunduğunda bu araçları DOĞRUDAN kullan - "yazayım mı?" diye
+sormana gerek yok, iste ve yap. Ama kullanıcı sadece fikir soruyorsa ya da
+sohbet ediyorsa araç çağırma, normal cevap ver.
 
 Aşağıda sana romanın bağlamı (kurallar, fihrist özetleri, seçili
 karakter/mekan/olay bilgileri, gelişim çizelgeleri) verilecek. Roman
@@ -321,6 +478,35 @@ CHAT_TOOLS = [
                     "text": {"type": "string", "description": "Paragrafın tam metni"},
                 },
                 "required": ["chapter_number", "paragraph_number", "text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_paragraph_by_id",
+            "description": "Kullanıcı 'P2367' gibi bir GLOBAL paragraf numarası verdiğinde, o paragrafın hangi bölümde olduğunu ve şu anki tam metnini getirir. Kullanıcı bir P-numarasına atıfta bulunduğunda (ör. 'P2367 betimleme eksik'), önce bunu çağırıp mevcut metni oku, sonra gerekirse edit_paragraph_by_id ile düzenle.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paragraph_id": {"type": "integer", "description": "P harfi olmadan sadece sayı, ör. P2367 için 2367"},
+                },
+                "required": ["paragraph_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_paragraph_by_id",
+            "description": "Global 'P' numarasıyla belirtilen paragrafı YENİ metinle günceller/üzerine yazar - eski hali otomatik olarak versiyon geçmişine kaydedilir, kaybolmaz. Önce get_paragraph_by_id ile mevcut metni okuman önerilir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paragraph_id": {"type": "integer", "description": "P harfi olmadan sadece sayı, ör. P2367 için 2367"},
+                    "text": {"type": "string", "description": "Paragrafın yeni tam metni"},
+                },
+                "required": ["paragraph_id", "text"],
             },
         },
     },
@@ -366,6 +552,46 @@ def _execute_chat_tool(db: Session, novel_id: int, name: str, args: dict) -> dic
 
         verb = "güncellendi" if was_update else "eklendi"
         return {"success": True, "action_summary": f"Bölüm {chapter_number}, Paragraf {paragraph_number} {verb}"}
+
+    if name == "get_paragraph_by_id":
+        paragraph_id = args.get("paragraph_id")
+        paragraph = (
+            db.query(models.Paragraph)
+            .join(models.Chapter, models.Paragraph.chapter_id == models.Chapter.id)
+            .filter(models.Paragraph.id == paragraph_id, models.Chapter.novel_id == novel_id)
+            .first()
+        )
+        if not paragraph:
+            return {"error": f"P{paragraph_id} bulunamadı", "action_summary": None}
+        return {
+            "success": True,
+            "chapter_number": paragraph.chapter.number,
+            "paragraph_number": paragraph.number,
+            "text": paragraph.text,
+            "action_summary": None,  # sadece okuma - kullanıcıya "işlem yapıldı" diye gösterilmesin
+        }
+
+    if name == "edit_paragraph_by_id":
+        paragraph_id = args.get("paragraph_id")
+        text = args.get("text", "")
+        paragraph = (
+            db.query(models.Paragraph)
+            .join(models.Chapter, models.Paragraph.chapter_id == models.Chapter.id)
+            .filter(models.Paragraph.id == paragraph_id, models.Chapter.novel_id == novel_id)
+            .first()
+        )
+        if not paragraph:
+            return {"error": f"P{paragraph_id} bulunamadı", "action_summary": None}
+        if paragraph.text != text:
+            db.add(models.ParagraphVersion(paragraph_id=paragraph.id, text=paragraph.text))
+        paragraph.text = text
+        db.commit()
+        db.refresh(paragraph)
+        detect_and_save_mentions(db, paragraph)
+        return {
+            "success": True,
+            "action_summary": f"P{paragraph_id} güncellendi (Bölüm {paragraph.chapter.number}, Paragraf {paragraph.number})",
+        }
 
     return {"error": f"Bilinmeyen araç: {name}", "action_summary": None}
 

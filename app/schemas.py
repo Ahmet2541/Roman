@@ -225,6 +225,16 @@ class ChapterSummaryGenerateResponse(BaseModel):
     generated_summary: str
 
 
+class AiSplitParagraphsRequest(BaseModel):
+    text: str
+    mode: str = "append"  # append: mevcut paragrafların sonuna ekler | replace: bölümün tüm paragraflarının YERİNE geçer
+
+
+class AiSplitParagraphsResponse(BaseModel):
+    paragraph_count: int
+    paragraphs: List[ParagraphOut]
+
+
 # ---- AI istekleri -------------------------------------------------------------
 
 class EntityRef(BaseModel):
@@ -307,6 +317,16 @@ class ProgressionOut(ProgressionBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     created_at: datetime
+
+
+class ProgressionSuggestion(BaseModel):
+    """AI'nın bir bölümü tarayıp önerdiği gelişim notu taslağı. Kaydedilmez -
+    kullanıcı onaylarsa mevcut POST /progressions/ ile kaydedilir."""
+    entity_type: str
+    entity_id: int
+    entity_name: str
+    chapter_number: int
+    note: str
 
 
 # ---- Tüm roman tutarlılık taraması -----------------------------------------

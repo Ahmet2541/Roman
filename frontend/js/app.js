@@ -22,6 +22,11 @@ function truncate(str, n) { return str && str.length > n ? str.slice(0, n) + '�
 
 async function switchView(view) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === view));
+  if (view !== 'roman' && dirtyChapterId) {
+    const toScan = dirtyChapterId;
+    dirtyChapterId = null;
+    runBackgroundChapterScan(toScan);
+  }
   if (view === 'roman') return renderRomanView();
   if (view === 'import') return renderImportView();
   if (view === 'event') return renderEventsView();
@@ -142,8 +147,12 @@ async function loadProgressionPanel(entityType, entityId) {
       });
     });
     document.getElementById('addProgressionBtn').addEventListener('click', async () => {
-      const chapterNumber = prompt('Hangi bölümden itibaren geçerli? (boş bırakılabilir)');
+      const chapterNumber = prompt('Hangi bölümden itibaren geçerli? Bir SAYI gir (ör. 3), boş da bırakabilirsin:');
       if (chapterNumber === null) return;
+      if (chapterNumber.trim() && Number.isNaN(parseInt(chapterNumber.trim(), 10))) {
+        alert(`"${chapterNumber}" bir sayı değil - bölüm numarasını rakamla yaz (ör. 3) ya da boş bırak.`);
+        return;
+      }
       const note = prompt('Ne değişti? (ör: "Bacağından yaralandı")');
       if (!note) return;
       try {
@@ -220,6 +229,15 @@ function showEntityForm(type, item) {
 // ---------------------------------------------------------------------
 
 let currentChapter = null;
+// Bir bölümde paragraf değişikliği olduğunda o bölümün id'si buraya yazılır.
+// Kullanıcı BAŞKA bir bölüme geçtiğinde, bu "kirli" bölüm arka planda
+// otomatik olarak taranır (yeni varlık + gelişim notu için) - yazarken
+// her kaydette AI'yı tetiklemek yerine, bölümü bitirip ayrılınca tetiklemek
+// hem daha ucuz hem daha az rahatsız edici.
+let dirtyChapterId = null;
+// chapterId -> {entities: [...], progressions: [...]} - arka plan
+// taramasının sonucu, kullanıcı o bölümü tekrar açana kadar burada bekler.
+const pendingAiSuggestions = {};
 
 async function renderRomanView() {
   main().innerHTML = `
@@ -350,17 +368,30 @@ async function refreshAfterChatActions() {
 async function createChapterPrompt(kind) {
   kind = kind || 'chapter';
   const kindLabel = kind === 'part' ? 'Başlık (Kısım)' : kind === 'subtitle' ? 'Alt Başlık' : 'Bölüm';
-  const number = prompt(`${kindLabel} sırası (fihristteki sırasını belirler):`);
+  const number = prompt(`${kindLabel} sırası - fihristteki sırasını belirleyen bir SAYI gir (ör. 1, 2, 3):`);
   if (!number) return;
+  const parsedNumber = parseInt(number.trim(), 10);
+  if (Number.isNaN(parsedNumber)) {
+    alert(`"${number}" bir sayı değil. Sıra alanına sadece 1, 2, 3 gibi bir SAYI yazmalısın - başlık/metin bir sonraki adımda soruluyor.`);
+    return;
+  }
   const title = prompt(`${kindLabel} metni${kind === 'chapter' ? ' (opsiyonel)' : ''}:`) || '';
   if (kind !== 'chapter' && !title.trim()) { alert(`${kindLabel} için bir metin gerekli.`); return; }
   try {
-    const chapter = await api.post('/chapters/', { number: parseInt(number, 10), title, kind });
+    const chapter = await api.post('/chapters/', { number: parsedNumber, title, kind });
     await loadChapterList(chapter.id);
   } catch (err) { alert(err.message); }
 }
 
 async function selectChapter(id) {
+  // Ayrılınan bölüm "kirliyse" (bu oturumda paragraf değişikliği olduysa),
+  // arka planda sessizce tara - kullanıcının beklemesine gerek yok.
+  if (dirtyChapterId && String(dirtyChapterId) !== String(id)) {
+    const toScan = dirtyChapterId;
+    dirtyChapterId = null;
+    runBackgroundChapterScan(toScan);
+  }
+
   document.querySelectorAll('.chapter-item').forEach(el => el.classList.toggle('active', el.dataset.id === String(id)));
   const readerPane = document.getElementById('readerPane');
   readerPane.innerHTML = `<div class="empty-state">Yükleniyor…</div>`;
@@ -374,11 +405,41 @@ async function selectChapter(id) {
   }
 }
 
+async function runBackgroundChapterScan(chapterId) {
+  try {
+    const [entities, progressions] = await Promise.all([
+      api.post(`/chapters/${chapterId}/suggest-entities`, {}).catch(() => []),
+      api.post(`/chapters/${chapterId}/suggest-progressions`, {}).catch(() => []),
+    ]);
+    const total = (entities || []).length + (progressions || []).length;
+    if (total > 0) {
+      pendingAiSuggestions[chapterId] = { entities: entities || [], progressions: progressions || [] };
+      showToast(`Bölüm için ${total} yeni AI önerisi hazır - bölümü tekrar açınca görebilirsin.`);
+      // Sidebardaki fihrist satırına küçük bir rozet ekle, farkında ol diye
+      const row = document.querySelector(`.chapter-item[data-id="${chapterId}"]`);
+      if (row && !row.querySelector('.pending-ai-badge')) {
+        row.insertAdjacentHTML('beforeend', '<span class="pending-ai-badge" title="Bekleyen AI önerisi var">●</span>');
+      }
+    }
+  } catch (err) { /* arka plan işlemi - kullanıcıyı rahatsız etme, sessizce geç */ }
+}
+
+function showToast(message) {
+  const toast = document.createElement('div');
+  toast.className = 'ai-toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => { toast.classList.add('ai-toast-hide'); setTimeout(() => toast.remove(), 400); }, 6000);
+}
+
 function renderReader(chapter) {
   const readerPane = document.getElementById('readerPane');
   const paragraphsHtml = chapter.paragraphs.map(p => `
-    <div class="paragraph-block">
-      <div class="paragraph-number">${p.number}</div>
+    <div class="paragraph-block" id="para-global-${p.id}">
+      <div class="paragraph-number" title="Bu paragrafın romandaki kalıcı numarası - AI sohbetinde 'P${p.id} ...' diyerek doğrudan bu paragrafa atıfta bulunabilirsin">
+        <div style="font-size:10px;color:var(--gold,#b08d3f);font-weight:700;">P${p.id}</div>
+        ${p.number}
+      </div>
       <div style="flex:1;">
         <div class="paragraph-text" contenteditable="true" data-number="${p.number}">${escapeHtml(p.text)}</div>
         <div>${(p.mentions || []).map(m => `<span class="mention-chip">${escapeHtml(m.entity_name)}</span>`).join('')}${p.is_style_sample ? '<span class="mention-chip" style="background:#1b2230;color:#fff;">★ stil örneği</span>' : ''}</div>
@@ -409,9 +470,81 @@ function renderReader(chapter) {
         ${chapter.summary ? escapeHtml(chapter.summary) : '<em>Henüz özet yok - romanın fihristinde ve AI bağlamında bu bölüm görünmeyecek.</em>'}
       </p>
     </div>
+    <div id="pendingAiSuggestionsBanner"></div>
+    <div class="chapter-summary-box" style="margin-top:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">ROMAN HARİTASI</strong>
+        <button class="btn btn-sm" id="scanProgressionsBtn">AI ile bu bölümü tara</button>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);margin:6px 0 0;">Bu bölümde geçen kişi/mekan/olaylar hakkında öğrenilen yeni bilgiyi bulup Gelişim Çizelgesi'ne (haritaya) ekler - böylece ileride yazılacak bölümler bu bilgiyle çelişmez.</p>
+      <div id="progressionScanResult"></div>
+    </div>
     <div style="height:16px;"></div>
     ${paragraphsHtml || '<div class="empty-state">Henüz paragraf yok.</div>'}
-    <button class="btn" id="addParaBtn">+ Yeni paragraf</button>`;
+    <button class="btn" id="addParaBtn">+ Yeni paragraf</button>
+
+    <div class="chapter-summary-box" style="margin-top:20px;">
+      <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">BÜYÜK METİN YAPIŞTIR</strong>
+      <p style="font-size:12px;color:var(--text-muted);margin:6px 0;">Paragraf araları net olmayan (tek blok) bir metni buraya yapıştır - AI, tek kelime değiştirmeden mantıklı paragraflara bölüp ekler.</p>
+      <textarea id="pasteBigTextArea" placeholder="Metni buraya yapıştır…" style="width:100%;min-height:100px;"></textarea>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+        <label style="font-size:12px;display:flex;align-items:center;gap:4px;"><input type="radio" name="splitMode" value="append" checked> Sona ekle</label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:4px;"><input type="radio" name="splitMode" value="replace"> Tüm paragrafların yerine geç</label>
+        <button class="btn btn-primary btn-sm" id="aiSplitBtn" style="margin-left:auto;">AI ile Böl ve Ekle</button>
+      </div>
+    </div>`;
+
+  document.getElementById('aiSplitBtn').addEventListener('click', async () => {
+    const textarea = document.getElementById('pasteBigTextArea');
+    const text = textarea.value.trim();
+    if (!text) return;
+    const mode = document.querySelector('input[name="splitMode"]:checked').value;
+    if (mode === 'replace' && !confirm('Bu bölümdeki TÜM paragraflar silinip yerine AI’nin böldüğü yeni paragraflar gelecek. Emin misin?')) return;
+    const btn = document.getElementById('aiSplitBtn');
+    btn.disabled = true;
+    btn.textContent = 'Bölünüyor…';
+    try {
+      await api.post(`/chapters/${chapter.id}/ai-split-paragraphs`, { text, mode });
+      dirtyChapterId = chapter.id;
+      const refreshed = await api.get(`/chapters/${chapter.id}`);
+      currentChapter = refreshed;
+      renderReader(refreshed);
+      await loadChapterList(chapter.id, true);
+    } catch (err) {
+      alert(err.message);
+      btn.disabled = false;
+      btn.textContent = 'AI ile Böl ve Ekle';
+    }
+  });
+
+  document.getElementById('scanProgressionsBtn').addEventListener('click', () => runSuggestProgressions(chapter));
+
+  const pending = pendingAiSuggestions[chapter.id];
+  if (pending) {
+    const total = pending.entities.length + pending.progressions.length;
+    const banner = document.getElementById('pendingAiSuggestionsBanner');
+    banner.innerHTML = `
+      <div class="panel" style="margin-bottom:12px;border-color:var(--gold);">
+        <strong style="font-size:12.5px;">🔔 Bu bölümü ayrıldığında AI arka planda taradı: ${total} öneri bulundu.</strong>
+        <button class="btn btn-sm" id="showPendingAiBtn" style="margin-left:8px;">Göster</button>
+      </div>`;
+    document.getElementById('showPendingAiBtn').addEventListener('click', () => {
+      banner.innerHTML = '';
+      if (pending.entities.length) {
+        const entPanel = document.createElement('div');
+        banner.appendChild(entPanel);
+        renderEntitySuggestionsInto(entPanel, chapter.id, pending.entities);
+      }
+      if (pending.progressions.length) {
+        const progPanel = document.createElement('div');
+        banner.appendChild(progPanel);
+        renderProgressionSuggestionsInto(progPanel, pending.progressions);
+      }
+      delete pendingAiSuggestions[chapter.id];
+      const badge = document.querySelector(`.chapter-item[data-id="${chapter.id}"] .pending-ai-badge`);
+      if (badge) badge.remove();
+    });
+  }
 
   document.getElementById('editTitleBtn').addEventListener('click', async () => {
     const newTitle = prompt('Yeni bölüm başlığı:', chapter.title || '');
@@ -483,6 +616,7 @@ function renderReader(chapter) {
       if (!confirm(`Paragraf ${btn.dataset.number}'i silmek istediğine emin misin?`)) return;
       try {
         await api.del(`/chapters/${chapter.id}/paragraphs/${btn.dataset.number}`);
+        dirtyChapterId = chapter.id;
         const refreshed = await api.get(`/chapters/${chapter.id}`);
         currentChapter = refreshed;
         renderReader(refreshed);
@@ -527,6 +661,7 @@ async function loadParagraphHistory(chapterId, number) {
         if (!confirm('Paragrafı bu eski versiyona geri döndürmek istediğine emin misin? (Şu anki hal de geçmişe kaydedilecek, kaybolmayacak.)')) return;
         try {
           await api.post(`/chapters/${chapterId}/paragraphs/${number}/restore/${btn.dataset.versionId}`, {});
+          dirtyChapterId = chapterId;
           const refreshed = await api.get(`/chapters/${chapterId}`);
           currentChapter = refreshed;
           renderReader(refreshed);
@@ -559,6 +694,7 @@ async function saveParagraph(chapterId, number) {
   if (!text) { alert('Paragraf boş olamaz.'); return; }
   try {
     await api.put(`/chapters/${chapterId}/paragraphs/${number}`, { number: parseInt(number, 10), text });
+    dirtyChapterId = chapterId;
     const chapter = await api.get(`/chapters/${chapterId}`);
     currentChapter = chapter;
     renderReader(chapter);
@@ -576,17 +712,28 @@ async function renderAiPanel(chapter) {
   panel.innerHTML = `<h3>AI Yazım Desteği</h3><div class="empty-state">Yükleniyor…</div>`;
   try {
     const lists = await Promise.all(PICKER_TYPES.map(t => api.get(ENTITY_TYPES[t].endpoint)));
+    // Bu bölümde zaten geçen (mentions'tan) varlıkları otomatik işaretle -
+    // her seferinde elle tek tek tıklamana gerek kalmasın.
+    const mentionedKeys = new Set();
+    (chapter.paragraphs || []).forEach(p => {
+      (p.mentions || []).forEach(m => mentionedKeys.add(`${m.entity_type}:${m.entity_id}`));
+    });
+
     const pickerHtml = PICKER_TYPES.map((t, idx) => {
       const items = lists[idx];
       if (!items.length) return '';
-      return `<div style="margin-bottom:8px;">
+      return `<div class="entity-picker-group" style="margin-bottom:8px;">
         <strong style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">${ENTITY_TYPES[t].plural.toUpperCase()}</strong><br>
-        ${items.map(i => `<label><input type="checkbox" class="entity-check" data-type="${t}" data-id="${i.id}"> ${escapeHtml(i.name)}</label>`).join('')}
+        ${items.map(i => {
+          const isMentioned = mentionedKeys.has(`${t}:${i.id}`);
+          return `<label class="entity-picker-label" data-name="${escapeHtml(i.name.toLowerCase())}"><input type="checkbox" class="entity-check" data-type="${t}" data-id="${i.id}" ${isMentioned ? 'checked' : ''}> ${escapeHtml(i.name)}${isMentioned ? ' <span style="color:var(--gold);font-size:11px;" title="Bu bölümde geçiyor">●</span>' : ''}</label>`;
+        }).join('')}
       </div>`;
     }).join('');
 
     panel.innerHTML = `
       <h3>AI Yazım Desteği</h3>
+      <input type="text" id="entityPickerSearch" placeholder="Kişi/mekan/olay ara…" style="width:100%;margin-bottom:8px;">
       <div class="entity-picker">${pickerHtml || '<div class="empty-state">Henüz kayıt yok</div>'}</div>
 
       <div class="ai-mode-tabs" style="display:flex;gap:6px;margin:10px 0 8px;">
@@ -611,6 +758,17 @@ async function renderAiPanel(chapter) {
 
       <button class="btn btn-sm" id="previewContextBtn" style="width:100%;margin-top:10px;">Bağlamı Önizle (AI'ya ne gidiyor?)</button>
       <div id="contextPreviewContainer"></div>`;
+
+    document.getElementById('entityPickerSearch').addEventListener('input', (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      panel.querySelectorAll('.entity-picker-label').forEach(label => {
+        label.style.display = !q || label.dataset.name.includes(q) ? '' : 'none';
+      });
+      panel.querySelectorAll('.entity-picker-group').forEach(group => {
+        const anyVisible = Array.from(group.querySelectorAll('.entity-picker-label')).some(l => l.style.display !== 'none');
+        group.style.display = anyVisible ? '' : 'none';
+      });
+    });
 
     aiChatMessages = [];
     renderChatMessages();
@@ -703,6 +861,7 @@ async function sendChatMessage(chapter) {
     aiChatMessages.push({ role: 'assistant', content: result.reply, actions: result.actions_taken || [] });
     renderChatMessages();
     if (result.actions_taken && result.actions_taken.length) {
+      if (currentChapter) dirtyChapterId = currentChapter.id;
       await refreshAfterChatActions();
     }
   } catch (err) {
@@ -790,6 +949,10 @@ function renderImportView() {
     <div class="panel">
       <p style="font-size:13.5px;color:var(--text-muted);">Elinde zaten yazılmış bir .txt dosyası varsa yükle — "Bölüm N" başlıklarına göre otomatik olarak bölüm/paragraf oluşturur ve mevcut menülerdeki isimleri paragraflarda arar. İçe aktarma otomatik olarak yeni karakter/mekan oluşturmaz; her bölüm için "AI ile varlık öner" ile Qwen'e henüz kayıtlı olmayan adayları buldurup onaylayarak ekleyebilirsin.</p>
       <div class="field"><input type="file" id="importFile" accept=".txt"></div>
+      <label style="font-size:13px;display:flex;align-items:center;gap:6px;margin:8px 0;">
+        <input type="checkbox" id="aiSplitImportCheck">
+        Paragraf araları net değilse (boş satır yoksa) AI ile böl - daha yavaş ama düzensiz yapıştırılmış metinlerde çok daha iyi sonuç verir
+      </label>
       <button class="btn btn-primary" id="importBtn">Yükle ve İçe Aktar</button>
       <div id="importResult"></div>
       <hr style="margin:22px 0;border:none;border-top:1px solid var(--border);">
@@ -801,12 +964,15 @@ function renderImportView() {
   document.getElementById('importBtn').addEventListener('click', async () => {
     const fileInput = document.getElementById('importFile');
     if (!fileInput.files.length) { alert('Bir dosya seç.'); return; }
+    const aiSplit = document.getElementById('aiSplitImportCheck').checked;
     const formData = new FormData();
     formData.append('file', fileInput.files[0]);
     const resultEl = document.getElementById('importResult');
-    resultEl.innerHTML = '<div class="empty-state">Yükleniyor…</div>';
+    resultEl.innerHTML = aiSplit
+      ? '<div class="empty-state">Yükleniyor - AI paragraf ayracı kullanılıyor, biraz sürebilir…</div>'
+      : '<div class="empty-state">Yükleniyor…</div>';
     try {
-      const res = await fetch('/chapters/import', {
+      const res = await fetch(`/chapters/import?ai_split_long_chapters=${aiSplit}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${getToken()}`, 'X-Novel-Id': getNovelId() },
         body: formData,
@@ -849,34 +1015,83 @@ async function runSuggestEntities(chapterId) {
   panel.innerHTML = '<div class="empty-state">Bölüm taranıyor, yeni varlıklar aranıyor…</div>';
   try {
     const suggestions = await api.post(`/chapters/${chapterId}/suggest-entities`, {});
-    if (!suggestions.length) {
-      panel.innerHTML = '<div class="empty-state" style="text-align:left;padding:6px 0;">Bu bölümde menülerde kayıtlı olmayan yeni bir varlık bulunamadı.</div>';
-      return;
-    }
-    panel.innerHTML = `
-      <div class="panel" style="margin:8px 0;">
-        <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">ÖNERİLEN YENİ VARLIKLAR</strong>
-        ${suggestions.map((s, i) => `
-          <label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
-            <input type="checkbox" class="suggestion-check" data-idx="${i}" checked style="margin-top:3px;">
-            <span><strong>[${escapeHtml((ENTITY_TYPES[s.entity_type] || {}).label || s.entity_type)}] ${escapeHtml(s.name)}</strong><br>
-            <span style="color:var(--text-muted);">${escapeHtml(s.description)}</span></span>
-          </label>`).join('')}
-        <button class="btn btn-primary btn-sm" id="approveSuggestionsBtn-${chapterId}" style="margin-top:8px;">Seçilenleri Ekle</button>
-      </div>`;
-
-    panel.querySelector(`#approveSuggestionsBtn-${chapterId}`).addEventListener('click', async () => {
-      const checks = panel.querySelectorAll('.suggestion-check:checked');
-      const chosen = Array.from(checks).map(cb => suggestions[parseInt(cb.dataset.idx, 10)]);
-      if (!chosen.length) { alert('Hiç seçim yapılmadı.'); return; }
-      try {
-        const result = await api.post('/ai/approve-suggestions', { suggestions: chosen });
-        panel.innerHTML = `<div class="success-text">${result.created.length} yeni kayıt eklendi.</div>`;
-      } catch (err) { alert(err.message); }
-    });
+    renderEntitySuggestionsInto(panel, chapterId, suggestions);
   } catch (err) {
     panel.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   }
+}
+
+function renderEntitySuggestionsInto(panel, chapterId, suggestions) {
+  if (!suggestions.length) {
+    panel.innerHTML = '<div class="empty-state" style="text-align:left;padding:6px 0;">Bu bölümde menülerde kayıtlı olmayan yeni bir varlık bulunamadı.</div>';
+    return;
+  }
+  panel.innerHTML = `
+    <div class="panel" style="margin:8px 0;">
+      <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">ÖNERİLEN YENİ VARLIKLAR</strong>
+      ${suggestions.map((s, i) => `
+        <label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
+          <input type="checkbox" class="suggestion-check" data-idx="${i}" checked style="margin-top:3px;">
+          <span><strong>[${escapeHtml((ENTITY_TYPES[s.entity_type] || {}).label || s.entity_type)}] ${escapeHtml(s.name)}</strong><br>
+          <span style="color:var(--text-muted);">${escapeHtml(s.description)}</span></span>
+        </label>`).join('')}
+      <button class="btn btn-primary btn-sm" id="approveSuggestionsBtn-${chapterId}" style="margin-top:8px;">Seçilenleri Ekle</button>
+    </div>`;
+
+  panel.querySelector(`#approveSuggestionsBtn-${chapterId}`).addEventListener('click', async () => {
+    const checks = panel.querySelectorAll('.suggestion-check:checked');
+    const chosen = Array.from(checks).map(cb => suggestions[parseInt(cb.dataset.idx, 10)]);
+    if (!chosen.length) { alert('Hiç seçim yapılmadı.'); return; }
+    try {
+      const result = await api.post('/ai/approve-suggestions', { suggestions: chosen });
+      panel.innerHTML = `<div class="success-text">${result.created.length} yeni kayıt eklendi.</div>`;
+    } catch (err) { alert(err.message); }
+  });
+}
+
+async function runSuggestProgressions(chapter) {
+  const container = document.getElementById('progressionScanResult');
+  if (!container) return;
+  container.innerHTML = '<div class="empty-state">Bölüm taranıyor, yeni/değişen bilgi aranıyor…</div>';
+  try {
+    const suggestions = await api.post(`/chapters/${chapter.id}/suggest-progressions`, {});
+    renderProgressionSuggestionsInto(container, suggestions);
+  } catch (err) {
+    container.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderProgressionSuggestionsInto(container, suggestions) {
+  if (!suggestions.length) {
+    container.innerHTML = '<div class="empty-state" style="text-align:left;padding:6px 0;">Bu bölümde, geçen kayıtlar hakkında zaten bilinenin ötesinde yeni bir bilgi bulunamadı.</div>';
+    return;
+  }
+  container.innerHTML = `
+    <div class="panel" style="margin:8px 0;">
+      <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">ÖNERİLEN GELİŞİM NOTLARI</strong>
+      ${suggestions.map((s, i) => `
+        <label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
+          <input type="checkbox" class="progression-suggestion-check" data-idx="${i}" checked style="margin-top:3px;">
+          <span><strong>${escapeHtml(s.entity_name)}</strong> (Bölüm ${s.chapter_number}): ${escapeHtml(s.note)}</span>
+        </label>`).join('')}
+      <button class="btn btn-primary btn-sm" id="approveProgressionsBtn" style="margin-top:8px;">Seçilenleri Haritaya Ekle</button>
+    </div>`;
+
+  container.querySelector('#approveProgressionsBtn').addEventListener('click', async (e) => {
+    const checks = container.querySelectorAll('.progression-suggestion-check:checked');
+    const chosen = Array.from(checks).map(cb => suggestions[parseInt(cb.dataset.idx, 10)]);
+    if (!chosen.length) { alert('Hiç seçim yapılmadı.'); return; }
+    e.target.disabled = true;
+    try {
+      for (const s of chosen) {
+        await api.post('/progressions/', {
+          entity_type: s.entity_type, entity_id: s.entity_id,
+          chapter_number: s.chapter_number, note: s.note,
+        });
+      }
+      container.innerHTML = `<div class="success-text">${chosen.length} gelişim notu haritaya eklendi.</div>`;
+    } catch (err) { alert(err.message); e.target.disabled = false; }
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -1360,10 +1575,35 @@ async function initApp() {
   });
   document.getElementById('globalSearch').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && e.target.value.trim()) {
-      renderSearchResults(e.target.value.trim());
+      const query = e.target.value.trim();
+      const pMatch = query.match(/^[Pp](\d+)$/);
+      if (pMatch) {
+        jumpToParagraphById(parseInt(pMatch[1], 10));
+      } else {
+        renderSearchResults(query);
+      }
     }
   });
   switchView('roman');
+}
+
+async function jumpToParagraphById(paragraphId) {
+  try {
+    const info = await api.get(`/chapters/paragraph/${paragraphId}`);
+    switchView('roman');
+    await loadChapterList(info.chapter_id);
+    setTimeout(() => {
+      const el = document.getElementById(`para-global-${paragraphId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.transition = 'background 0.3s';
+        el.style.background = 'var(--gold-dim, #fdf3d8)';
+        setTimeout(() => { el.style.background = ''; }, 2000);
+      }
+    }, 300);
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 initApp();

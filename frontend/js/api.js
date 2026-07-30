@@ -33,7 +33,20 @@ async function apiFetch(path, opts = {}) {
   }
   if (!res.ok) {
     let detail = `İstek başarısız (${res.status})`;
-    try { const data = await res.json(); if (data.detail) detail = data.detail; } catch (e) { /* ignore */ }
+    try {
+      const data = await res.json();
+      if (typeof data.detail === 'string') {
+        detail = data.detail;
+      } else if (Array.isArray(data.detail)) {
+        // FastAPI 422 doğrulama hatası: [{loc:[...], msg:'...', ...}, ...]
+        detail = data.detail.map(d => {
+          const field = Array.isArray(d.loc) ? d.loc[d.loc.length - 1] : '';
+          return field ? `${field}: ${d.msg}` : d.msg;
+        }).join(' / ');
+      } else if (data.detail) {
+        detail = JSON.stringify(data.detail);
+      }
+    } catch (e) { /* ignore */ }
     throw new Error(detail);
   }
   if (res.status === 204) return null;

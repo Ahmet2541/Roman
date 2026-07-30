@@ -10,7 +10,7 @@ from .. import models, schemas
 from ..mentions import detect_and_save_mentions
 from ..entities import ENTITY_MODELS
 from ..import_parser import parse_manuscript, split_paragraphs
-from ..qwen_client import summarize_chapter, suggest_entities_for_chapter
+from ..qwen_client import summarize_chapter, suggest_entities_for_chapter, suggest_progressions_for_chapter, split_paragraphs_with_ai
 from ..ratelimit import rate_limit
 from ..novel_context import get_novel_id
 
@@ -49,6 +49,34 @@ def word_count_stats(db: Session = Depends(get_db), _user=Depends(get_current_us
         total += count
         per_chapter.append(schemas.ChapterWordCount(chapter_number=c.number, title=c.title, word_count=count))
     return schemas.WordCountStats(total_words=total, chapters=per_chapter)
+
+
+@router.get("/paragraph/{paragraph_id}", response_model=dict)
+def find_paragraph_by_global_id(
+    paragraph_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Paragrafın kendi veritabanı id'si zaten roman genelinde benzersiz ve
+    kalıcı - bunu 'P{id}' şeklinde bir global paragraf numarası olarak
+    kullanıyoruz (okuyucuda her paragrafın başında görünür). Bu uç nokta,
+    'P2367' gibi bir referans verildiğinde hangi bölümde/kaçıncı paragrafta
+    olduğunu bulup okuyucuyu doğrudan oraya götürmek için kullanılır."""
+    paragraph = (
+        db.query(models.Paragraph)
+        .join(models.Chapter, models.Paragraph.chapter_id == models.Chapter.id)
+        .filter(models.Paragraph.id == paragraph_id, models.Chapter.novel_id == novel_id)
+        .first()
+    )
+    if not paragraph:
+        raise HTTPException(404, f"P{paragraph_id} bulunamadı")
+    return {
+        "paragraph_id": paragraph.id,
+        "chapter_id": paragraph.chapter_id,
+        "chapter_number": paragraph.chapter.number,
+        "chapter_title": paragraph.chapter.title,
+        "paragraph_number": paragraph.number,
+        "text": paragraph.text,
+    }
 
 
 @router.get("/search", response_model=List[dict])
@@ -170,6 +198,61 @@ def search(
     return results
 
 
+@router.post("/{chapter_id}/ai-split-paragraphs", response_model=schemas.AiSplitParagraphsResponse)
+def ai_split_paragraphs(
+    chapter_id: int, payload: schemas.AiSplitParagraphsRequest, db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=10, window_seconds=60, label="AI paragraf bölme")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Paragraf araları net olmayan (boş satırla ayrılmamış) büyük bir
+    metni AI ile mantıklı paragraflara böler ve DOĞRUDAN kaydeder - burada
+    onay adımı yok çünkü metnin kendisi zaten kullanıcının kendi yazdığı/
+    yapıştırdığı metin, AI sadece nereye paragraf arası koyacağına karar
+    veriyor (tek kelime değiştirmiyor).
+
+    mode='append': mevcut paragrafların ardına, sıradaki numaralardan
+    devam ederek ekler. mode='replace': bölümün TÜM mevcut paragraflarının
+    yerine geçer (eskiler silinir - geri alınamaz, dikkatli kullan)."""
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
+    if not payload.text.strip():
+        raise HTTPException(400, "Bölünecek metin boş olamaz")
+    if payload.mode not in ("append", "replace"):
+        raise HTTPException(400, "mode 'append' ya da 'replace' olmalı")
+
+    try:
+        split_texts = split_paragraphs_with_ai(payload.text)
+    except Exception as exc:
+        logger.exception("AI paragraf bölme başarısız oldu")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Qwen API'ye ulaşılamadı: {exc}. DASHSCOPE_API_KEY doğru mu ve internet bağlantısı var mı kontrol et.",
+        )
+    if not split_texts:
+        raise HTTPException(502, "AI hiçbir paragraf üretmedi, tekrar dener misin?")
+
+    if payload.mode == "replace":
+        for p in list(chapter.paragraphs):
+            db.delete(p)
+        db.commit()
+        start_number = 1
+    else:
+        start_number = (max((p.number for p in chapter.paragraphs), default=0)) + 1
+
+    created = []
+    for offset, text in enumerate(split_texts):
+        paragraph = models.Paragraph(chapter_id=chapter.id, number=start_number + offset, text=text)
+        db.add(paragraph)
+        db.commit()
+        db.refresh(paragraph)
+        detect_and_save_mentions(db, paragraph)
+        db.refresh(paragraph)
+        created.append(paragraph)
+
+    return schemas.AiSplitParagraphsResponse(paragraph_count=len(created), paragraphs=created)
+
+
 @router.post("/{chapter_id}/generate-summary", response_model=schemas.ChapterSummaryGenerateResponse)
 def generate_chapter_summary(
     chapter_id: int, db: Session = Depends(get_db),
@@ -218,6 +301,34 @@ def suggest_chapter_entities(
         suggestions = suggest_entities_for_chapter(db, chapter)
     except Exception as exc:
         logger.exception("Varlık önerisi üretimi başarısız oldu")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Qwen API'ye ulaşılamadı: {exc}. DASHSCOPE_API_KEY doğru mu ve internet bağlantısı var mı kontrol et.",
+        )
+    return suggestions
+
+
+@router.post("/{chapter_id}/suggest-progressions", response_model=List[schemas.ProgressionSuggestion])
+def suggest_chapter_progressions(
+    chapter_id: int, db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=10, window_seconds=60, label="gelişim önerisi")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Bu bölümde geçen kişi/mekan/olay/nesne/ipucu kayıtları hakkında
+    öğrenilen YENİ ya da DEĞİŞEN bilgiyi tespit edip Gelişim Çizelgesi
+    (Progressions) taslağı olarak önerir - romanın kronolojik 'haritasını'
+    otomatik oluşturan mekanizma budur. HİÇBİR ŞEY doğrudan kaydedilmez;
+    kullanıcı onayladığı öneriler mevcut POST /progressions/ ile kaydedilir."""
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
+    if not chapter.paragraphs:
+        raise HTTPException(400, "Bu bölümde henüz taranacak paragraf yok")
+
+    try:
+        suggestions = suggest_progressions_for_chapter(db, chapter)
+    except Exception as exc:
+        logger.exception("Gelişim önerisi üretimi başarısız oldu")
         raise HTTPException(
             status_code=502,
             detail=f"Qwen API'ye ulaşılamadı: {exc}. DASHSCOPE_API_KEY doğru mu ve internet bağlantısı var mı kontrol et.",
@@ -393,13 +504,21 @@ def toggle_style_sample(
 @router.post("/import")
 async def import_manuscript(
     file: UploadFile = File(...),
+    ai_split_long_chapters: bool = False,
     db: Session = Depends(get_db), _user=Depends(get_current_user),
     novel_id: int = Depends(get_novel_id),
 ):
     """Elinde zaten yazılmış bir metni (.txt) yükle - 'Bölüm N' başlıklarına
     göre otomatik bölüm/paragraf oluşturur ve o an menülerde kayıtlı
     karakter/mekan/olay/nesne isimlerini paragraflarda arar. Aynı numaralı
-    bölüm/paragraf zaten varsa üzerine yazılır (idempotent import)."""
+    bölüm/paragraf zaten varsa üzerine yazılır (idempotent import).
+
+    ai_split_long_chapters=true verilirse: boş satırla paragraflara
+    ayrılamamış (tek blok hâlinde gelen, 600+ karakterlik) bölümler için
+    basit boş-satır ayracı yerine AI ile anlamlı paragraf bölme kullanılır
+    (bkz. qwen_client.split_paragraphs_with_ai). Daha yavaştır (her böyle
+    bölüm için bir Qwen isteği gerekir) ama düzensiz yapıştırılmış/OCR'lı
+    metinlerde çok daha iyi sonuç verir."""
     raw = (await file.read()).decode("utf-8", errors="replace")
     parsed = parse_manuscript(raw)
 
@@ -416,6 +535,13 @@ async def import_manuscript(
         db.refresh(chapter)
 
         paragraphs = split_paragraphs(chap["text"])
+        if ai_split_long_chapters and len(paragraphs) <= 1 and len(chap["text"]) > 600:
+            try:
+                paragraphs = split_paragraphs_with_ai(chap["text"])
+            except Exception:
+                logger.exception(f"Bölüm {chap['number']} için AI bölme başarısız oldu, boş-satır ayracına geri dönülüyor")
+                # AI başarısız olursa sessizce eski (blank-line) sonuca devam et - import'u durdurma
+
         for idx, text in enumerate(paragraphs, start=1):
             paragraph = (
                 db.query(models.Paragraph)

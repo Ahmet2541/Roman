@@ -12,8 +12,8 @@ router = APIRouter(prefix="/relationships", tags=["İlişkiler"])
 
 
 def _to_out(db: Session, rel: models.CharacterRelationship) -> schemas.RelationshipOut:
-    char_a = db.query(models.Character).filter(models.Character.id == rel.character_a_id).first()
-    char_b = db.query(models.Character).filter(models.Character.id == rel.character_b_id).first()
+    char_a = db.query(models.Character).filter(models.Character.id == rel.character_a_id, models.Character.novel_id == rel.novel_id).first()
+    char_b = db.query(models.Character).filter(models.Character.id == rel.character_b_id, models.Character.novel_id == rel.novel_id).first()
     return schemas.RelationshipOut(
         id=rel.id,
         character_a_id=rel.character_a_id, character_a_name=char_a.name if char_a else "?",
