@@ -1663,10 +1663,15 @@ async function sendChatMessage(chapter) {
   document.getElementById('aiChatSendBtn').disabled = true;
 
   try {
+    const resultBox = document.getElementById('aiResultBox');
+    const currentResult = (resultBox && resultBox.style.display !== 'none')
+      ? document.getElementById('aiResultText').textContent
+      : null;
     const payload = {
       chapter_number: chapter ? chapter.number : 0,
       selected_entities: selected,
       messages: aiChatMessages,
+      current_result: currentResult,
     };
     const result = await api.post('/ai/chat', payload);
     aiChatMessages.push({
@@ -1674,6 +1679,13 @@ async function sendChatMessage(chapter) {
       pendingUpdates: (result.pending_entity_updates || []).map(p => ({ ...p, resolved: false })),
     });
     renderChatMessages();
+    // Qwen set_draft_result aracını çağırdıysa (bkz. backend), SONUÇ
+    // kutusunu OTOMATİK dolduruyoruz - kullanıcının elle "Sonuca Taşı"
+    // demesine gerek yok. "ev değil bina yap" gibi bir düzenleme isteğinde
+    // de aynı şekilde kutu GÜNCELLENMİŞ tam metinle otomatik yenilenir.
+    if (result.draft_result) {
+      showResult(result.draft_result);
+    }
     if (result.actions_taken && result.actions_taken.length) {
       if (currentChapter) dirtyChapterId = currentChapter.id;
       await refreshAfterChatActions();

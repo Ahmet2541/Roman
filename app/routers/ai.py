@@ -86,14 +86,20 @@ def chat(
         chapter_number=payload.chapter_number, instruction_text=last_user_message,
     )
     try:
-        reply, actions_taken, pending_entity_updates = chat_with_qwen(db, novel_id, universe_id, context, payload.messages)
+        reply, actions_taken, pending_entity_updates, draft_result = chat_with_qwen(
+            db, novel_id, universe_id, context, payload.messages,
+            current_result=payload.current_result,
+        )
     except Exception as exc:
         logger.exception("AI sohbet isteği başarısız oldu")
         raise HTTPException(
             status_code=502,
             detail=f"Qwen API'ye ulaşılamadı: {exc}. DASHSCOPE_API_KEY doğru mu ve internet bağlantısı var mı kontrol et.",
         )
-    return schemas.AiChatResponse(reply=reply, actions_taken=actions_taken, pending_entity_updates=pending_entity_updates)
+    return schemas.AiChatResponse(
+        reply=reply, actions_taken=actions_taken,
+        pending_entity_updates=pending_entity_updates, draft_result=draft_result,
+    )
 
 
 @router.post("/approve-suggestions", status_code=201)

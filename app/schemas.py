@@ -407,6 +407,11 @@ class AiChatRequest(BaseModel):
     chapter_number: Optional[int] = None
     selected_entities: List[EntityRef] = []
     messages: List[ChatMessage]
+    # SONUÇ kutusunda ŞU AN duran taslak metin (varsa). AI'nın "ev değil
+    # bina yap" gibi bir düzenleme isteğini doğru temele oturtabilmesi için
+    # gönderilir - AI bunu context'te görür, tam güncellenmiş halini
+    # set_draft_result ile geri döner (bkz. qwen_client.CHAT_SYSTEM_PROMPT).
+    current_result: Optional[str] = None
 
 
 class EntityUpdateProposal(BaseModel):
@@ -429,6 +434,11 @@ class AiChatResponse(BaseModel):
     # bunları sohbet balonunun yanında bir onay kartı olarak gösterir;
     # kullanıcı onaylarsa POST /ai/approve-entity-update ile kaydedilir.
     pending_entity_updates: List[EntityUpdateProposal] = []
+    # AI'nın set_draft_result aracıyla ürettiği taslak metin (varsa) - dolu
+    # gelirse frontend SONUÇ kutusunu OTOMATİK doldurur, kullanıcının elle
+    # "Sonuca Taşı" demesine gerek kalmaz. None ise bu tur sadece sohbetti,
+    # SONUÇ kutusu olduğu gibi kalır.
+    draft_result: Optional[str] = None
 
 
 class EntityUpdateApproval(BaseModel):

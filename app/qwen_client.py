@@ -846,23 +846,29 @@ yürüt: fikir üret, öneri getir, merak ettiğini sor, gerektiğinde kendi
 görüşünü de belirt ("Bence bu sahnede...", "Şunu da düşünebiliriz...",
 "Açıkçası şu kısım biraz zayıf kalmış olabilir...").
 
-ELİNDE ALTI ARAÇ VAR: create_chapter (yeni bölüm açar), write_paragraph
+ELİNDE YEDİ ARAÇ VAR: create_chapter (yeni bölüm açar), write_paragraph
 (bölüm+paragraf numarasıyla bir paragraf yazar/GÜNCELLER), 
 get_paragraph_by_id + edit_paragraph_by_id (kullanıcının 'P2367' gibi
 verdiği GLOBAL paragraf numarasıyla çalışır - önce oku, sonra gerekirse
 düzenle), get_entity_section (bir KİŞİ/MEKAN'ın belirli bir yönü hakkında
-derin bilgi getirir - ör. "duygusal_yapi", "fiziksel_yapi"), ve
+derin bilgi getirir - ör. "duygusal_yapi", "fiziksel_yapi"),
 propose_entity_update (bir KİŞİ/MEKAN hakkında yeni öğrenilen bir bilgiyi
-ÖNERİR - bu ASLA doğrudan yazmaz, kullanıcı onayı gerekir).
+ÖNERİR - bu ASLA doğrudan yazmaz, kullanıcı onayı gerekir), ve
+set_draft_result (henüz hangi bölüme/paragrafa gideceği NETLEŞMEMİŞ bir
+metin taslağını - ör. bir betimleme, bir sahne fikri - ekranın SONUÇ
+kutusuna yazar, detayı aşağıda).
 Kullanıcı 'P2367 betimleme eksik' gibi bir P-numarası verdiğinde
 DOĞRUDAN get_paragraph_by_id ile o paragrafı bul, oku, sonra isterse
 edit_paragraph_by_id ile düzelt - hangi bölümde olduğunu sormana gerek
 yok, araç bunu senin için buluyor. Var olan bir paragrafı güncellersen
 eski hali otomatik geçmişe kaydedilir, kaybolmaz. Kullanıcı "şu bölümü
-yaz", "yeni bölüm aç", "şu paragrafı değiştir/güncelle" gibi somut bir
-istekte bulunduğunda bu araçları DOĞRUDAN kullan - "yazayım mı?" diye
-sormana gerek yok, iste ve yap. Ama kullanıcı sadece fikir soruyorsa ya da
-sohbet ediyorsa araç çağırma, normal cevap ver.
+yaz", "yeni bölüm aç", "şu paragrafı değiştir/güncelle" gibi NET BİR
+BÖLÜM/PARAGRAF NUMARASI vererek somut bir istekte bulunduğunda bu araçları
+DOĞRUDAN kullan - "yazayım mı?" diye sormana gerek yok, iste ve yap. Henüz
+bir bölüm/paragraf numarası belirtilmemiş, üzerinde konuşula konuşula
+şekillenen bir taslaksa (aşağıdaki set_draft_result talimatına bak) onu
+kullan. Kullanıcı sadece fikir soruyorsa ya da sohbet ediyorsa hiçbir araç
+çağırma, normal cevap ver.
 
 get_entity_section KULLANIMI ÖNEMLİ: Bir karakter/mekan hakkında bir şey
 yazarken TALİMATIN HANGİ YÖNÜ istediğini anla ve SADECE o bölümü çek -
@@ -891,18 +897,22 @@ karakter/mekan/olay bilgileri, gelişim çizelgeleri) verilecek. Roman
 gerçekleriyle (kim kim, ne olmuş, kurallar) ÇELİŞME - ama üslup, ton ve
 öneri konusunda özgürsün, robotik bir onay makinesi gibi davranma.
 
-YENİDEN YAZMA/GELİŞTİRME İSTEKLERİNDE ÇOK ÖNEMLİ: Kullanıcı sana bir metin
-verip "bunu geliştir", "daha iyi bir betimleme yaz", "bunu güçlendir" gibi
-somut bir yeniden yazma isteği verdiğinde, cevabının GÖVDESİ GELİŞTİRİLMİŞ
-METNİN KENDİSİ olmalı - bir sürü açıklayıcı soru sorup metni hiç yazmadan
-bırakma. "Bu gerçek bir mekan mı yoksa metafor mu?", "Şunu mu demek
-istedin?" gibi sorularla oyalanıp asıl istenen metni ertelemek EN BÜYÜK
-HATA - kullanıcı senden YAZILMIŞ bir şey görmek istiyor, bir anket değil.
-Belirsiz bir nokta varsa bile, MAKUL BİR VARSAYIMLA geliştirilmiş metni
-YİNE DE yaz, gerekirse metnin ALTINA tek bir kısa soru/not ekleyebilirsin
-("Not: burayı X yönünde de yazabilirim, ister misin?") - ama önce metin,
-sonra (varsa) kısa not. Cevabında 3-4 soru art arda sıralamak KESİNLİKLE
-YASAK.
+YENİDEN YAZMA/GELİŞTİRME İSTEKLERİNDE (set_draft_result) ÇOK ÖNEMLİ:
+Kullanıcı sana bir metin verip "bunu geliştir", "daha iyi bir betimleme
+yaz", "bu sahneyi yaz" gibi somut bir taslak isteği verdiğinde YA DA ekranda
+"ŞU AN SONUÇ KUTUSUNDA DURAN TASLAK" olarak verilen bir metni DEĞİŞTİRMENİ
+istediğinde (ör. "ev değil bina yap", "bunu kısalt"), set_draft_result
+aracını TAM VE GÜNCEL metinle çağır - bir sürü açıklayıcı soru sorup metni
+hiç yazmadan bırakma. "Bu gerçek bir mekan mı yoksa metafor mu?", "Şunu mu
+demek istedin?" gibi sorularla oyalanıp asıl istenen metni ertelemek EN
+BÜYÜK HATA - kullanıcı senden YAZILMIŞ bir şey görmek istiyor, bir anket
+değil. Belirsiz bir nokta varsa bile, MAKUL BİR VARSAYIMLA geliştirilmiş
+metni set_draft_result ile YİNE DE üret - sohbet cevabına (varsa) en fazla
+TEK KISA CÜMLElik bir not ekleyebilirsin ("Not: burayı X yönünde de
+yazabilirim, ister misin?"), asla arka arkaya birden fazla soru sıralama,
+asla taslağı sohbet cevabının İÇİNE de tekrar yazma - taslak SADECE
+set_draft_result'a gider. Bir DÜZENLEME isteğinde her zaman TASLAĞIN
+TAMAMINI (sadece değişen kelimeyi değil) gönder.
 
 Araç çağırmadığın normal cevaplarını SADECE düz, doğal metin olarak ver -
 JSON, madde işareti başlığı ya da yapılandırılmış format KULLANMA. Gerçek
@@ -1029,6 +1039,39 @@ CHAT_TOOLS = [
                     "conflict_note": {"type": "string", "description": "Çelişki varsa, hangi eski bilgiyle çeliştiğinin kısa açıklaması"},
                 },
                 "required": ["entity_type", "entity_id", "section", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_draft_result",
+            "description": (
+                "Kullanıcı senden bir paragraf/betimleme/sahne/metin TASLAĞI "
+                "istediğinde (ör. 'daha iyi bir betimleme yaz', 'bu sahneyi yaz') "
+                "YA DA ekranda ŞU AN duran bir taslağı DEĞİŞTİRMENİ istediğinde "
+                "(ör. 'ev değil bina yap', 'bunu kısalt', 'daha karanlık bir tonda "
+                "yaz') bu aracı TAM VE GÜNCEL taslak metinle çağır. Bu metin "
+                "doğrudan ekranın SONUÇ kutusuna yazılır, kullanıcı oradan "
+                "paragrafa ekleyebilir - senin normal sohbet cevabına KARIŞMAZ.\n\n"
+                "ÇOK ÖNEMLİ: Kullanıcı bir DÜZENLEME istediğinde (context'te "
+                "'ŞU AN SONUÇ KUTUSUNDA DURAN TASLAK' olarak verilir), o taslağın "
+                "TAMAMINI, istenen değişikliği uygulayarak tekrar gönder - sadece "
+                "değişen kelimeyi değil, TÜM metni. Belirli bir bölüm/paragraf "
+                "numarası verilmişse (write_paragraph/edit_paragraph_by_id ile "
+                "doğrudan yazman istenmişse) bu aracı DEĞİL, o araçları kullan - "
+                "set_draft_result sadece nereye gideceği henüz netleşmemiş, "
+                "üzerinde çalışılan taslaklar için.\n\n"
+                "Bu aracı çağırdığında normal sohbet cevabın (varsa) SADECE kısa "
+                "bir not olsun (ör. 'Güncelledim.') - taslağın kendisini sohbet "
+                "cevabına da yazma, tekrar olur."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Tam ve güncel taslak metin"},
+                },
+                "required": ["text"],
             },
         },
     },
@@ -1197,10 +1240,28 @@ def _execute_chat_tool(db: Session, novel_id: int, universe_id: int, name: str, 
             "proposal": proposal,
         }
 
+    if name == "set_draft_result":
+        # ÖNEMLİ: bu araç da (propose_entity_update gibi) DB'ye HİÇBİR ŞEY
+        # YAZMAZ - sadece taslak metni frontend'in SONUÇ kutusuna taşınmak
+        # üzere döner. Kalıcı hale gelmesi (paragrafa eklenmesi) tamamen
+        # kullanıcının elindeki bir sonraki adım.
+        text = (args.get("text") or "").strip()
+        if not text:
+            return {"error": "text boş olamaz", "action_summary": None, "is_draft_result": False}
+        return {
+            "success": True,
+            "action_summary": None,  # "yapıldı" değil, henüz kaydedilmemiş bir taslak
+            "is_draft_result": True,
+            "draft_text": text,
+        }
+
     return {"error": f"Bilinmeyen araç: {name}", "action_summary": None}
 
 
-def chat_with_qwen(db: Session, novel_id: int, universe_id: int, context: str, messages: list, max_tool_rounds: int = 5) -> tuple[str, list[str], list[dict]]:
+def chat_with_qwen(
+    db: Session, novel_id: int, universe_id: int, context: str, messages: list,
+    current_result: str | None = None, max_tool_rounds: int = 5,
+) -> tuple[str, list[str], list[dict], str | None]:
     """Sohbet modu artık sadece metin üretmiyor - Qwen bölüm oluşturma ve
     paragraf yazma/güncelleme araçlarını DOĞRUDAN çağırabiliyor. Döngü: Qwen
     bir araç çağırırsa çalıştırılır, sonucu tekrar Qwen'e verilir, Qwen ya
@@ -1210,15 +1271,29 @@ def chat_with_qwen(db: Session, novel_id: int, universe_id: int, context: str, m
     ÖNEMLİ AYRIM: actions_taken == zaten YAPILMIŞ işlemler (bölüm/paragraf
     yazıldı - geri dönüşü DB'de zaten var). pending_entity_updates ==
     HENÜZ YAPILMAMIŞ, kullanıcı onayı bekleyen varlık güncelleme önerileri
-    (bkz. propose_entity_update - DB'ye hiçbir şey yazmaz). Bu ayrım
-    bilerek yapıldı: paragraf yazmak "iste ve yap" mantığıyla direkt
-    yürütülüyor, ama bir karakterin kalıcı profilini değiştirmek (özellikle
-    çelişki içerebileceği için) her zaman kullanıcı onayından geçmeli.
+    (bkz. propose_entity_update - DB'ye hiçbir şey yazmaz). draft_result ==
+    HENÜZ hiçbir yere kaydedilmemiş bir metin taslağı (bkz. set_draft_result) -
+    frontend'in SONUÇ kutusuna OTOMATİK yazılır, kullanıcı oradan paragrafa
+    ekler ya da sohbetle düzenlemeye devam eder. Bu üç ayrım bilerek yapıldı:
+    paragraf yazmak "iste ve yap" mantığıyla direkt yürütülüyor, ama bir
+    karakterin kalıcı profilini değiştirmek ya da bir taslağı KESİNLEŞTİRMEK
+    her zaman kullanıcı onayından/eyleminden geçmeli.
 
-    Dönüş: (metin_cevabı, yapılan_işlemlerin_özet_listesi, onay_bekleyen_öneriler)"""
+    current_result: SONUÇ kutusunda ŞU AN duran taslak (varsa) - context'e
+    ayrı bir blok olarak eklenir ki kullanıcı "ev değil bina yap" gibi bir
+    düzenleme istediğinde Qwen neyi düzenlediğini tam olarak bilsin.
+
+    Dönüş: (metin_cevabı, yapılan_işlemlerin_özet_listesi, onay_bekleyen_öneriler, taslak_sonuç)"""
     system_content = CHAT_SYSTEM_PROMPT
     if context:
         system_content += f"\n\nROMANIN BAĞLAMI:\n{context}"
+    if current_result:
+        system_content += (
+            "\n\nŞU AN SONUÇ KUTUSUNDA DURAN TASLAK METİN (kullanıcı bundan "
+            "bahsediyor olabilir - bir düzenleme istenirse bu metnin TAMAMINI "
+            "değişikliği uygulayarak set_draft_result ile geri döndür):\n"
+            f"{current_result}"
+        )
 
     chat_messages = [{"role": "system", "content": system_content}]
     for m in messages:
@@ -1229,6 +1304,7 @@ def chat_with_qwen(db: Session, novel_id: int, universe_id: int, context: str, m
     client = get_client()
     actions_taken: list[str] = []
     pending_entity_updates: list[dict] = []
+    draft_result: str | None = None
 
     for _ in range(max_tool_rounds):
         response = client.chat.completions.create(
@@ -1240,7 +1316,7 @@ def chat_with_qwen(db: Session, novel_id: int, universe_id: int, context: str, m
         tool_calls = getattr(msg, "tool_calls", None)
 
         if not tool_calls:
-            return (msg.content or "").strip(), actions_taken, pending_entity_updates
+            return (msg.content or "").strip(), actions_taken, pending_entity_updates, draft_result
 
         chat_messages.append({
             "role": "assistant",
@@ -1260,12 +1336,15 @@ def chat_with_qwen(db: Session, novel_id: int, universe_id: int, context: str, m
                 actions_taken.append(result["action_summary"])
             if result.get("is_proposal") and result.get("proposal"):
                 pending_entity_updates.append(result["proposal"])
+            if result.get("is_draft_result") and result.get("draft_text"):
+                draft_result = result["draft_text"]  # aynı turda birden fazla çağrılırsa SON hali geçerli
             chat_messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result, ensure_ascii=False)})
 
     return (
         "Bir dizi işlem yaptım ama son mesajımı tamamlayamadım - üstte hangi bölüm/paragrafların değiştiğini görebilirsin.",
         actions_taken,
         pending_entity_updates,
+        draft_result,
     )
 
 
