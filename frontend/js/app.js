@@ -516,7 +516,8 @@ async function renderRomanView() {
       <div id="bulkScanPanel" style="display:none;grid-column:1;"></div>
       <div class="reader" id="readerPane"><div class="empty-state">Bir bölüm seç ya da yeni oluştur.</div></div>
       <div class="side-panel" id="aiPanel"></div>
-    </div>`;
+    </div>
+    <div id="createItemModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(10,12,20,0.45);z-index:50;align-items:center;justify-content:center;"></div>`;
 
   document.getElementById('newChapterBtn').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -526,7 +527,7 @@ async function renderRomanView() {
   document.querySelectorAll('#newChapterMenu button').forEach(btn => {
     btn.addEventListener('click', () => {
       document.getElementById('newChapterMenu').style.display = 'none';
-      createChapterPrompt(btn.dataset.kind);
+      openCreateItemModal(btn.dataset.kind);
     });
   });
   document.addEventListener('click', () => {
@@ -826,26 +827,176 @@ async function refreshAfterChatActions() {
   }
 }
 
-async function createChapterPrompt(kind) {
+// ---------------------------------------------------------------------
+// "+ Yeni" oluşturma akışı: rastgele bir "sıra numarası" yazdırmak yerine
+// (kafa karıştırıcıydı - flat bir sayı, hiyerarşiyle ilgisi yoktu) fihristin
+// gösterdiği "1-2-3" numaralamasıyla BİREBİR eşleşen 3 kutu gösteriyoruz:
+// [Kısım#] [Alt Başlık#] [Bölüm#]. Hangi kutunun kilitli/değiştirilebilir
+// olduğu, neyi oluşturduğuna VE şu an neyin içinde bulunduğuna (son
+// görüntülenen bölümün bağlamına) göre otomatik belirlenir:
+//   - Yeni Bölüm: içinde bulunduğun Kısım/Alt Başlık kutuları KİLİTLİ
+//     (o bağlamı DEĞİŞTİRMÜYORSUN, sadece ona bölüm ekliyorsun),
+//     Bölüm# kutusu değiştirilebilir ve bir sonraki sayı önerilir.
+//   - Yeni Başlık (Kısım): tek kutu (Kısım#) değiştirilebilir, sıradaki
+//     numara önerilir - henüz hiç Kısım yoksa "1" önerilir.
+//   - Yeni Alt Başlık: içinde bulunduğun Kısım kutusu KİLİTLİ (varsa),
+//     Alt Başlık# kutusu değiştirilebilir ve sıradaki numara önerilir.
+// Gerçek arka plan "sıra numarası" (backend'in number alanı) bu seçime
+// göre OTOMATİK hesaplanır - gerekirse (araya ekleniyorsa) sonraki
+// kayıtlar sessizce +1 kaydırılır (bkz. insertAfterNumber).
+// ---------------------------------------------------------------------
+
+function getCurrentContext() {
+  const hierarchy = buildChapterHierarchy(lastLoadedChapters);
+  if (!currentChapter) return { partId: null, partNum: null, subtitleId: null, subNum: null };
+  const item = hierarchy.find(it => String(it.chapter.id) === String(currentChapter.id));
+  if (!item) return { partId: null, partNum: null, subtitleId: null, subNum: null };
+  const partId = item.ancestorIds[0] || null;
+  const subtitleId = item.ancestorIds[1] || null;
+  const partItem = partId ? hierarchy.find(it => String(it.chapter.id) === partId) : null;
+  const subItem = subtitleId ? hierarchy.find(it => String(it.chapter.id) === subtitleId) : null;
+  return {
+    partId, partNum: partItem ? partItem.displayNumber : null,
+    subtitleId, subNum: subItem ? subItem.displayNumber.split('-').pop() : null,
+  };
+}
+
+function countExistingInScope(kind, partId, subtitleId) {
+  const hierarchy = buildChapterHierarchy(lastLoadedChapters);
+  if (kind === 'part') return hierarchy.filter(it => it.chapter.kind === 'part').length;
+  if (kind === 'subtitle') {
+    return hierarchy.filter(it => it.chapter.kind === 'subtitle' && (it.ancestorIds[0] || null) === partId).length;
+  }
+  const scopeIds = [partId, subtitleId].filter(Boolean);
+  return hierarchy.filter(it => it.chapter.kind === 'chapter' && JSON.stringify(it.ancestorIds) === JSON.stringify(scopeIds)).length;
+}
+
+// Yeni öğenin arka plandaki (backend) "number"ının hangi mevcut kaydın
+// HEMEN ARDINDAN geleceğini bulur - o kaydın number'ı döner, ekleme bunun
+// +1 fazlası olarak yapılır (gerekirse sonrakiler kaydırılır).
+function findInsertionAnchorNumber(kind, ctx) {
+  const hierarchy = buildChapterHierarchy(lastLoadedChapters);
+  if (!hierarchy.length) return 0;
+  const lastOverall = hierarchy[hierarchy.length - 1].chapter.number;
+
+  if (kind === 'part') return lastOverall; // yeni Kısım her zaman dokümanın en sonuna eklenir
+
+  if (kind === 'subtitle') {
+    if (!ctx.partId) return lastOverall; // üst seviye alt başlık - en sona
+    let last = null;
+    for (const it of hierarchy) {
+      if (String(it.chapter.id) === ctx.partId || it.ancestorIds.includes(ctx.partId)) last = it;
+    }
+    return last ? last.chapter.number : lastOverall;
+  }
+
+  // kind === 'chapter'
+  const scopeIds = [ctx.partId, ctx.subtitleId].filter(Boolean);
+  if (!scopeIds.length) return lastOverall; // hiçbir bağlam yok - en sona
+  let last = null;
+  for (const it of hierarchy) {
+    const isSelfDivider = (ctx.subtitleId && String(it.chapter.id) === ctx.subtitleId) ||
+      (!ctx.subtitleId && ctx.partId && String(it.chapter.id) === ctx.partId);
+    const isDescendant = JSON.stringify(it.ancestorIds) === JSON.stringify(scopeIds);
+    if (isSelfDivider || isDescendant) last = it;
+  }
+  return last ? last.chapter.number : lastOverall;
+}
+
+// anchorNumber'dan HEMEN SONRAKİ boş "number" değerini bulur - araya
+// sıkıştırmak gerekiyorsa (bir sonraki kayıt zaten anchor+1'de duruyorsa)
+// ondan sonraki TÜM kayıtları SONDAN BAŞA doğru +1 kaydırır (unique
+// constraint çakışmasın diye) - böylece hiçbir veri kaybı/çakışma olmadan
+// dokümanın ortasına yeni bir bölüm/kısım/alt başlık eklenebilir.
+async function insertAfterNumber(anchorNumber) {
+  const sorted = [...lastLoadedChapters].sort((a, b) => a.number - b.number);
+  const idx = sorted.findIndex(c => c.number === anchorNumber);
+  const nextItem = idx >= 0 ? sorted[idx + 1] : undefined;
+  if (!nextItem || nextItem.number > anchorNumber + 1) {
+    return anchorNumber + 1; // boşluk var ya da liste sonu - kaydırmaya gerek yok
+  }
+  const toShift = sorted.slice(idx + 1);
+  for (let i = toShift.length - 1; i >= 0; i--) {
+    const c = toShift[i];
+    await api.put(`/chapters/${c.id}`, { number: c.number + 1 });
+  }
+  return anchorNumber + 1;
+}
+
+function openCreateItemModal(kind) {
   kind = kind || 'chapter';
   const kindLabel = kind === 'part' ? 'Başlık (Kısım)' : kind === 'subtitle' ? 'Alt Başlık' : 'Bölüm';
-  const number = prompt(`${kindLabel} sırası - fihristteki sırasını belirleyen bir SAYI gir (ör. 1, 2, 3):`);
-  if (!number) return;
-  const parsedNumber = parseInt(number.trim(), 10);
-  if (Number.isNaN(parsedNumber)) {
-    alert(`"${number}" bir sayı değil. Sıra alanına sadece 1, 2, 3 gibi bir SAYI yazmalısın - başlık/metin bir sonraki adımda soruluyor.`);
-    return;
+  const ctx = getCurrentContext();
+
+  // Her kutunun durumu: { value, locked } - locked=true ise input disabled.
+  let box1, box2, box3; // Kısım# / Alt Başlık# / Bölüm#
+  if (kind === 'part') {
+    box1 = { value: countExistingInScope('part') + 1, locked: false };
+    box2 = null; box3 = null;
+  } else if (kind === 'subtitle') {
+    box1 = ctx.partId ? { value: ctx.partNum, locked: true } : { value: '—', locked: true, na: true };
+    box2 = { value: countExistingInScope('subtitle', ctx.partId, null) + 1, locked: false };
+    box3 = null;
+  } else {
+    box1 = ctx.partId ? { value: ctx.partNum, locked: true } : { value: '—', locked: true, na: true };
+    box2 = ctx.subtitleId ? { value: ctx.subNum, locked: true } : { value: '—', locked: true, na: true };
+    box3 = { value: countExistingInScope('chapter', ctx.partId, ctx.subtitleId) + 1, locked: false };
   }
-  const rawTitle = prompt(`${kindLabel} metni${kind === 'chapter' ? ' (opsiyonel)' : ''}:`) || '';
-  if (kind !== 'chapter' && !rawTitle.trim()) { alert(`${kindLabel} için bir metin gerekli.`); return; }
-  // Bir AI sohbetinden ya da başka bir kaynaktan kopyala-yapıştır yapılırsa
-  // "> **başlık**" gibi markdown işaretleri gelebilir - fihriste çirkin
-  // görünmemesi için kaydetmeden önce temizliyoruz.
-  const title = stripMarkdownArtifacts(rawTitle);
-  try {
-    const chapter = await api.post('/chapters/', { number: parsedNumber, title, kind });
-    await loadChapterList(chapter.id);
-  } catch (err) { alert(err.message); }
+
+  const renderBox = (label, box) => {
+    if (!box) return `<div style="flex:1;min-width:0;"></div>`;
+    return `<div style="flex:1;min-width:0;text-align:center;">
+      <div style="font-size:10.5px;color:var(--text-muted);margin-bottom:3px;">${label}</div>
+      <input type="text" class="pos-box" value="${box.value}" ${box.locked ? 'disabled' : ''}
+        style="width:100%;text-align:center;padding:8px 4px;border-radius:8px;border:1px solid var(--border);
+        ${box.locked ? 'background:var(--paper-dim);color:var(--text-muted);' : 'background:#fff;font-weight:600;'}">
+    </div>`;
+  };
+
+  const overlay = document.getElementById('createItemModalOverlay');
+  overlay.innerHTML = `
+    <div class="panel" style="width:340px;max-width:92vw;">
+      <strong style="font-size:13px;">Yeni ${kindLabel}</strong>
+      <div style="display:flex;gap:8px;margin:12px 0;">
+        ${renderBox('Kısım', box1)}
+        ${renderBox('Alt Başlık', box2)}
+        ${renderBox('Bölüm', box3)}
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Gri kutular şu an içinde bulunduğun bağlamı gösterir, değiştirilemez - sadece koyu renkli kutu düzenlenebilir.</div>
+      <div class="field">
+        <label>${kindLabel} metni${kind === 'chapter' ? ' (opsiyonel)' : ''}</label>
+        <input type="text" id="createItemTitle" placeholder="${kind === 'chapter' ? 'Boş bırakabilirsin' : 'Zorunlu'}">
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="createItemConfirmBtn">Oluştur</button>
+        <button class="btn" id="createItemCancelBtn">Vazgeç</button>
+      </div>
+      <div id="createItemError" class="error-text"></div>
+    </div>`;
+  overlay.style.display = 'flex';
+
+  document.getElementById('createItemCancelBtn').addEventListener('click', () => { overlay.style.display = 'none'; });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; }, { once: true });
+
+  document.getElementById('createItemConfirmBtn').addEventListener('click', async (e) => {
+    const rawTitle = document.getElementById('createItemTitle').value;
+    if (kind !== 'chapter' && !rawTitle.trim()) {
+      document.getElementById('createItemError').textContent = `${kindLabel} için bir metin gerekli.`;
+      return;
+    }
+    const title = stripMarkdownArtifacts(rawTitle);
+    e.target.disabled = true;
+    try {
+      const anchorNumber = findInsertionAnchorNumber(kind, ctx);
+      const newNumber = await insertAfterNumber(anchorNumber);
+      const chapter = await api.post('/chapters/', { number: newNumber, title, kind });
+      overlay.style.display = 'none';
+      await loadChapterList(chapter.id);
+    } catch (err) {
+      document.getElementById('createItemError').textContent = err.message;
+      e.target.disabled = false;
+    }
+  });
 }
 
 async function selectChapter(id) {

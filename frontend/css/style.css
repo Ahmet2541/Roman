@@ -156,6 +156,11 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
 }
 .sidebar .search-box input::placeholder { color: #9099b0; }
 .novel-switch-box { padding: 0 0 12px; }
+/* .btn'in genel beyaz arkaplanı (#fff) sidebar dışındaki tüm butonlar için
+   doğru varsayılan - ama bu buton sidebar İÇİNDE, .nav-item-like ile
+   üzerine yazılıyor zaten (bkz. yukarısı). ID seçiciyle burada bir daha
+   sabitliyoruz - hiçbir CSS önbellek/sıralama ihtimalinde beyaz kalmasın. */
+#switchNovelBtn { background: none !important; border: none !important; }
 .sidebar-footer {
   padding: 14px 0 0;
   border-top: 1px solid var(--border-dark);
