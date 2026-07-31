@@ -3,6 +3,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from ..database import get_db
 from ..auth import get_current_user
@@ -26,7 +27,26 @@ logger = logging.getLogger("roman_api.chapters")
 
 @router.get("/", response_model=List[schemas.ChapterListOut])
 def list_chapters(db: Session = Depends(get_db), _user=Depends(get_current_user), novel_id: int = Depends(get_novel_id)):
-    return db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).order_by(models.Chapter.number).all()
+    chapters = db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).order_by(models.Chapter.number).all()
+    # Kısım/Alt Başlık normalde paragrafsız olur (sadece ayraç) - ama backend
+    # bunu hiçbir yerde ENGELLEMİYOR, yani yanlışlıkla (ör. "Yeni Bölüm"
+    # yerine "Yeni Başlık (Kısım)" seçilip metin yazılmışsa) bir Kısım'ın
+    # KENDİSİNDE paragraf birikmiş olabilir - bu durumda o içerik fihristten
+    # "buraya git" ile hiç erişilemez hale gelirdi. paragraph_count bunu
+    # frontend'in tespit edip doğrudan açılabilir kılması için var.
+    counts = dict(
+        db.query(models.Paragraph.chapter_id, func.count(models.Paragraph.id))
+        .join(models.Chapter, models.Paragraph.chapter_id == models.Chapter.id)
+        .filter(models.Chapter.novel_id == novel_id)
+        .group_by(models.Paragraph.chapter_id)
+        .all()
+    )
+    result = []
+    for c in chapters:
+        out = schemas.ChapterListOut.model_validate(c)
+        out.paragraph_count = counts.get(c.id, 0)
+        result.append(out)
+    return result
 
 
 @router.post("/", response_model=schemas.ChapterOut, status_code=201)
@@ -565,10 +585,27 @@ def upsert_paragraph(
         .first()
     )
     if paragraph:
+        # Var olan bir paragrafı düzenlemek HER ZAMAN serbest - kind='part'/
+        # 'subtitle' altında yanlışlıkla oluşmuş eski paragraflar bile
+        # (bkz. aşağıdaki YENİ paragraf kısıtı) düzeltilebilir/taşınabilir
+        # olsun diye burada engel YOK.
         if paragraph.text != payload.text:
             db.add(models.ParagraphVersion(paragraph_id=paragraph.id, text=paragraph.text))
         paragraph.text = payload.text
     else:
+        # YENİ bir paragraf sadece gerçek bir Bölüm'e eklenebilir - Kısım/
+        # Alt Başlık sadece yapısal bir ayraç, içerik tutmamalı. Bu kontrol
+        # olmadan (önceki halimiz) "Yeni Başlık (Kısım)" yanlışlıkla seçilip
+        # metin yazılırsa, o içerik fihristten hiç erişilemez hale
+        # geliyordu (Kısım satırları "ilk alt bölüme git" davranışına
+        # sahip, kendi paragrafını göstermiyordu).
+        if chapter.kind != "chapter":
+            kind_label = "Kısım" if chapter.kind == "part" else "Alt Başlık"
+            raise HTTPException(
+                400,
+                f"Bu bir {kind_label} - sadece yapısal bir ayraç, paragraf tutamaz. "
+                f"Metin yazmak için önce '+ Yeni' > 'Yeni Bölüm' ile gerçek bir bölüm oluştur.",
+            )
         paragraph = models.Paragraph(chapter_id=chapter_id, number=number, text=payload.text)
         db.add(paragraph)
     db.commit()

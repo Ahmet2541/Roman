@@ -320,13 +320,17 @@ class ChapterListOut(BaseModel):
     """Fihrist satırı. summary burada dönüyor çünkü fihrist artık sadece bir
     liste değil - romanın merkezi özet katmanının dışa açılan yüzü. kind,
     bunun normal bir bölüm mü yoksa bir başlık/alt başlık ayracı mı
-    olduğunu belirtir."""
+    olduğunu belirtir. paragraph_count, bir Kısım/Alt Başlık'ın (kind !=
+    'chapter') KENDİSİNE yanlışlıkla paragraf eklenmiş olup olmadığını
+    tespit etmek için var - normalde 0 olmalı, sıfırdan büyükse frontend
+    bunu doğrudan açılabilir/uyarılabilir bir durum olarak ele alır."""
     model_config = ConfigDict(from_attributes=True)
     id: int
     number: int
     title: str
     kind: str
     summary: str
+    paragraph_count: int = 0
 
 
 class ChapterSummaryGenerateResponse(BaseModel):

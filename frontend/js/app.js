@@ -653,10 +653,19 @@ function renderChapterListDOM() {
       const bulkScanBtn = isPart
         ? `<button class="btn-icon-sm bulk-scan-btn" data-id="${c.id}" title="Bu Kısımdaki TÜM bölümleri tara - yeni varlık ve gelişim notu önerileri">🔍</button>`
         : '';
+      // Kısım/Alt Başlık normalde sadece bir ayraç, paragraf tutmaz - ama
+      // eski bir veri/yanlış tıklama sonucu KENDİSİNE paragraf yazılmışsa
+      // (backend artık bunu YENİ paragraf için engelliyor ama var olan
+      // eski kayıtlar hâlâ olabilir) bunu görünür kılıyoruz - yoksa o
+      // içerik fihristten hiç erişilemez hale gelirdi.
+      const hasOrphanText = (c.paragraph_count || 0) > 0;
+      const orphanBadge = hasOrphanText
+        ? `<span title="Bu ${isPart ? 'Kısım' : 'Alt Başlık'}'ın kendisinde ${c.paragraph_count} paragraf var - tıklayınca doğrudan bunları açar" style="font-size:11px;color:var(--danger);">⚠</span>`
+        : '';
       return `<div class="chapter-item ${isPart ? 'chapter-part-divider' : 'chapter-subtitle-divider'}" data-id="${c.id}" style="cursor:default;padding-left:${14 + indent}px;${isPart ? 'background:var(--paper-dim);' : ''}">
         ${toggle}
-        <div class="chapter-label-edit" data-id="${c.id}" style="flex:1;cursor:pointer;${isPart ? 'font-weight:700;letter-spacing:0.5px;text-transform:uppercase;font-size:12.5px;' : 'font-style:italic;font-size:12.5px;color:var(--text-muted);'}" title="Bu kısımdaki ilk bölüme git">
-          <span style="opacity:0.6;font-weight:600;">${item.displayNumber}</span> ${escapeHtml(cleanTitle) || '<span style=\"opacity:0.5;\">(başlıksız)</span>'}
+        <div class="chapter-label-edit" data-id="${c.id}" style="flex:1;cursor:pointer;${isPart ? 'font-weight:700;letter-spacing:0.5px;text-transform:uppercase;font-size:12.5px;' : 'font-style:italic;font-size:12.5px;color:var(--text-muted);'}" title="${hasOrphanText ? 'Bu kısımda paragraf var - tıklayınca aç' : 'Bu kısımdaki ilk bölüme git'}">
+          <span style="opacity:0.6;font-weight:600;">${item.displayNumber}</span> ${escapeHtml(cleanTitle) || '<span style=\"opacity:0.5;\">(başlıksız)</span>'} ${orphanBadge}
         </div>
         ${bulkScanBtn}
         <button class="btn-icon-sm edit-chapter-btn" data-id="${c.id}" title="Metni düzenle">✎</button>
@@ -690,12 +699,19 @@ function renderChapterListDOM() {
   });
   // Kısım/Alt Başlık metnine tıklamak artık DÜZENLEME AÇMIYOR - liste
   // uzadıkça (12.000 sayfalık bir seri gibi) asıl ihtiyaç o bölgeye HIZLICA
-  // GİTMEK, her tıklamanın bir düzenleme penceresi açması değil. Tıklamak,
-  // o Kısım/Alt Başlık'ın altındaki İLK gerçek bölümü seçip okuyucuya
-  // açar (daraltılmış olsa bile). Metni değiştirmek için ayrı, açık bir
-  // ✎ butonu var - kazara tıklayıp yazı kaybetme riski yok.
+  // GİTMEK, her tıklamanın bir düzenleme penceresi açması değil. Öncelik
+  // sırası: (1) bu Kısım/Alt Başlık'ın KENDİSİNDE paragraf varsa (normalde
+  // olmaz ama eski/yanlış veri varsa - bkz. paragraph_count) doğrudan onu
+  // aç, (2) yoksa altındaki İLK gerçek bölümü seçip okuyucuya götür, (3)
+  // hiçbiri yoksa uyarı ver. Metni değiştirmek için ayrı, açık bir ✎
+  // butonu var - kazara tıklayıp yazı kaybetme riski yok.
   listEl.querySelectorAll('.chapter-label-edit').forEach(el => {
     el.addEventListener('click', () => {
+      const c = chapters.find(x => String(x.id) === el.dataset.id);
+      if (c && (c.paragraph_count || 0) > 0) {
+        selectChapter(c.id);
+        return;
+      }
       const target = findFirstChapterUnder(el.dataset.id);
       if (target) selectChapter(target.id);
       else alert('Bu kısımda henüz bölüm yok. Metni değiştirmek için ✎ simgesine tıkla.');
@@ -1074,7 +1090,15 @@ function renderReader(chapter) {
       </div>
     </div>`).join('');
 
+  const kindWarning = chapter.kind !== 'chapter'
+    ? `<div class="panel" style="border-color:var(--danger);background:#fdf1f0;margin-bottom:12px;">
+        <strong style="font-size:12.5px;color:var(--danger);">⚠ Bu bir ${chapter.kind === 'part' ? 'Kısım' : 'Alt Başlık'} - normalde sadece bir ayraç, paragraf tutmaz.</strong>
+        <div style="font-size:12px;margin-top:4px;">Burada gördüğün metin muhtemelen "+ Yeni" ile yanlışlıkla buraya yazılmış. Bu içeriği düzeltmek için: yeni bir "Bölüm" oluştur, metni oraya taşı, sonra buradaki paragrafları sil.</div>
+      </div>`
+    : '';
+
   readerPane.innerHTML = `
+    ${kindWarning}
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <h2 style="margin:0;">Bölüm ${chapter.number}${chapter.title ? ' — ' + escapeHtml(chapter.title) : ''}</h2>
       <button class="btn btn-sm" id="editTitleBtn">Başlığı düzenle</button>
