@@ -7,6 +7,19 @@ from .entities import ENTITY_MODELS
 from .novel_context import get_universe_id_for_novel
 
 
+def turkish_lower(s: str) -> str:
+    """Python'un varsayılan (locale'siz) str.lower()'ı Türkçe'ye özgü İ/I
+    harflerini YANLIŞ çevirir: 'I'.lower() -> 'i' (Türkçe'de 'ı' olmalı),
+    'İ'.lower() -> 'i' + birleşik nokta (tek bir 'i' değil). Bu yüzden
+    "YAŞLI TEKNİSYEN" gibi tamamen büyük harfli bir metin, kayıtlı
+    "Yaşlı Teknisyen" ismiyle .lower() sonrası EŞLEŞMİYORDU - mention
+    tespiti sessizce başarısız oluyordu. Türkçe'ye özgü harfleri ÖNCE elle
+    doğru karşılıklarına çevirip SONRA genel .lower()'ı uyguluyoruz -
+    ş/ğ/ü/ö/ç gibi diğer Türkçe harfler zaten .lower() ile doğru çalışıyor,
+    sadece I/İ çifti özel muamele gerektiriyor."""
+    return s.replace("İ", "i").replace("I", "ı").lower()
+
+
 def detect_and_save_mentions(db: Session, paragraph: models.Paragraph):
     """Paragraf metninde geçen menü isimlerini (VE alias'larını) basit
     kelime eşleştirmesiyle bulur ve Mention tablosuna işler. Var olan eski
@@ -32,7 +45,7 @@ def detect_and_save_mentions(db: Session, paragraph: models.Paragraph):
         db.commit()
         return  # evrene henüz bağlanmamış (migration bekleniyor) - sessizce atla
 
-    text_lower = paragraph.text.lower()
+    text_lower = turkish_lower(paragraph.text)
 
     for entity_type, model in ENTITY_MODELS.items():
         records = db.query(model).filter(model.universe_id == universe_id).all()
@@ -43,7 +56,7 @@ def detect_and_save_mentions(db: Session, paragraph: models.Paragraph):
                 if not name or not name.strip():
                     continue
                 # Kelime sınırlarına göre ara (örn. "Ahmet" tek başına, "Ahmete" de yakalar)
-                pattern = r"\b" + re.escape(name.lower()) + r"\b"
+                pattern = r"\b" + re.escape(turkish_lower(name)) + r"\b"
                 if re.search(pattern, text_lower):
                     matched = True
                     break

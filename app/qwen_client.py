@@ -376,16 +376,31 @@ olay/nesne/ipucu/terim isimlerinin listesi verilecek. Görevin, bu bölümde
 geçen ama henüz kayıtlı listede OLMAYAN, roman için önemli görünen yeni
 varlık adaylarını bulmak.
 
+ÖNEMLİ - KARAKTERLER/MEKANLAR HER ZAMAN ÖZEL İSİMLE GEÇMEZ: Bir karakter
+"yaşlı teknisyen", "tavernacı", "kırmızı paltolu kadın" gibi sadece ROLÜ ya
+da TASVİRİ üzerinden tanıtılmış olabilir - henüz özel bir adı olmasa bile,
+konuşan, bir eylem yapan ya da ayrıntılı tasvir edilen HERKES bir karakter
+adayıdır. Aynı şekilde bir mekan "eski değirmen", "limandaki han" gibi özel
+adı olmadan da geçebilir - bu da bir mekan adayıdır. Böyle durumlarda name
+alanına o tasvirin kendisini yaz (ör. "Yaşlı Teknisyen", "Eski Değirmen") -
+"henüz özel ismi yok" diye ATLAMA.
+
 Kurallar:
-- Zaten kayıtlı listede olan bir isim TEKRAR ÖNERİLMESİN.
+- Zaten kayıtlı listede olan bir isim (ya da AÇIKÇA aynı kişiyi/yeri işaret
+  eden bir tasvir) TEKRAR ÖNERİLMESİN.
 - entity_type sadece şunlardan biri olabilir: character, place, event,
   object, foreshadowing, term.
 - Her öneri için kısa (1-2 cümlelik), SADECE bu bölümdeki bilgiye dayanan
   bir description yaz - yorum katma, tahmin etme, roman dışı bilgi ekleme.
-- Emin olmadığın, sıradan bir kelime ya da genel isim olabilecek adayları
-  ÖNERME (Türkçede her cümle başı da büyük harfle başladığından yanlış
-  pozitif riski yüksektir - şüpheliyse önerme).
-- Önemsiz, tek seferlik geçen, hikâye için gereksiz varlıkları atla.
+- YANLIŞ POZİTİF RİSKİ SADECE ŞUNUN İÇİN GEÇERLİ: cümle başında büyük
+  harfle başladığı için özel isim gibi GÖRÜNEN ama aslında sıradan bir
+  kelime olan durumlar (ör. "Ateş çok büyüktü." cümlesindeki "Ateş" kelimesi
+  bir karakter/mekan değil, sadece cümle başı büyük harfidir - bunu ÖNERME).
+  Bu risk, GERÇEK bir karakter/mekan tasvirini (yaşlı teknisyen, eski
+  değirmen gibi) dışlamak için bir gerekçe DEĞİLDİR - tasvir net ve
+  hikayede bir eylemi/rolü/konuşması varsa mutlaka ÖNER.
+- Önemsiz, tek seferlik geçen, hikâye için gereksiz varlıkları atla (ör.
+  arka planda bahsi geçen isimsiz bir kalabalık).
 
 Yanıtını SADECE aşağıdaki JSON formatında ver:
 {
@@ -394,6 +409,7 @@ Yanıtını SADECE aşağıdaki JSON formatında ver:
   ]
 }
 Yeni bir şey bulamazsan suggestions boş liste olsun."""
+
 
 
 def suggest_entities_for_chapter(db: Session, chapter: "models.Chapter") -> list[dict]:
@@ -874,6 +890,19 @@ Aşağıda sana romanın bağlamı (kurallar, fihrist özetleri, seçili
 karakter/mekan/olay bilgileri, gelişim çizelgeleri) verilecek. Roman
 gerçekleriyle (kim kim, ne olmuş, kurallar) ÇELİŞME - ama üslup, ton ve
 öneri konusunda özgürsün, robotik bir onay makinesi gibi davranma.
+
+YENİDEN YAZMA/GELİŞTİRME İSTEKLERİNDE ÇOK ÖNEMLİ: Kullanıcı sana bir metin
+verip "bunu geliştir", "daha iyi bir betimleme yaz", "bunu güçlendir" gibi
+somut bir yeniden yazma isteği verdiğinde, cevabının GÖVDESİ GELİŞTİRİLMİŞ
+METNİN KENDİSİ olmalı - bir sürü açıklayıcı soru sorup metni hiç yazmadan
+bırakma. "Bu gerçek bir mekan mı yoksa metafor mu?", "Şunu mu demek
+istedin?" gibi sorularla oyalanıp asıl istenen metni ertelemek EN BÜYÜK
+HATA - kullanıcı senden YAZILMIŞ bir şey görmek istiyor, bir anket değil.
+Belirsiz bir nokta varsa bile, MAKUL BİR VARSAYIMLA geliştirilmiş metni
+YİNE DE yaz, gerekirse metnin ALTINA tek bir kısa soru/not ekleyebilirsin
+("Not: burayı X yönünde de yazabilirim, ister misin?") - ama önce metin,
+sonra (varsa) kısa not. Cevabında 3-4 soru art arda sıralamak KESİNLİKLE
+YASAK.
 
 Araç çağırmadığın normal cevaplarını SADECE düz, doğal metin olarak ver -
 JSON, madde işareti başlığı ya da yapılandırılmış format KULLANMA. Gerçek

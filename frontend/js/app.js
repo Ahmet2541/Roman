@@ -1429,6 +1429,19 @@ async function renderAiPanel(chapter) {
         <button class="btn btn-sm ai-mode-btn" data-mode="instruct">Talimat</button>
       </div>
 
+      <div id="aiResultBox" style="display:none;margin-bottom:10px;">
+        <div class="panel" style="border-color:var(--gold);background:var(--gold-dim);">
+          <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">SONUÇ - PARAGRAFA HAZIR METİN</strong>
+          <div id="aiResultText" style="white-space:pre-wrap;margin:8px 0;font-size:13.5px;"></div>
+          <div id="aiResultExtra"></div>
+          <div style="display:flex;gap:6px;margin-top:6px;">
+            <button class="btn btn-primary btn-sm" id="resultInsertBtn">Paragrafa Ekle</button>
+            <button class="btn btn-sm" id="resultCopyBtn">Kopyala</button>
+            <button class="btn btn-sm" id="resultClearBtn">Temizle</button>
+          </div>
+        </div>
+      </div>
+
       <div id="aiChatMode">
         <div id="aiChatMessages" class="ai-chat-messages"></div>
         <div style="display:flex;gap:6px;">
@@ -1480,9 +1493,42 @@ async function renderAiPanel(chapter) {
     });
     document.getElementById('aiAssistBtn').addEventListener('click', () => runAiAssist(chapter));
     document.getElementById('previewContextBtn').addEventListener('click', () => runContextPreview(chapter));
+
+    document.getElementById('resultInsertBtn').addEventListener('click', () => {
+      insertChatReplyAsParagraph(document.getElementById('aiResultText').textContent);
+    });
+    document.getElementById('resultCopyBtn').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(document.getElementById('aiResultText').textContent);
+      } catch (e) { /* pano izni yoksa sessizce geç - kritik değil */ }
+    });
+    document.getElementById('resultClearBtn').addEventListener('click', () => clearResult());
   } catch (err) {
     panel.innerHTML = `<h3>AI Yazım Desteği</h3><div class="error-text">${escapeHtml(err.message)}</div>`;
   }
+}
+
+// SONUÇ kutusu: sohbet (alt) ile asıl kullanılabilir metni (üst) birbirinden
+// AYIRAN kalıcı panel. Sohbet doğası gereği konuşma/soru/yorum içerebilir -
+// bunların hiçbiri yanlışlıkla "paragrafa ekle" ile romana karışmasın diye,
+// paragrafa eklenecek metin HER ZAMAN önce bu kutuya taşınır (kullanıcı
+// kendi seçer - hangi mesajın gerçek "sonuç" olduğuna dair kör bir metin
+// analizi yapmıyoruz, çünkü bu dil bağımlı ve kırılgan olurdu).
+function showResult(text, extraHtml) {
+  const box = document.getElementById('aiResultBox');
+  if (!box) return;
+  box.style.display = 'block';
+  document.getElementById('aiResultText').textContent = text;
+  document.getElementById('aiResultExtra').innerHTML = extraHtml || '';
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function clearResult() {
+  const box = document.getElementById('aiResultBox');
+  if (!box) return;
+  box.style.display = 'none';
+  document.getElementById('aiResultText').textContent = '';
+  document.getElementById('aiResultExtra').innerHTML = '';
 }
 
 let aiChatMessages = [];
@@ -1504,11 +1550,13 @@ function renderChatMessages() {
     <div class="ai-chat-bubble ${m.role}">
       ${m.actions && m.actions.length ? `<div style="font-size:11px;color:#2f6b3a;background:#eef7ef;border-radius:6px;padding:4px 6px;margin-bottom:6px;">✓ ${m.actions.map(escapeHtml).join(' · ')}</div>` : ''}
       <div style="white-space:pre-wrap;">${escapeHtml(m.content)}</div>
-      ${m.role === 'assistant' ? `<button class="btn btn-sm insert-to-paragraph-btn" data-idx="${i}" style="margin-top:6px;">Bölüme paragraf olarak ekle</button>` : ''}
+      ${m.role === 'assistant' ? `<button class="btn btn-sm move-to-result-btn" data-idx="${i}" style="margin-top:6px;" title="Bu mesajın metnini yukarıdaki SONUÇ kutusuna taşı">⬆ Sonuca Taşı</button>` : ''}
       ${(m.pendingUpdates || []).map((p, pIdx) => renderEntityUpdateProposalCard(i, pIdx, p)).join('')}
     </div>`).join('');
-  el.querySelectorAll('.insert-to-paragraph-btn').forEach(btn => {
-    btn.addEventListener('click', () => insertChatReplyAsParagraph(aiChatMessages[parseInt(btn.dataset.idx, 10)].content));
+  el.querySelectorAll('.move-to-result-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      showResult(aiChatMessages[parseInt(btn.dataset.idx, 10)].content);
+    });
   });
   wireEntityUpdateProposalButtons();
   el.scrollTop = el.scrollHeight;
@@ -1580,6 +1628,15 @@ function wireEntityUpdateProposalButtons() {
 
 function insertChatReplyAsParagraph(text) {
   if (!currentChapter) { alert('Önce sol taraftan bir bölüm seç.'); return; }
+  // AI bazen (özellikle "geliştir/yeniden yaz" gibi isteklerde) asıl metni
+  // yazmak yerine soru sorup oyalanabiliyor - bu durumda "Ne dersin?",
+  // "İstersen..." gibi bir sohbet cevabı OLDUĞU GİBİ paragrafa gömülürse
+  // roman metnine karışır. Buraya kör bir "içerik analizi" koymak yerine
+  // (dil bağımlı, kırılgan) basit bir önizleme + onay adımı koyuyoruz -
+  // karar hep kullanıcıda kalıyor, ama en azından GÖRMEDEN eklenmiyor.
+  const preview = text.length > 220 ? text.slice(0, 220) + '…' : text;
+  const confirmed = confirm(`Bu metin paragraf olarak eklenecek:\n\n"${preview}"\n\nEklemek istediğine emin misin? (Bu bir sohbet cevabıysa - soru/açıklama içeriyorsa - "İptal"e basıp sadece asıl anlatım kısmını elle kopyalayabilirsin.)`);
+  if (!confirmed) return;
   const nextNumber = currentChapter.paragraphs.length ? Math.max(...currentChapter.paragraphs.map(p => p.number)) + 1 : 1;
   addEmptyParagraphBlock(nextNumber);
   const el = document.querySelector(`.paragraph-text[data-number="${nextNumber}"]`);
@@ -1662,21 +1719,22 @@ async function runAiAssist(chapter) {
       existing_text: null,
     };
     const result = await api.post('/ai/assist', payload);
-    let html = `<div class="ai-result">${escapeHtml(result.generated_text)}</div>`;
+    let extraHtml = '';
 
     if (result.consistency_notes && result.consistency_notes.length) {
-      html += `<div style="margin-top:10px;"><strong style="font-size:12px;">Tutarlılık notları:</strong>
+      extraHtml += `<div style="margin-top:8px;"><strong style="font-size:12px;">Tutarlılık notları:</strong>
         <ul style="font-size:12.5px;margin:6px 0 0 16px;">${result.consistency_notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul></div>`;
     }
     if (result.new_entity_suggestions && result.new_entity_suggestions.length) {
-      html += `<div style="margin-top:10px;"><strong style="font-size:12px;">Yeni öneriler:</strong>` +
+      extraHtml += `<div style="margin-top:8px;"><strong style="font-size:12px;">Yeni öneriler:</strong>` +
         result.new_entity_suggestions.map((s, idx) => `
           <div class="suggestion-item">
             <label><input type="checkbox" class="suggestion-check" data-idx="${idx}"> ${escapeHtml(s.entity_type)}: ${escapeHtml(s.name)}</label>
           </div>`).join('') +
         `<button class="btn btn-sm" id="approveBtn" style="margin-top:8px;">Seçilenleri onayla</button></div>`;
     }
-    resultContainer.innerHTML = html;
+    resultContainer.innerHTML = '';
+    showResult(result.generated_text, extraHtml);
     window.__lastAiSuggestions = result.new_entity_suggestions || [];
 
     const approveBtn = document.getElementById('approveBtn');
