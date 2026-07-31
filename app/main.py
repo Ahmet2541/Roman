@@ -1,10 +1,12 @@
 import logging
+import re
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, HTMLResponse
 
 from .database import Base, engine, SessionLocal
 from . import auth
@@ -23,6 +25,16 @@ from .routers.entity_history import router as entity_history_router
 from .routers.novels import router as novels_router
 from .routers.universes import router as universes_router
 from .routers.admin import router as admin_router
+
+# Sunucu her başladığında (yani her deploy'da) DEĞİŞEN bir sürüm damgası -
+# index.html/login.html'deki <script>/<link> etiketlerine "?v=..." olarak
+# enjekte edilir. Amaç: tarayıcı önbelleği yüzünden "kodu güncelledim ama
+# ekranda hiçbir şey değişmemiş" sorununu KÖKTEN çözmek - dosya adı (app.js)
+# hiç değişmediği için tarayıcılar deploy sonrası bile eski sürümü
+# önbellekten sunmaya devam edebiliyordu. Şimdi her deploy'da URL'nin
+# kendisi değiştiği için (app.js?v=ESKİ -> app.js?v=YENİ) tarayıcı bunu
+# HİÇ görmediği yeni bir dosya sanıp yeniden indirmek ZORUNDA kalıyor.
+STATIC_VERSION = uuid.uuid4().hex[:10]
 
 # ---- Loglama: sunucu tarafında bir şey ters giderse görebilmek için ----
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
@@ -98,7 +110,46 @@ app.include_router(admin_router)
 # API endpoint'leriyle çakışmaması için kök dizin ("/") yerine ayrı bir
 # prefix kullanılıyor.
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+
+
+def _serve_versioned_html(filename: str) -> HTMLResponse:
+    """index.html/login.html'i okuyup KENDİ dizinindeki .js/.css
+    referanslarına "?v=STATIC_VERSION" ekler, sonra Cache-Control: no-store
+    ile döner - böylece HTML'in KENDİSİ hiç önbelleklenmez (her istekte
+    sunucudan taze gelir) ve içindeki script/link etiketleri her deploy'da
+    değişen bir URL'ye işaret ettiği için tarayıcı app.js/style.css'i de
+    yeniden indirmek zorunda kalır. login.js/api.js gibi diğer JS
+    dosyaları da aynı şekilde kapsanıyor (genel regex, tek tek isim
+    saymaya gerek yok)."""
+    path = FRONTEND_DIR / filename
+    html = path.read_text(encoding="utf-8")
+
+    def _add_version(match: "re.Match") -> str:
+        attr, url = match.group(1), match.group(2)
+        if url.startswith(("http://", "https://", "//")):
+            return match.group(0)  # dış bir CDN linkiyse (ör. Google Fonts) dokunma
+        sep = "&" if "?" in url else "?"
+        return f'{attr}="{url}{sep}v={STATIC_VERSION}"'
+
+    html = re.sub(r'(src|href)="([^"]+\.(?:js|css))"', _add_version, html)
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-store, must-revalidate"})
+
+
 if FRONTEND_DIR.exists():
+    # ÖNEMLİ: bu iki route, aşağıdaki app.mount("/app", ...)'tan ÖNCE
+    # tanımlanmalı - FastAPI/Starlette route'ları kayıt sırasına göre
+    # eşleştirir, bu yüzden daha spesifik olan bu ikisi önce gelmezse
+    # mount'un genel dosya sunumu bunları (versiyonsuz, ham haliyle) ele
+    # geçirirdi.
+    @app.get("/app/", include_in_schema=False)
+    @app.get("/app/index.html", include_in_schema=False)
+    def serve_index():
+        return _serve_versioned_html("index.html")
+
+    @app.get("/app/login.html", include_in_schema=False)
+    def serve_login():
+        return _serve_versioned_html("login.html")
+
     app.mount("/app", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
 
 
