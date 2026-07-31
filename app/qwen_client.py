@@ -8,6 +8,8 @@ from .config import settings
 from . import models
 from .entities import ENTITY_MODELS, ENTITY_LABELS_TR
 from .mentions import detect_and_save_mentions
+from .sections import SECTIONS_BY_ENTITY_TYPE, ai_visible_sections, describe_sections_for_tool
+from .novel_context import get_universe_id_for_novel
 
 _client = None
 
@@ -25,10 +27,30 @@ def get_client() -> OpenAI:
 # SABİT KATMAN: Roman kuralları. Her istekte tam ve değişmeden dahil edilir.
 # ---------------------------------------------------------------------------
 
-def build_fixed_layer(db: Session, novel_id: int) -> str:
-    rules = db.query(models.Rule).filter(models.Rule.novel_id == novel_id).all()
+def build_fixed_layer(db: Session, universe_id: int, instruction_text: str = "") -> str:
+    """Devasa dünyalarda (bkz. proje sohbet geçmişi - 12.000 sayfalık seri
+    senaryosu) kural sayısı arttıkça hepsini her seferinde göndermek token
+    israfı olur. Eşik altında (KUCUK_DUNYA_ESIGI) davranış AYNI kalır -
+    hepsi gönderilir, hiçbir şey değişmez. Eşik üstünde: etiketsiz
+    (evrensel) kurallar HER ZAMAN gider, etiketli kurallar SADECE o etiket
+    talimat metninde geçiyorsa gider - basit ama etkili bir alt küme."""
+    rules = db.query(models.Rule).filter(models.Rule.universe_id == universe_id).all()
     if not rules:
         return ""
+
+    KUCUK_DUNYA_ESIGI = 40
+    if len(rules) > KUCUK_DUNYA_ESIGI and instruction_text:
+        instruction_lower = instruction_text.lower()
+        selected = [
+            r for r in rules
+            if not r.tags or any(tag.lower() in instruction_lower for tag in r.tags)
+        ]
+        # Filtreleme hiçbir şey seçmediyse (ör. instruction_text boşsa ya da
+        # hiçbir etiket eşleşmediyse) sessizce hepsini göndermeye geri dön -
+        # "kural kayboldu" hissi vermemek, sessiz veri kaybından her zaman iyidir.
+        if selected:
+            rules = selected
+
     lines = ["ROMAN KURALLARI (bunlar asla ihlal edilemez, her bölümde geçerlidir):"]
     for r in rules:
         lines.append(f"- {r.title}: {r.description}")
@@ -45,18 +67,42 @@ def build_fixed_layer(db: Session, novel_id: int) -> str:
 # teşvik eder.
 # ---------------------------------------------------------------------------
 
-def build_index_layer(db: Session, novel_id: int, exclude_chapter_number: int | None = None) -> str:
-    chapters = (
-        db.query(models.Chapter)
-        .filter(models.Chapter.novel_id == novel_id, models.Chapter.kind == "chapter", models.Chapter.summary != "")
-        .order_by(models.Chapter.number)
+def build_index_layer(db: Session, universe_id: int, current_novel_id: int, exclude_chapter_number: int | None = None) -> str:
+    """Devasa bir SERİ için fihrist artık tek kitapla sınırlı değil - aynı
+    evrendeki TÜM kitapların özetleri (kronolojik book_number sırasıyla)
+    dahil edilir, çünkü 3. kitabı yazarken 1-2. kitaplarda ne olduğunu
+    bilmek gerekir. Tek kitaplık projelerde (universe'te tek novel varsa)
+    davranış eskisiyle birebir aynıdır - sadece 'Kitap X' etiketi
+    eklenmez, gereksiz gürültü olmasın diye."""
+    novels_in_universe = (
+        db.query(models.Novel)
+        .filter(models.Novel.universe_id == universe_id)
+        .order_by(models.Novel.book_number.is_(None), models.Novel.book_number, models.Novel.id)
         .all()
     )
-    chapters = [c for c in chapters if c.number != exclude_chapter_number]
+    novel_ids = [n.id for n in novels_in_universe]
+    multi_book = len(novel_ids) > 1
+
+    chapters = (
+        db.query(models.Chapter)
+        .filter(models.Chapter.novel_id.in_(novel_ids), models.Chapter.kind == "chapter", models.Chapter.summary != "")
+        .all()
+    )
+    if current_novel_id is not None:
+        chapters = [c for c in chapters if not (c.novel_id == current_novel_id and c.number == exclude_chapter_number)]
     if not chapters:
         return ""
+
+    novel_order = {n.id: i for i, n in enumerate(novels_in_universe)}
+    novel_names = {n.id: n.name for n in novels_in_universe}
+    chapters.sort(key=lambda c: (novel_order.get(c.novel_id, 0), c.number))
+
     lines = ["ROMAN FİHRİSTİ (yazılmış bölümlerin özetleri, sırayla):"]
+    last_novel_id = None
     for c in chapters:
+        if multi_book and c.novel_id != last_novel_id:
+            lines.append(f"\n-- {novel_names.get(c.novel_id, '?')} --")
+            last_novel_id = c.novel_id
         title_part = f" - {c.title}" if c.title else ""
         lines.append(f"Bölüm {c.number}{title_part}: {c.summary}")
     return "\n".join(lines)
@@ -67,7 +113,7 @@ def build_index_layer(db: Session, novel_id: int, exclude_chapter_number: int | 
 # + bu varlıkların geçtiği en alakalı geçmiş paragraflar.
 # ---------------------------------------------------------------------------
 
-def build_dynamic_layer(db: Session, novel_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3) -> str:
+def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3) -> str:
     if not selected_entities:
         return ""
 
@@ -76,7 +122,7 @@ def build_dynamic_layer(db: Session, novel_id: int, selected_entities: list, max
         model = ENTITY_MODELS.get(ref.entity_type)
         if model is None:
             continue
-        record = db.query(model).filter(model.id == ref.entity_id, model.novel_id == novel_id).first()
+        record = db.query(model).filter(model.id == ref.entity_id, model.universe_id == universe_id).first()
         if record is None:
             continue
 
@@ -87,17 +133,69 @@ def build_dynamic_layer(db: Session, novel_id: int, selected_entities: list, max
         if getattr(record, "notes", ""):
             blocks.append(f"Notlar: {record.notes}")
 
+        # MEKAN HİYERARŞİSİ: bir mekan başka bir mekanın içindeyse (bkz.
+        # Place.parent_place_id), bu zinciri otomatik ekliyoruz - ör.
+        # "Kraliyet Sarayı, Buz Şehri içinde, Kuzey Krallığı içinde".
+        # Yazarın bunu her mekan için elle Bağlantılar'a yazmasına gerek
+        # kalmaz, ve tutarlılık garanti edilir (veri TEK bir yerde -
+        # parent_place_id - tutuluyor, metne kopyalanmıyor). max 20
+        # seviye sınırı sadece bir güvenlik ağı - hatalı/döngüsel veri
+        # (ör. A'nın üstü B, B'nin üstü A) sonsuz döngüye girmesin diye.
+        if ref.entity_type == "place" and getattr(record, "parent_place_id", None):
+            chain = []
+            current_id = record.parent_place_id
+            depth = 0
+            while current_id and depth < 20:
+                parent = db.query(models.Place).filter(models.Place.id == current_id, models.Place.universe_id == universe_id).first()
+                if not parent:
+                    break
+                chain.append(parent.name)
+                current_id = parent.parent_place_id
+                depth += 1
+            if chain:
+                blocks.append(f"Nerede: {', '.join(chain)} içinde")
+
+        # 'sections' (bkz. app/sections.py) İÇERİĞİNİ buraya basmıyoruz -
+        # bilerek. Amaç tam olarak bunu önlemek: karakterin TÜM derin
+        # profilini (görünüş, kariyer, ilişkiler...) her istekte context'e
+        # basıp token israf etmek. Bunun yerine sadece HANGİ bölümlerin
+        # DOLU olduğunu (birkaç kelime, neredeyse maliyetsiz) belirtiyoruz -
+        # AI, talimatla ilgiliyse get_entity_section aracıyla (bkz.
+        # CHAT_TOOLS) sadece ihtiyaç duyduğu bölümü kendisi çeker.
+        entity_sections = getattr(record, "sections", None) or {}
+        filled_sections = [k for k, v in ai_visible_sections(entity_sections).items() if v]
+        if filled_sections:
+            blocks.append(f"Ek detay bölümleri mevcut (gerekirse get_entity_section ile çek): {', '.join(filled_sections)}")
+
         progressions = (
             db.query(models.Progression)
             .filter(
                 models.Progression.entity_type == ref.entity_type,
                 models.Progression.entity_id == ref.entity_id,
+                models.Progression.universe_id == universe_id,
             )
             .all()
         )
         if progressions:
             progressions.sort(key=lambda p: (p.chapter_number is None, p.chapter_number or 0, p.id))
             blocks.append("Zaman içindeki gelişimi (kronolojik sırayla, EN GÜNCEL EN ALTTA):")
+            # Devasa bir seride (yüzlerce bölüm) bir karakterin gelişim
+            # notu listesi tek başına sınırsız büyüyebilir - bu yüzden
+            # SADECE son PROGRESSION_VERBATIM_LIMIT not tam metniyle
+            # gösterilir, daha eskisi tek satırlık bir özet-listesine
+            # sıkıştırılır (gerçek bir AI özeti değil, basit bir kısaltma -
+            # tam ayrıntı her zaman Gelişim Çizelgesi menüsünde duruyor).
+            PROGRESSION_VERBATIM_LIMIT = 10
+            if len(progressions) > PROGRESSION_VERBATIM_LIMIT:
+                older = progressions[:-PROGRESSION_VERBATIM_LIMIT]
+                recent = progressions[-PROGRESSION_VERBATIM_LIMIT:]
+                older_preview = "; ".join(
+                    (p.note[:40] + "…" if len(p.note) > 40 else p.note) for p in older[:5]
+                )
+                remaining = len(older) - 5
+                extra = f" (+{remaining} eski not daha, ayrıntı için Gelişim Çizelgesi'ne bak)" if remaining > 0 else ""
+                blocks.append(f"  - [ESKİ NOTLARIN ÖZETİ] {older_preview}{extra}")
+                progressions = recent
             for prog in progressions:
                 chapter_part = f"Bölüm {prog.chapter_number}" if prog.chapter_number else "bölüm belirtilmemiş"
                 blocks.append(f"  - ({chapter_part}) {prog.note}")
@@ -123,11 +221,17 @@ def build_dynamic_layer(db: Session, novel_id: int, selected_entities: list, max
 # tutarlı olmalı, bölüme özel değil.
 # ---------------------------------------------------------------------------
 
-def build_style_layer(db: Session, novel_id: int, max_samples: int = 5) -> str:
+def build_style_layer(db: Session, universe_id: int, max_samples: int = 5) -> str:
+    """Üslup tutarlılığı da tek kitapla sınırlı değil - bir serinin tüm
+    kitaplarında AYNI ses korunmalı, o yüzden stil örnekleri (is_style_sample)
+    evrendeki TÜM kitaplardan toplanır, sadece aktif kitaptan değil."""
+    novel_ids = [n.id for n in db.query(models.Novel.id).filter(models.Novel.universe_id == universe_id).all()]
+    if not novel_ids:
+        return ""
     samples = (
         db.query(models.Paragraph)
         .join(models.Chapter, models.Paragraph.chapter_id == models.Chapter.id)
-        .filter(models.Paragraph.is_style_sample == True, models.Chapter.novel_id == novel_id)  # noqa: E712
+        .filter(models.Paragraph.is_style_sample == True, models.Chapter.novel_id.in_(novel_ids))  # noqa: E712
         .order_by(models.Paragraph.id.desc())
         .limit(max_samples)
         .all()
@@ -140,14 +244,23 @@ def build_style_layer(db: Session, novel_id: int, max_samples: int = 5) -> str:
     return "\n".join(lines)
 
 
-def build_context(db: Session, novel_id: int, selected_entities: list, chapter_number: int | None = None) -> str:
+def build_context(
+    db: Session, novel_id: int, universe_id: int, selected_entities: list,
+    chapter_number: int | None = None, instruction_text: str = "",
+) -> str:
     """chapter_number verilirse (o an üzerinde çalışılan bölüm), fihrist
     katmanında o bölüm dışlanır - bir bölümün kendi özetini kendi context'i
-    olarak görmesi anlamsız, gerçek metin zaten mevcut_text/dynamic layer'da."""
-    fixed = build_fixed_layer(db, novel_id)
-    index = build_index_layer(db, novel_id, exclude_chapter_number=chapter_number)
-    style = build_style_layer(db, novel_id)
-    dynamic = build_dynamic_layer(db, novel_id, selected_entities)
+    olarak görmesi anlamsız, gerçek metin zaten mevcut_text/dynamic layer'da.
+
+    novel_id: hangi KİTAP üzerinde çalışılıyor (fihristte 'şu an
+    yazdığın bölüm hariç' filtresi ve full_scan için).
+    universe_id: karakterler/mekanlar/kurallar/stil örnekleri gibi
+    PAYLAŞILAN verinin hangi evrenden çekileceği - bu artık seride tüm
+    kitapları kapsıyor."""
+    fixed = build_fixed_layer(db, universe_id, instruction_text=instruction_text)
+    index = build_index_layer(db, universe_id, novel_id, exclude_chapter_number=chapter_number)
+    style = build_style_layer(db, universe_id)
+    dynamic = build_dynamic_layer(db, universe_id, selected_entities)
     return "\n\n".join(part for part in [fixed, index, style, dynamic] if part)
 
 
@@ -262,18 +375,37 @@ Yeni bir şey bulamazsan suggestions boş liste olsun."""
 
 
 def suggest_entities_for_chapter(db: Session, chapter: "models.Chapter") -> list[dict]:
+    return suggest_entities_for_chapters(db, [chapter])
+
+
+def suggest_entities_for_chapters(db: Session, chapters: list) -> list[dict]:
+    """suggest_entities_for_chapter'ın TOPLU hali - birden fazla bölümü
+    (ör. bir Kısım'ın tamamını ya da kullanıcının elle seçtiği bölüm
+    grubunu) TEK bir Qwen isteğinde birlikte tarar. Tek bölümlük çağrı da
+    (yukarıdaki suggest_entities_for_chapter) artık buna delege ediyor -
+    mantık tek yerde, iki kod yolu yok.
+
+    Aynı isim birden fazla bölümde geçse bile öneri listesinde SADECE bir
+    kez görünür (existing_names_lower + seen_names_lower ile tekilleştirme)."""
+    if not chapters:
+        return []
+    universe_id = get_universe_id_for_novel(db, chapters[0].novel_id)
     existing_lines = []
     for entity_type, model in ENTITY_MODELS.items():
         label = ENTITY_LABELS_TR.get(entity_type, entity_type)
-        for record in db.query(model).filter(model.novel_id == chapter.novel_id).all():
+        for record in db.query(model).filter(model.universe_id == universe_id).all():
             existing_lines.append(f"{label}: {record.name}")
 
-    chapter_text = "\n".join(f"[Paragraf {p.number}] {p.text}" for p in chapter.paragraphs)
-    title_part = f" - {chapter.title}" if chapter.title else ""
+    chapter_blocks = []
+    for chapter in sorted(chapters, key=lambda c: c.number):
+        chapter_text = "\n".join(f"[Paragraf {p.number}] {p.text}" for p in chapter.paragraphs)
+        title_part = f" - {chapter.title}" if chapter.title else ""
+        chapter_blocks.append(f"=== BÖLÜM {chapter.number}{title_part} ===\n{chapter_text}")
+
     user_message = (
         "ZATEN KAYITLI OLANLAR:\n"
         + ("\n".join(existing_lines) if existing_lines else "(henüz hiç kayıt yok)")
-        + f"\n\nBÖLÜM {chapter.number}{title_part} METNİ:\n{chapter_text}"
+        + "\n\n" + "\n\n".join(chapter_blocks)
     )
 
     client = get_client()
@@ -292,6 +424,7 @@ def suggest_entities_for_chapter(db: Session, chapter: "models.Chapter") -> list
         return []
 
     existing_names_lower = {line.split(": ", 1)[1].lower() for line in existing_lines if ": " in line}
+    seen_names_lower = set()
     filtered = []
     for s in data.get("suggestions", []):
         if not isinstance(s, dict):
@@ -299,10 +432,12 @@ def suggest_entities_for_chapter(db: Session, chapter: "models.Chapter") -> list
         if s.get("entity_type") not in ENTITY_MODELS:
             continue
         name = (s.get("name") or "").strip()
-        if not name or name.lower() in existing_names_lower:
+        if not name or name.lower() in existing_names_lower or name.lower() in seen_names_lower:
             continue
+        seen_names_lower.add(name.lower())
         filtered.append({"entity_type": s["entity_type"], "name": name, "description": s.get("description", "")})
     return filtered
+
 
 
 # ---------------------------------------------------------------------------
@@ -316,10 +451,10 @@ def suggest_entities_for_chapter(db: Session, chapter: "models.Chapter") -> list
 # ---------------------------------------------------------------------------
 
 PROGRESSION_EXTRACTION_SYSTEM_PROMPT = """Sen bir roman editörü asistanısın.
-Sana bir bölümün metni ve bu bölümde geçen kişi/mekan/olay/nesne/ipucu
-kayıtlarının HÂLİHAZIRDA bilinen açıklamaları verilecek. Görevin, bu
-bölümün her varlık hakkında YENİ ya da DEĞİŞEN ne öğrettiğini bulmak -
-zaten bilinenin tekrarı olan bilgiyi ATLA.
+Sana bir ya da daha fazla bölümün metni ve bu bölümlerde geçen kişi/mekan/
+olay/nesne/ipucu kayıtlarının HÂLİHAZIRDA bilinen açıklamaları verilecek.
+Görevin, bu bölümlerin her varlık hakkında YENİ ya da DEĞİŞEN ne öğrettiğini
+bulmak - zaten bilinenin tekrarı olan bilgiyi ATLA.
 
 Kurallar:
 - Sadece GERÇEKTEN yeni/değişen bilgi için not yaz (ör. bir sır ortaya
@@ -330,21 +465,38 @@ Kurallar:
 - Emin olmadığın ya da önemsiz gördüğün varlıklar için not üretme.
 - Sadece sana verilen varlık listesindeki (entity_type + entity_id
   eşleşen) kayıtlar için öneri yap, yeni varlık uydurma.
+- Birden fazla bölüm verildiyse, her notun HANGİ bölümde geçtiğini
+  chapter_number alanında doğru belirt - bu, notun kronolojik sırasını
+  tutmak için kritik.
 
 Yanıtını SADECE aşağıdaki JSON formatında ver:
 {
   "updates": [
-    {"entity_type": "character", "entity_id": 3, "note": "..."}
+    {"entity_type": "character", "entity_id": 3, "chapter_number": 5, "note": "..."}
   ]
 }
 Yeni/değişen bilgi yoksa updates boş liste olsun."""
 
 
 def suggest_progressions_for_chapter(db: Session, chapter: "models.Chapter") -> list[dict]:
+    return suggest_progressions_for_chapters(db, [chapter])
+
+
+def suggest_progressions_for_chapters(db: Session, chapters: list) -> list[dict]:
+    """suggest_progressions_for_chapter'ın TOPLU hali - bkz.
+    suggest_entities_for_chapters ile aynı mantık. Birden fazla bölüm tek
+    istekte taranır, her not kendi chapter_number'ıyla (AI'nın belirttiği,
+    geçersizse en son bölüme düşen) döner."""
+    if not chapters:
+        return []
+    chapters = sorted(chapters, key=lambda c: c.number)
+    chapter_ids = [c.id for c in chapters]
+    valid_chapter_numbers = {c.number for c in chapters}
+
     mentions = (
         db.query(models.Mention)
         .join(models.Paragraph, models.Mention.paragraph_id == models.Paragraph.id)
-        .filter(models.Paragraph.chapter_id == chapter.id)
+        .filter(models.Paragraph.chapter_id.in_(chapter_ids))
         .all()
     )
     seen = {}
@@ -355,11 +507,12 @@ def suggest_progressions_for_chapter(db: Session, chapter: "models.Chapter") -> 
 
     entity_lines = []
     entity_lookup = {}  # (type, id) -> name, mevcut kayıt gerçekten var mı doğrulamak için
+    universe_id = get_universe_id_for_novel(db, chapters[0].novel_id)
     for (entity_type, entity_id), name in seen.items():
         model = ENTITY_MODELS.get(entity_type)
         if model is None:
             continue
-        record = db.query(model).filter(model.id == entity_id, model.novel_id == chapter.novel_id).first()
+        record = db.query(model).filter(model.id == entity_id, model.universe_id == universe_id).first()
         if record is None:
             continue
         label = ENTITY_LABELS_TR.get(entity_type, entity_type)
@@ -370,12 +523,16 @@ def suggest_progressions_for_chapter(db: Session, chapter: "models.Chapter") -> 
     if not entity_lines:
         return []
 
-    chapter_text = "\n".join(f"[Paragraf {p.number}] {p.text}" for p in chapter.paragraphs)
-    title_part = f" - {chapter.title}" if chapter.title else ""
+    chapter_blocks = []
+    for chapter in chapters:
+        chapter_text = "\n".join(f"[Paragraf {p.number}] {p.text}" for p in chapter.paragraphs)
+        title_part = f" - {chapter.title}" if chapter.title else ""
+        chapter_blocks.append(f"=== BÖLÜM {chapter.number}{title_part} ===\n{chapter_text}")
+
     user_message = (
-        "BU BÖLÜMDE GEÇEN VARLIKLAR VE HÂLİHAZIRDA BİLİNENLER:\n"
+        "BU BÖLÜMLERDE GEÇEN VARLIKLAR VE HÂLİHAZIRDA BİLİNENLER:\n"
         + "\n".join(entity_lines)
-        + f"\n\nBÖLÜM {chapter.number}{title_part} METNİ:\n{chapter_text}"
+        + "\n\n" + "\n\n".join(chapter_blocks)
     )
 
     client = get_client()
@@ -403,16 +560,241 @@ def suggest_progressions_for_chapter(db: Session, chapter: "models.Chapter") -> 
         note = (u.get("note") or "").strip()
         if not note:
             continue
+        chapter_number = u.get("chapter_number")
+        if chapter_number not in valid_chapter_numbers:
+            # AI bölüm numarasını atlamış ya da yanlış verdiyse, taranan
+            # aralığın SON bölümüne düşürüyoruz - sessizce kaybetmek yerine
+            # en azından kronolojik olarak makul bir yere koyuyoruz.
+            chapter_number = chapters[-1].number
         filtered.append({
             "entity_type": key[0], "entity_id": key[1], "entity_name": entity_lookup[key],
-            "chapter_number": chapter.number, "note": note,
+            "chapter_number": chapter_number, "note": note,
         })
     return filtered
 
 
 # ---------------------------------------------------------------------------
-# SOHBET MODU: /ai/assist'in aksine tek seferlik "talimat -> yapılandırılmış
-# JSON sonuç" değil, kullanıcıyla ileri-geri mesajlaşan bir yazı arkadaşı.
+# İLİŞKİ KEŞFİ (bölüm bazlı/toplu): bir ya da daha fazla bölümde ortaya
+# çıkan, henüz İlişki Haritası'nda kayıtlı OLMAYAN karakter-karakter
+# ilişkilerini bulur. suggest_entities/suggest_progressions ile AYNI desen:
+# hiçbir şey doğrudan kaydedilmez, öneri döner, onay POST /relationships/
+# ile (var olan endpoint, yeni bir şey gerekmiyor) yapılır.
+# ---------------------------------------------------------------------------
+
+RELATIONSHIP_EXTRACTION_SYSTEM_PROMPT = """Sen bir roman editörü asistanısın.
+Sana bir ya da daha fazla bölümün metni, bu evrende KAYITLI karakterlerin
+listesi ve ZATEN BİLİNEN karakter ilişkileri verilecek. Görevin, bu
+bölümlerde ortaya çıkan ama henüz kayıtlı OLMAYAN yeni karakter
+ilişkilerini bulmak.
+
+Kurallar:
+- İki karakterin sadece aynı sahnede geçmesi ilişki DEĞİLDİR - aralarında
+  AÇIKÇA belirtilen ya da güçlü şekilde ima edilen bir bağ olmalı (kardeş,
+  düşman, sevgili, danışman, arkadaş, rakip, üst-ast vb.).
+- Sadece sana verilen karakter listesindeki (id eşleşen) karakterler
+  arasında öneri yap - yeni karakter uydurma.
+- Zaten bilinen bir ilişki (A-B ya da B-A, yön farketmez) TEKRAR
+  önerilmesin.
+- label kısa olsun (ör. "kardeşi", "düşmanı", "danışmanı").
+- notes'a bu ilişkiyi hangi bölümden/olaydan çıkardığını 1 cümleyle yaz.
+
+Yanıtını SADECE aşağıdaki JSON formatında ver:
+{
+  "relationships": [
+    {"character_a_id": 3, "character_b_id": 7, "label": "danışmanı", "notes": "..."}
+  ]
+}
+Yeni ilişki bulamazsan boş liste ver."""
+
+
+def suggest_relationships_for_chapter(db: Session, chapter: "models.Chapter") -> list[dict]:
+    return suggest_relationships_for_chapters(db, [chapter])
+
+
+def suggest_relationships_for_chapters(db: Session, chapters: list) -> list[dict]:
+    if not chapters:
+        return []
+    chapters = sorted(chapters, key=lambda c: c.number)
+    universe_id = get_universe_id_for_novel(db, chapters[0].novel_id)
+
+    characters = db.query(models.Character).filter(models.Character.universe_id == universe_id).all()
+    if len(characters) < 2:
+        return []  # ilişki kurulabilecek en az 2 karakter gerekir
+    char_by_id = {c.id: c.name for c in characters}
+    char_lines = [f"id={c.id} \"{c.name}\"" for c in characters]
+
+    existing_rels = db.query(models.CharacterRelationship).filter(models.CharacterRelationship.universe_id == universe_id).all()
+    existing_pairs = {frozenset((r.character_a_id, r.character_b_id)) for r in existing_rels}
+    existing_lines = [
+        f"{char_by_id.get(r.character_a_id, '?')} - {char_by_id.get(r.character_b_id, '?')}: {r.label}"
+        for r in existing_rels
+    ] or ["(henüz kayıtlı ilişki yok)"]
+
+    chapter_blocks = []
+    for chapter in chapters:
+        chapter_text = "\n".join(f"[Paragraf {p.number}] {p.text}" for p in chapter.paragraphs)
+        title_part = f" - {chapter.title}" if chapter.title else ""
+        chapter_blocks.append(f"=== BÖLÜM {chapter.number}{title_part} ===\n{chapter_text}")
+
+    user_message = (
+        "KAYITLI KARAKTERLER:\n" + "\n".join(char_lines)
+        + "\n\nBİLİNEN İLİŞKİLER:\n" + "\n".join(existing_lines)
+        + "\n\n" + "\n\n".join(chapter_blocks)
+    )
+
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": RELATIONSHIP_EXTRACTION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ],
+    )
+    raw = response.choices[0].message.content
+    cleaned = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return []
+
+    filtered = []
+    seen_pairs = set()
+    for r in data.get("relationships", []):
+        if not isinstance(r, dict):
+            continue
+        a_id, b_id = r.get("character_a_id"), r.get("character_b_id")
+        if a_id not in char_by_id or b_id not in char_by_id or a_id == b_id:
+            continue
+        pair = frozenset((a_id, b_id))
+        if pair in existing_pairs or pair in seen_pairs:
+            continue
+        label = (r.get("label") or "").strip()
+        if not label:
+            continue
+        seen_pairs.add(pair)
+        filtered.append({
+            "character_a_id": a_id, "character_a_name": char_by_id[a_id],
+            "character_b_id": b_id, "character_b_name": char_by_id[b_id],
+            "label": label, "notes": (r.get("notes") or "").strip(),
+        })
+    return filtered
+
+
+# ---------------------------------------------------------------------------
+# OLAY/ZAMAN ÇİZELGESİ KEŞFİ (bölüm bazlı/toplu): bir ya da daha fazla
+# bölümde geçen, hikaye için önemli OLAYLARI (Olaylar/Zaman Çizelgesi
+# menüsüne eklenmeye değer anlar) bulur - basit "yeni varlık" önerisinden
+# farklı olarak place_id/character_ids gibi YAPILANDIRILMIŞ bağlantılarla
+# döner, çünkü Event kaydı bunları gerektirir (bkz. models.Event). Onay
+# POST /events/ ile (var olan endpoint) yapılır - frontend her onaylanan
+# öneriyi doğrudan bu uca gönderir.
+#
+# story_order KASITLI OLARAK AI'DAN İSTENMİYOR - modelin tutarlı, çakışmayan
+# sayılar üretmesi güvenilir değil. Bunun yerine Python tarafında
+# DETERMİNİSTİK olarak hesaplanıyor (bölüm numarası * 1000 + o bölüm
+# içindeki sıra) - böylece farklı taramalar arasında bile sıralama tutarlı
+# kalır ve yeni bir bölüm eklendiğinde eski olaylarla çakışmaz.
+# ---------------------------------------------------------------------------
+
+EVENT_EXTRACTION_SYSTEM_PROMPT = """Sen bir roman editörü asistanısın. Sana
+bir ya da daha fazla bölümün metni, bu evrende KAYITLI karakter ve mekan
+listeleri verilecek. Görevin, bu bölümlerde geçen ÖNEMLİ olayları (zaman
+çizelgesine eklenmeye değer, hikayeyi ileri götüren belirli anları) bulmak.
+
+Kurallar:
+- Sadece hikaye için önemli, TEKİL ve tanımlanabilir olayları öner (sıradan
+  bir diyalog değişimini değil - ör. "taç giyme töreni", "kalenin ele
+  geçirilmesi", "X'in Y'yi öldürmesi" gibi belirgin olaylar).
+- character_ids: bu olayda doğrudan yer alan karakterlerin id'leri (SADECE
+  verilen listeden, eşleşmiyorsa boş bırak).
+- place_id: olayın geçtiği mekan (varsa, SADECE verilen listeden, emin
+  değilsen null bırak).
+- chapter_number: bu olayın hangi bölümde geçtiği.
+
+Yanıtını SADECE aşağıdaki JSON formatında ver:
+{
+  "events": [
+    {"name": "...", "description": "...", "character_ids": [3,7], "place_id": 2, "chapter_number": 5}
+  ]
+}
+Önemli bir olay yoksa boş liste ver."""
+
+
+def suggest_events_for_chapter(db: Session, chapter: "models.Chapter") -> list[dict]:
+    return suggest_events_for_chapters(db, [chapter])
+
+
+def suggest_events_for_chapters(db: Session, chapters: list) -> list[dict]:
+    if not chapters:
+        return []
+    chapters = sorted(chapters, key=lambda c: c.number)
+    valid_chapter_numbers = {c.number for c in chapters}
+    universe_id = get_universe_id_for_novel(db, chapters[0].novel_id)
+
+    characters = db.query(models.Character).filter(models.Character.universe_id == universe_id).all()
+    places = db.query(models.Place).filter(models.Place.universe_id == universe_id).all()
+    char_by_id = {c.id: c.name for c in characters}
+    place_by_id = {p.id: p.name for p in places}
+    char_lines = [f"id={c.id} \"{c.name}\"" for c in characters] or ["(henüz kayıtlı karakter yok)"]
+    place_lines = [f"id={p.id} \"{p.name}\"" for p in places] or ["(henüz kayıtlı mekan yok)"]
+
+    existing_events = db.query(models.Event).filter(models.Event.universe_id == universe_id).all()
+    existing_names_lower = {e.name.lower() for e in existing_events}
+
+    chapter_blocks = []
+    for chapter in chapters:
+        chapter_text = "\n".join(f"[Paragraf {p.number}] {p.text}" for p in chapter.paragraphs)
+        title_part = f" - {chapter.title}" if chapter.title else ""
+        chapter_blocks.append(f"=== BÖLÜM {chapter.number}{title_part} ===\n{chapter_text}")
+
+    user_message = (
+        "KAYITLI KARAKTERLER:\n" + "\n".join(char_lines)
+        + "\n\nKAYITLI MEKANLAR:\n" + "\n".join(place_lines)
+        + "\n\n" + "\n\n".join(chapter_blocks)
+    )
+
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": EVENT_EXTRACTION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ],
+    )
+    raw = response.choices[0].message.content
+    cleaned = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return []
+
+    filtered = []
+    per_chapter_counter = {}
+    for e in data.get("events", []):
+        if not isinstance(e, dict):
+            continue
+        name = (e.get("name") or "").strip()
+        if not name or name.lower() in existing_names_lower:
+            continue
+        chapter_number = e.get("chapter_number")
+        if chapter_number not in valid_chapter_numbers:
+            chapter_number = chapters[-1].number
+        char_ids = [cid for cid in (e.get("character_ids") or []) if cid in char_by_id]
+        place_id = e.get("place_id")
+        if place_id not in place_by_id:
+            place_id = None
+
+        idx = per_chapter_counter.get(chapter_number, 0)
+        per_chapter_counter[chapter_number] = idx + 1
+        story_order = chapter_number * 1000 + idx
+
+        filtered.append({
+            "name": name, "description": (e.get("description") or "").strip(),
+            "chapter_number": chapter_number, "story_order": story_order,
+            "place_id": place_id, "place_name": place_by_id.get(place_id),
+            "character_ids": char_ids, "character_names": [char_by_id[cid] for cid in char_ids],
+        })
+    return filtered
 # JSON zorunluluğu kasıtlı olarak KALDIRILDI - katı format modelin doğal,
 # sıcak, fikir üreten bir üslupla yazmasını engelliyordu ("ruhsuz" hissi
 # büyük ölçüde buradan geliyordu). Qwen'in kendi hafızası olmadığı için
@@ -426,11 +808,15 @@ yürüt: fikir üret, öneri getir, merak ettiğini sor, gerektiğinde kendi
 görüşünü de belirt ("Bence bu sahnede...", "Şunu da düşünebiliriz...",
 "Açıkçası şu kısım biraz zayıf kalmış olabilir...").
 
-ELİNDE DÖRT ARAÇ VAR: create_chapter (yeni bölüm açar), write_paragraph
-(bölüm+paragraf numarasıyla bir paragraf yazar/GÜNCELLER), ve
+ELİNDE ALTI ARAÇ VAR: create_chapter (yeni bölüm açar), write_paragraph
+(bölüm+paragraf numarasıyla bir paragraf yazar/GÜNCELLER), 
 get_paragraph_by_id + edit_paragraph_by_id (kullanıcının 'P2367' gibi
 verdiği GLOBAL paragraf numarasıyla çalışır - önce oku, sonra gerekirse
-düzenle). Kullanıcı 'P2367 betimleme eksik' gibi bir P-numarası verdiğinde
+düzenle), get_entity_section (bir KİŞİ/MEKAN'ın belirli bir yönü hakkında
+derin bilgi getirir - ör. "duygusal_yapi", "fiziksel_yapi"), ve
+propose_entity_update (bir KİŞİ/MEKAN hakkında yeni öğrenilen bir bilgiyi
+ÖNERİR - bu ASLA doğrudan yazmaz, kullanıcı onayı gerekir).
+Kullanıcı 'P2367 betimleme eksik' gibi bir P-numarası verdiğinde
 DOĞRUDAN get_paragraph_by_id ile o paragrafı bul, oku, sonra isterse
 edit_paragraph_by_id ile düzelt - hangi bölümde olduğunu sormana gerek
 yok, araç bunu senin için buluyor. Var olan bir paragrafı güncellersen
@@ -439,6 +825,28 @@ yaz", "yeni bölüm aç", "şu paragrafı değiştir/güncelle" gibi somut bir
 istekte bulunduğunda bu araçları DOĞRUDAN kullan - "yazayım mı?" diye
 sormana gerek yok, iste ve yap. Ama kullanıcı sadece fikir soruyorsa ya da
 sohbet ediyorsa araç çağırma, normal cevap ver.
+
+get_entity_section KULLANIMI ÖNEMLİ: Bir karakter/mekan hakkında bir şey
+yazarken TALİMATIN HANGİ YÖNÜ istediğini anla ve SADECE o bölümü çek -
+hepsini birden çekme. "Soğukkanlı", "vicdanı", "korkuyor mu" gibi ifadeler
+duygusal_yapi'ye işaret eder; "nasıl görünüyor", "kıyafeti" fiziksel_yapi'ye;
+"dış cephesi", "mimarisi" (mekan için) fiziksel_yapi'ye; "içeride nasıl
+hissettiriyor" atmosfer'e işaret eder. Aşağıdaki bağlamda bir varlığın
+"Ek detay bölümleri mevcut" diye listelenen anahtarları varsa, gerekirse
+bunlardan ilgili olanı çek - listelenmeyen bir bölüm zaten boştur, çekmeye
+gerek yok.
+
+propose_entity_update KULLANIMI ÖNEMLİ: Kullanıcı bir karakter/mekan
+hakkında somut, kayda değer YENİ bir bilgi verdiğinde (ör. "Başkan aslında
+eskiden asker" gibi) bunu FARK EDİP öner - kullanıcı sana özellikle "bunu
+kaydet" demese bile, konuşma doğal akışında ortaya çıkan önemli bir bilgiyi
+kaçırma. Ama önermeden ÖNCE mümkünse get_entity_section ile o bölümün
+mevcut halini oku ve YENİ bilginin eskiyle ÇELİŞİP ÇELİŞMEDİĞİNE dikkatlice
+karar ver (araç açıklamasındaki çelişki örneğine bak). Emin değilsen
+conflicts_with_existing=false bırak, kullanıcı zaten öneriyi görüp karar
+verecek - yanlış pozitif çelişki uyarısı vermek, gerçek bir çelişkiyi
+kaçırmaktan daha az zararlı değil, o yüzden emin olmadığın çelişkileri
+uydurma.
 
 Aşağıda sana romanın bağlamı (kurallar, fihrist özetleri, seçili
 karakter/mekan/olay bilgileri, gelişim çizelgeleri) verilecek. Roman
@@ -510,13 +918,81 @@ CHAT_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_entity_section",
+            "description": (
+                "Bir KİŞİ ya da MEKAN hakkında yazarken, o varlığın SADECE istenen "
+                "yönüyle ilgili derin notu getirir - description/notes'tan daha "
+                "detaylı, konuya göre bölünmüş bir profil katmanıdır. Talimatta "
+                "hangi yön isteniyorsa SADECE onu çek, alakasız bölümleri çekme.\n\n"
+                + describe_sections_for_tool() +
+                "\n\nÖrnek: 'Ahmet'in soğukkanlılığını göster' -> entity_type=character, "
+                "section=duygusal_yapi. 'Binanın dış cephesini tasvir et' -> "
+                "entity_type=place, section=fiziksel_yapi."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_type": {"type": "string", "enum": ["character", "place"]},
+                    "entity_id": {"type": "integer", "description": "Karakter/mekan id'si (bağlamda '(id: ...)' olarak verilir)"},
+                    "section": {"type": "string", "description": "Yukarıdaki entity_type'a uygun section anahtarlarından biri"},
+                },
+                "required": ["entity_type", "entity_id", "section"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_entity_update",
+            "description": (
+                "Sohbet sırasında bir KİŞİ ya da MEKAN hakkında YENİ ya da GÜNCEL bir "
+                "bilgi ortaya çıktığında bunu ÖNERİR - DOĞRUDAN YAZMAZ, hiçbir şey "
+                "kullanıcı onaylamadan kaydedilmez. Kullanıcı bir varlığı @-mention "
+                "ile (ya da bağlamda açıkça) işaret ettiğinde ve konuşmada o varlık "
+                "hakkında somut, kayda değer bir bilgi geçtiğinde bu aracı çağır.\n\n"
+                "ÇELİŞKİ KONTROLÜ ÖNEMLİ: content'i yazmadan önce, bu bilginin "
+                "get_entity_section ile okuduğun (ya da bağlamda zaten verilen) "
+                "MEVCUT bilgiyle ÇELİŞİP ÇELİŞMEDİĞİNİ değerlendir. Çelişki örneği: "
+                "mevcut notta 'kel' yazıyorsa ve yeni bilgi 'saçları yüzünü "
+                "kapatıyordu' ise bu bir çelişkidir. Çelişki varsa "
+                "conflicts_with_existing=true yap ve conflict_note'ta HANGİ eski "
+                "bilgiyle çeliştiğini kısaca açıkla (1 cümle). Çelişki yoksa "
+                "(sadece ek/tamamlayıcı bilgiyse) conflicts_with_existing=false "
+                "bırak - bu durumda kullanıcı onaylarsa yeni bilgi mevcut notun "
+                "SONUNA eklenir, üzerine yazılmaz.\n\n"
+                "section için: o varlığın section listesinden en uygun olanını seç "
+                "(get_entity_section'daki section seçenekleriyle aynı liste), hiçbiri "
+                "uymuyorsa 'notes' kullan."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_type": {"type": "string", "enum": ["character", "place"]},
+                    "entity_id": {"type": "integer", "description": "Karakter/mekan id'si"},
+                    "section": {"type": "string", "description": "İlgili section anahtarı, ya da hiçbiri uymuyorsa 'notes'"},
+                    "content": {"type": "string", "description": "Eklenmesi önerilen YENİ bilgi (kısa, net, tek bir gerçeklik)"},
+                    "conflicts_with_existing": {"type": "boolean", "description": "Bu bilgi, o bölümde zaten yazan bir şeyle çelişiyor mu?"},
+                    "conflict_note": {"type": "string", "description": "Çelişki varsa, hangi eski bilgiyle çeliştiğinin kısa açıklaması"},
+                },
+                "required": ["entity_type", "entity_id", "section", "content"],
+            },
+        },
+    },
 ]
 
 
-def _execute_chat_tool(db: Session, novel_id: int, name: str, args: dict) -> dict:
+def _execute_chat_tool(db: Session, novel_id: int, universe_id: int, name: str, args: dict) -> dict:
     """Qwen'in çağırdığı aracı gerçekten çalıştırır (DB'ye yazar). Sonuç
     hem Qwen'e (tool sonucu olarak, bir sonraki adımı planlaması için) hem
-    de kullanıcıya (actions_taken listesi, bkz. chat_with_qwen) gider."""
+    de kullanıcıya (actions_taken listesi, bkz. chat_with_qwen) gider.
+
+    create_chapter/write_paragraph/get_paragraph_by_id/edit_paragraph_by_id
+    KİTABA özel oldukları için novel_id kullanır; get_entity_section/
+    propose_entity_update ise EVREN düzeyinde paylaşılan karakter/mekan
+    verisine eriştiği için universe_id kullanır."""
     if name == "create_chapter":
         number = args.get("number")
         if db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id, models.Chapter.number == number).first():
@@ -593,17 +1069,102 @@ def _execute_chat_tool(db: Session, novel_id: int, name: str, args: dict) -> dic
             "action_summary": f"P{paragraph_id} güncellendi (Bölüm {paragraph.chapter.number}, Paragraf {paragraph.number})",
         }
 
+    if name == "get_entity_section":
+        entity_type = args.get("entity_type")
+        entity_id = args.get("entity_id")
+        section = args.get("section")
+
+        allowed_sections = SECTIONS_BY_ENTITY_TYPE.get(entity_type)
+        if allowed_sections is None:
+            return {"error": f"'{entity_type}' için bölüm sistemi yok (sadece character/place destekleniyor)", "action_summary": None}
+
+        # 'meta' bilerek yazar-özel - AI hiçbir zaman bunu isteyip alamaz,
+        # yanlışlıkla ya da kasıtlı çağrılsa bile burada engelleniyor
+        # (savunma katmanı: sistem talimatında zaten bahsedilmiyor ama
+        # sağlam olsun diye burada da kapalı).
+        if section == "meta" or section not in allowed_sections:
+            allowed_list = ", ".join(ai_visible_sections(allowed_sections).keys())
+            return {"error": f"Geçersiz section '{section}'. Kullanılabilir: {allowed_list}", "action_summary": None}
+
+        model = ENTITY_MODELS.get(entity_type)
+        record = db.query(model).filter(model.id == entity_id, model.universe_id == universe_id).first() if model else None
+        if not record:
+            return {"error": f"{entity_type} id={entity_id} bulunamadı", "action_summary": None}
+
+        content = (getattr(record, "sections", None) or {}).get(section, "")
+        return {
+            "success": True,
+            "entity_name": record.name,
+            "section": section,
+            "content": content or "(bu bölüm için henüz veri girilmemiş)",
+            "action_summary": None,  # sadece okuma - kullanıcıya "işlem yapıldı" diye gösterilmesin
+        }
+
+    if name == "propose_entity_update":
+        # ÖNEMLİ: bu araç DB'ye HİÇBİR ŞEY YAZMAZ - sadece geçerli bir öneri
+        # olduğunu doğrulayıp chat_with_qwen'e (oradan da kullanıcıya) bir
+        # "onaya açık öneri" olarak döner. Yazma işlemi ancak kullanıcı
+        # onayladığında /ai/approve-entity-update ile gerçekleşir.
+        entity_type = args.get("entity_type")
+        entity_id = args.get("entity_id")
+        section = args.get("section")
+        content = (args.get("content") or "").strip()
+        conflicts = bool(args.get("conflicts_with_existing", False))
+        conflict_note = (args.get("conflict_note") or "").strip()
+
+        if not content:
+            return {"error": "content boş olamaz", "action_summary": None, "is_proposal": False}
+
+        model = ENTITY_MODELS.get(entity_type)
+        if model is None:
+            return {"error": f"'{entity_type}' geçersiz varlık tipi", "action_summary": None, "is_proposal": False}
+        if section != "notes":
+            allowed_sections = SECTIONS_BY_ENTITY_TYPE.get(entity_type)
+            if allowed_sections is None or section == "meta" or section not in allowed_sections:
+                return {"error": f"Geçersiz section '{section}' ({entity_type} için)", "action_summary": None, "is_proposal": False}
+
+        record = db.query(model).filter(model.id == entity_id, model.universe_id == universe_id).first()
+        if not record:
+            return {"error": f"{entity_type} id={entity_id} bulunamadı", "action_summary": None, "is_proposal": False}
+
+        existing_text = record.notes if section == "notes" else (getattr(record, "sections", None) or {}).get(section, "")
+
+        proposal = {
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "entity_name": record.name,
+            "section": section,
+            "content": content,
+            "existing_text": existing_text or "",
+            "conflicts_with_existing": conflicts,
+            "conflict_note": conflict_note,
+        }
+        return {
+            "success": True,
+            "action_summary": None,  # bu bir "yapıldı" değil, "önerildi" - actions_taken'a girmiyor
+            "is_proposal": True,
+            "proposal": proposal,
+        }
+
     return {"error": f"Bilinmeyen araç: {name}", "action_summary": None}
 
 
-def chat_with_qwen(db: Session, novel_id: int, context: str, messages: list, max_tool_rounds: int = 5) -> tuple[str, list[str]]:
+def chat_with_qwen(db: Session, novel_id: int, universe_id: int, context: str, messages: list, max_tool_rounds: int = 5) -> tuple[str, list[str], list[dict]]:
     """Sohbet modu artık sadece metin üretmiyor - Qwen bölüm oluşturma ve
     paragraf yazma/güncelleme araçlarını DOĞRUDAN çağırabiliyor. Döngü: Qwen
     bir araç çağırırsa çalıştırılır, sonucu tekrar Qwen'e verilir, Qwen ya
     başka bir araç çağırır ya da sohbete devam eder - max_tool_rounds bu
     döngünün sonsuza gitmemesi için bir güvenlik sınırı.
 
-    Dönüş: (metin_cevabı, yapılan_işlemlerin_özet_listesi)"""
+    ÖNEMLİ AYRIM: actions_taken == zaten YAPILMIŞ işlemler (bölüm/paragraf
+    yazıldı - geri dönüşü DB'de zaten var). pending_entity_updates ==
+    HENÜZ YAPILMAMIŞ, kullanıcı onayı bekleyen varlık güncelleme önerileri
+    (bkz. propose_entity_update - DB'ye hiçbir şey yazmaz). Bu ayrım
+    bilerek yapıldı: paragraf yazmak "iste ve yap" mantığıyla direkt
+    yürütülüyor, ama bir karakterin kalıcı profilini değiştirmek (özellikle
+    çelişki içerebileceği için) her zaman kullanıcı onayından geçmeli.
+
+    Dönüş: (metin_cevabı, yapılan_işlemlerin_özet_listesi, onay_bekleyen_öneriler)"""
     system_content = CHAT_SYSTEM_PROMPT
     if context:
         system_content += f"\n\nROMANIN BAĞLAMI:\n{context}"
@@ -616,6 +1177,7 @@ def chat_with_qwen(db: Session, novel_id: int, context: str, messages: list, max
 
     client = get_client()
     actions_taken: list[str] = []
+    pending_entity_updates: list[dict] = []
 
     for _ in range(max_tool_rounds):
         response = client.chat.completions.create(
@@ -627,7 +1189,7 @@ def chat_with_qwen(db: Session, novel_id: int, context: str, messages: list, max
         tool_calls = getattr(msg, "tool_calls", None)
 
         if not tool_calls:
-            return (msg.content or "").strip(), actions_taken
+            return (msg.content or "").strip(), actions_taken, pending_entity_updates
 
         chat_messages.append({
             "role": "assistant",
@@ -642,12 +1204,18 @@ def chat_with_qwen(db: Session, novel_id: int, context: str, messages: list, max
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
-            result = _execute_chat_tool(db, novel_id, tc.function.name, args)
+            result = _execute_chat_tool(db, novel_id, universe_id, tc.function.name, args)
             if result.get("action_summary"):
                 actions_taken.append(result["action_summary"])
+            if result.get("is_proposal") and result.get("proposal"):
+                pending_entity_updates.append(result["proposal"])
             chat_messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result, ensure_ascii=False)})
 
-    return "Bir dizi işlem yaptım ama son mesajımı tamamlayamadım - üstte hangi bölüm/paragrafların değiştiğini görebilirsin.", actions_taken
+    return (
+        "Bir dizi işlem yaptım ama son mesajımı tamamlayamadım - üstte hangi bölüm/paragrafların değiştiğini görebilirsin.",
+        actions_taken,
+        pending_entity_updates,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -745,7 +1313,7 @@ da yorum ekleme. Yanıtını SADECE aşağıdaki JSON formatında ver:
 Hiçbir tutarsızlık bulamazsan issues boş liste olsun."""
 
 
-def full_scan(db: Session, novel_id: int, full_text_last_n: int = 3) -> dict:
+def full_scan(db: Session, novel_id: int, universe_id: int, full_text_last_n: int = 3) -> dict:
     """Fihrist katmanı burada da merkezde: context penceresini aşmamak için
     sadece son full_text_last_n bölüm tam metniyle gönderilir, daha eski
     bölümler (özeti varsa) sadece özetiyle temsil edilir. Özeti olmayan eski
@@ -754,28 +1322,78 @@ def full_scan(db: Session, novel_id: int, full_text_last_n: int = 3) -> dict:
 
     kind='part'/'subtitle' girdilerinin paragrafı yok, sadece yapısal bir
     ayraç - bunlar içerik olarak taranmaz, sadece bir başlık satırı olarak
-    metne eklenir (Qwen'in roman yapısını - kısımları - görmesi için)."""
+    metne eklenir (Qwen'in roman yapısını - kısımları - görmesi için).
+
+    DEVASA ROMANLAR İÇİN PARÇALI TARAMA: manuscript_text tek bir istekte
+    context penceresini aşacak kadar büyükse (bkz. CHUNK_CHAR_LIMIT),
+    bölümler ardışık PARÇALARA ayrılır ve her parça AYRI bir Qwen isteğiyle
+    taranır, sonuçlar birleştirilir. Küçük/orta romanlarda (tek parçaya
+    sığan) davranış eskisiyle BİREBİR aynıdır - hiçbir ekstra istek/gecikme
+    olmaz. Not: bu basit, ardışık bir parçalama - her parça DİĞER
+    parçalardan bağımsız taranır, yani bir parçanın başındaki bir şeyle
+    başka bir parçanın sonundaki bir şey arasındaki çelişkiyi (aradaki
+    parçalar atlanarak) yakalamayabilir. Tam roman genelinde kusursuz tek
+    seferlik tarama, context penceresi büyüklüğüyle doğal olarak sınırlı -
+    bu, o sınırı esneten ama tamamen ortadan kaldırmayan bir yaklaşım."""
     all_entries = db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).order_by(models.Chapter.number).all()
     chapters = [c for c in all_entries if c.kind == "chapter"]
     if not chapters:
         return {"summary": "Henüz taranacak bölüm yok.", "issues": []}
 
     cutoff_number = chapters[max(0, len(chapters) - full_text_last_n)].number
+    fixed_layer = build_fixed_layer(db, universe_id)
 
-    parts = [build_fixed_layer(db, novel_id)]
+    # Her bölüm/ayraç için metin BLOĞUNU üret (henüz birleştirmeden) -
+    # parçalama, bu blokları ardışık gruplara ayırarak yapılır.
+    entry_blocks = []
     for entry in all_entries:
         if entry.kind != "chapter":
-            parts.append(f"\n### {entry.title or ('Ayraç ' + str(entry.number))} ###")
+            entry_blocks.append(f"\n### {entry.title or ('Ayraç ' + str(entry.number))} ###")
             continue
         header = f"\n=== BÖLÜM {entry.number}{' - ' + entry.title if entry.title else ''} ==="
         if entry.number < cutoff_number and entry.summary:
-            parts.append(header + f"\n[ÖZET] {entry.summary}")
+            entry_blocks.append(header + f"\n[ÖZET] {entry.summary}")
         else:
-            parts.append(header)
+            block = [header]
             for p in entry.paragraphs:
-                parts.append(f"[Paragraf {p.number}] {p.text}")
-    manuscript_text = "\n".join(part for part in parts if part)
+                block.append(f"[Paragraf {p.number}] {p.text}")
+            entry_blocks.append("\n".join(block))
 
+    CHUNK_CHAR_LIMIT = 60_000  # kabaca ~15-20k token - tedbirli bir sınır
+    total_len = sum(len(b) for b in entry_blocks) + len(fixed_layer)
+
+    if total_len <= CHUNK_CHAR_LIMIT:
+        manuscript_text = fixed_layer + "\n" + "\n".join(entry_blocks)
+        return _run_full_scan_request(manuscript_text)
+
+    # Parçalara ayır - her parça CHUNK_CHAR_LIMIT'i (kurallar dahil) aşmasın.
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    current_len = len(fixed_layer)
+    for block in entry_blocks:
+        if current and current_len + len(block) > CHUNK_CHAR_LIMIT:
+            chunks.append(current)
+            current = []
+            current_len = len(fixed_layer)
+        current.append(block)
+        current_len += len(block)
+    if current:
+        chunks.append(current)
+
+    all_issues = []
+    summaries = []
+    for i, chunk_blocks in enumerate(chunks, start=1):
+        note = f"\n\n(NOT: bu, romanın {len(chunks)} parçaya bölünmüş taramasının {i}. parçası - sadece bu parçadaki metne bak.)"
+        manuscript_text = fixed_layer + note + "\n" + "\n".join(chunk_blocks)
+        result = _run_full_scan_request(manuscript_text)
+        all_issues.extend(result.get("issues", []))
+        if result.get("summary"):
+            summaries.append(f"[Parça {i}/{len(chunks)}] {result['summary']}")
+
+    return {"summary": " ".join(summaries), "issues": all_issues}
+
+
+def _run_full_scan_request(manuscript_text: str) -> dict:
     client = get_client()
     response = client.chat.completions.create(
         model=settings.qwen_model,

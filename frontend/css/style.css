@@ -34,30 +34,75 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
 /* ---- Layout ---- */
 .app-shell { display: flex; height: 100vh; }
 
+/* Sol menü artık dinlenme halinde bir "kitap sırtı" - sadece ikonlar, dar
+   bir şerit. Üzerine gelince (ya da klavyeyle içine girilince) kapak
+   açılır gibi genişleyip etiketler görünür. position:fixed olduğu için
+   genişlerken ana içeriği İTMEZ, üzerine hafifçe biner (bkz. .main
+   margin-left) - böylece sayfa hiç zıplamaz/reflow olmaz. */
 .sidebar {
-  width: 230px;
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  z-index: 30;
+  width: 64px;
   flex-shrink: 0;
   background: var(--ink-900);
   color: var(--gold-dim);
   display: flex;
   flex-direction: column;
   padding: 20px 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: width 0.28s cubic-bezier(.4,0,.2,1), box-shadow 0.28s ease;
 }
+@media (min-width: 769px) {
+  .sidebar:hover, .sidebar:focus-within {
+    width: 240px;
+    box-shadow: 10px 0 28px rgba(10,12,20,0.28);
+  }
+  .sidebar:hover .nav-label, .sidebar:focus-within .nav-label,
+  .sidebar:hover .brand-word, .sidebar:focus-within .brand-word {
+    opacity: 1;
+    transition-delay: 0.08s;
+  }
+}
+.main { margin-left: 64px; }
+
 .sidebar .brand {
-  font-family: var(--font-display);
-  font-size: 19px;
-  font-weight: 600;
-  color: #fff;
-  padding: 0 20px 18px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 0 0 18px 22px;
   border-bottom: 1px solid var(--border-dark);
   margin-bottom: 14px;
 }
-.sidebar nav { flex: 1; overflow-y: auto; }
-.sidebar .nav-item {
-  display: block;
+.sidebar .brand-mark {
+  flex-shrink: 0;
+  width: 30px; height: 30px;
+  border: 1.5px solid var(--gold);
+  border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 600;
+  color: var(--gold);
+  font-size: 16px;
+}
+.sidebar .brand-word {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.sidebar nav { flex: 1; overflow-y: auto; overflow-x: hidden; }
+.sidebar .nav-item, .sidebar .nav-item-like, .sidebar-footer button {
+  display: flex;
+  align-items: center;
+  gap: 14px;
   width: 100%;
   text-align: left;
-  padding: 10px 20px;
+  padding: 10px 0 10px 22px;
   background: none;
   border: none;
   color: var(--gold-dim);
@@ -65,6 +110,22 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   cursor: pointer;
   border-left: 3px solid transparent;
   opacity: 0.75;
+  transition: opacity 0.18s ease, background-color 0.18s ease, border-left-color 0.18s ease, color 0.18s ease;
+}
+.sidebar .nav-icon {
+  flex-shrink: 0;
+  width: 20px; height: 20px;
+  display: flex; align-items: center; justify-content: center;
+}
+.sidebar .nav-icon svg { width: 20px; height: 20px; }
+.sidebar .nav-label {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  flex: 1;
+  min-width: 0;
+  white-space: normal;
+  line-height: 1.25;
+  padding-right: 14px;
 }
 .sidebar .nav-item:hover { opacity: 1; background: rgba(255,255,255,0.04); }
 .sidebar .nav-item.active {
@@ -73,10 +134,13 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   background: rgba(201,162,39,0.08);
   color: #fff;
   font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(201,162,39,0.1);
 }
-.sidebar .search-box { padding: 0 16px 16px; }
+.sidebar .nav-item.active .nav-icon { color: var(--gold); }
+.sidebar .search-box { padding: 0 16px 16px 22px; }
 .sidebar .search-box input {
   width: 100%;
+  max-width: 190px;
   padding: 8px 10px;
   border-radius: var(--radius);
   border: 1px solid var(--border-dark);
@@ -84,20 +148,19 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   color: #fff;
 }
 .sidebar .search-box input::placeholder { color: #9099b0; }
+.novel-switch-box { padding: 0 0 12px; }
 .sidebar-footer {
-  padding: 14px 20px 0;
+  padding: 14px 0 0;
   border-top: 1px solid var(--border-dark);
 }
 .sidebar-footer button {
-  width: 100%;
-  padding: 8px;
-  background: none;
-  border: 1px solid var(--border-dark);
-  color: var(--gold-dim);
-  border-radius: var(--radius);
-  cursor: pointer;
+  border-radius: 0;
 }
-.sidebar-footer button:hover { background: rgba(255,255,255,0.06); }
+.sidebar-footer button:hover { background: rgba(255,255,255,0.06); opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar, .sidebar .nav-item, .sidebar .nav-label, .sidebar .brand-word { transition: none; }
+}
 
 .main {
   flex: 1;
@@ -163,6 +226,13 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
 .chapter-list .chapter-item.active { background: var(--gold-dim); font-weight: 600; }
 .btn-icon-sm { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 13px; padding: 2px 5px; border-radius: 4px; flex-shrink: 0; }
 .btn-icon-sm:hover { color: var(--danger); background: #fdf1f0; }
+.edit-chapter-btn:hover { color: var(--gold, #b8860b); background: var(--gold-dim, #fbf3e2); }
+.chapter-toggle {
+  flex-shrink: 0; width: 16px; text-align: center; background: none; border: none;
+  cursor: pointer; color: var(--text-muted); font-size: 10px; padding: 0;
+}
+.chapter-toggle:hover { color: var(--text-ink); }
+.chapter-label-edit:hover { text-decoration: underline; text-decoration-color: var(--gold); text-underline-offset: 3px; }
 
 .reader {
   background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
@@ -224,15 +294,18 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   .app-shell { display: block; height: auto; min-height: 100vh; }
 
   .sidebar {
-    position: fixed; top: 0; left: 0; bottom: 0; z-index: 30;
     width: 250px;
     transform: translateX(-100%);
     transition: transform 0.2s ease;
   }
+  /* Mobilde menü tam açılıp kapanan bir çekmece - masaüstündeki
+     hover-genişleme yerine dokunmatik bir toggle var, o yüzden etiket ve
+     wordmark her zaman tam görünür olmalı (opacity fade'e gerek yok). */
+  .sidebar .nav-label, .sidebar .brand-word { opacity: 1; }
   body.sidebar-open .sidebar { transform: translateX(0); }
   body.sidebar-open .sidebar-overlay { display: block; }
 
-  .main { padding: 60px 16px 24px; overflow-y: visible; }
+  .main { margin-left: 0; padding: 60px 16px 24px; overflow-y: visible; }
 
   .toolbar { flex-wrap: wrap; }
   .panel { max-width: 100%; }
@@ -261,15 +334,28 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
 }
 .novel-select-box {
   background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 28px 32px; width: 90%; max-width: 420px;
+  padding: 28px 32px; width: 90%; max-width: 480px;
 }
 .novel-select-box h2 { margin-top: 0; }
-.novel-list { display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; }
+.novel-list { display: flex; flex-direction: column; gap: 4px; max-height: 400px; overflow-y: auto; }
+.universe-group { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 4px; }
+.universe-group-header {
+  display: flex; justify-content: space-between; align-items: center;
+  font-family: var(--font-display); font-weight: 600; font-size: 14px;
+  padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid var(--border);
+}
+.delete-universe-btn {
+  background: none; border: none; color: var(--danger); font-size: 11px;
+  cursor: pointer; padding: 2px 6px; border-radius: 4px; white-space: nowrap;
+}
+.delete-universe-btn:hover { background: #fdf1f0; }
 .novel-list-item {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+  margin-bottom: 4px;
 }
 .novel-list-item:hover { background: var(--paper-dim); }
+.add-book-btn { width: 100%; }
 
 /* Arka plan AI taraması bildirimleri */
 .ai-toast {

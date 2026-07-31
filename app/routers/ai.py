@@ -7,8 +7,9 @@ from ..auth import get_current_user
 from .. import schemas, models
 from ..qwen_client import build_context, ask_qwen, full_scan, chat_with_qwen
 from ..entities import ENTITY_MODELS
+from ..sections import SECTIONS_BY_ENTITY_TYPE
 from ..ratelimit import rate_limit
-from ..novel_context import get_novel_id
+from ..novel_context import get_novel_id, get_universe_id
 
 router = APIRouter(prefix="/ai", tags=["AI Destek"])
 logger = logging.getLogger("roman_api.ai")
@@ -18,13 +19,16 @@ logger = logging.getLogger("roman_api.ai")
 def assist(
     payload: schemas.AiAssistRequest, db: Session = Depends(get_db),
     _user=Depends(rate_limit(max_calls=15, window_seconds=60, label="AI yazım")),
-    novel_id: int = Depends(get_novel_id),
+    novel_id: int = Depends(get_novel_id), universe_id: int = Depends(get_universe_id),
 ):
     """Seçilen karakter/mekan/olay/nesne kayıtlarını + roman kurallarını
     context olarak toplar, Qwen'e gönderir. Qwen'in ürettiği hiçbir şey
     burada veritabanına yazılmaz - onay için kullanıcıya döner."""
 
-    context = build_context(db, novel_id, payload.selected_entities, chapter_number=payload.chapter_number)
+    context = build_context(
+        db, novel_id, universe_id, payload.selected_entities,
+        chapter_number=payload.chapter_number, instruction_text=payload.instruction,
+    )
     try:
         result = ask_qwen(context, payload.instruction, payload.existing_text)
     except Exception as exc:
@@ -46,13 +50,13 @@ def preview_context(
     payload: schemas.ContextPreviewRequest,
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
-    novel_id: int = Depends(get_novel_id),
+    novel_id: int = Depends(get_novel_id), universe_id: int = Depends(get_universe_id),
 ):
     """/ai/assist'in Qwen'e GÖNDERMEDEN önce oluşturacağı tam context'i
     gösterir - Qwen'e hiç istek atmadığı için ücretsiz ve rate-limitsizdir.
     Amaç: 'AI'ya gerçekte ne gidiyor' sorusuna güvenle cevap bulabilmek
     (Novelcrafter'daki 'prompt preview' fikrinin karşılığı)."""
-    context = build_context(db, novel_id, payload.selected_entities, chapter_number=payload.chapter_number)
+    context = build_context(db, novel_id, universe_id, payload.selected_entities, chapter_number=payload.chapter_number)
     return schemas.ContextPreviewResponse(
         context=context,
         char_count=len(context),
@@ -64,7 +68,7 @@ def preview_context(
 def chat(
     payload: schemas.AiChatRequest, db: Session = Depends(get_db),
     _user=Depends(rate_limit(max_calls=25, window_seconds=60, label="AI sohbet")),
-    novel_id: int = Depends(get_novel_id),
+    novel_id: int = Depends(get_novel_id), universe_id: int = Depends(get_universe_id),
 ):
     """Tek seferlik 'talimat -> yapılandırılmış sonuç' akışının aksine,
     kullanıcıyla ileri-geri mesajlaşan sohbet modu (bkz. qwen_client.
@@ -76,26 +80,30 @@ def chat(
     if not payload.messages:
         raise HTTPException(400, "En az bir mesaj gerekli")
 
-    context = build_context(db, novel_id, payload.selected_entities, chapter_number=payload.chapter_number)
+    last_user_message = next((m.content for m in reversed(payload.messages) if getattr(m, "role", None) == "user"), "")
+    context = build_context(
+        db, novel_id, universe_id, payload.selected_entities,
+        chapter_number=payload.chapter_number, instruction_text=last_user_message,
+    )
     try:
-        reply, actions_taken = chat_with_qwen(db, novel_id, context, payload.messages)
+        reply, actions_taken, pending_entity_updates = chat_with_qwen(db, novel_id, universe_id, context, payload.messages)
     except Exception as exc:
         logger.exception("AI sohbet isteği başarısız oldu")
         raise HTTPException(
             status_code=502,
             detail=f"Qwen API'ye ulaşılamadı: {exc}. DASHSCOPE_API_KEY doğru mu ve internet bağlantısı var mı kontrol et.",
         )
-    return schemas.AiChatResponse(reply=reply, actions_taken=actions_taken)
+    return schemas.AiChatResponse(reply=reply, actions_taken=actions_taken, pending_entity_updates=pending_entity_updates)
 
 
 @router.post("/approve-suggestions", status_code=201)
 def approve_suggestions(
     payload: schemas.ApproveSuggestionsRequest,
     db: Session = Depends(get_db), _user=Depends(get_current_user),
-    novel_id: int = Depends(get_novel_id),
+    universe_id: int = Depends(get_universe_id),
 ):
     """Kullanıcının onayladığı önerileri işler. İki durum var:
-    - existing_entity_id boşsa: yeni bir kayıt oluşturulur (aktif romana bağlı).
+    - existing_entity_id boşsa: yeni bir kayıt oluşturulur (aktif evrene bağlı).
     - existing_entity_id doluysa: var olan kaydın 'notes' alanına yeni bilgi
       EKLENİR (mevcut açıklama asla silinmez/üzerine yazılmaz) - bu sayede
       "Ahmet" için ikinci bir kopya kayıt oluşmaz."""
@@ -107,7 +115,7 @@ def approve_suggestions(
             continue
 
         if suggestion.existing_entity_id:
-            item = db.query(model).filter(model.id == suggestion.existing_entity_id, model.novel_id == novel_id).first()
+            item = db.query(model).filter(model.id == suggestion.existing_entity_id, model.universe_id == universe_id).first()
             if item is None:
                 continue
             extra = f"\n[Bölüm güncellemesi] {suggestion.description}"
@@ -115,7 +123,7 @@ def approve_suggestions(
             db.commit()
             updated.append({"entity_type": suggestion.entity_type, "id": item.id, "name": item.name})
         else:
-            item = model(novel_id=novel_id, name=suggestion.name, description=suggestion.description)
+            item = model(universe_id=universe_id, name=suggestion.name, description=suggestion.description)
             db.add(item)
             db.flush()
             db.commit()
@@ -124,18 +132,65 @@ def approve_suggestions(
     return {"created": created, "updated": updated}
 
 
+@router.post("/approve-entity-update")
+def approve_entity_update(
+    payload: schemas.EntityUpdateApproval,
+    db: Session = Depends(get_db), _user=Depends(get_current_user),
+    universe_id: int = Depends(get_universe_id),
+):
+    """Sohbette AI'nın önerdiği bir varlık güncellemesini (bkz.
+    propose_entity_update / EntityUpdateProposal) kullanıcı onayladığında
+    çağrılır. mode='append' (varsayılan) ise mevcut metnin SONUNA eklenir -
+    hiçbir zaman sessizce üzerine yazılmaz. mode='replace' sadece kullanıcı
+    BİLEREK seçtiğinde (ör. AI bir çelişki tespit ettiğinde ve kullanıcı
+    'eskiyi değiştir' dediğinde) kullanılır."""
+    model = ENTITY_MODELS.get(payload.entity_type)
+    if model is None or not hasattr(model, "sections"):
+        raise HTTPException(400, f"'{payload.entity_type}' için bölüm güncellemesi desteklenmiyor")
+
+    item = db.query(model).filter(model.id == payload.entity_id, model.universe_id == universe_id).first()
+    if not item:
+        raise HTTPException(404, f"{payload.entity_type} id={payload.entity_id} bulunamadı")
+
+    new_content = payload.content.strip()
+    if not new_content:
+        raise HTTPException(400, "content boş olamaz")
+
+    if payload.section == "notes":
+        existing = item.notes or ""
+        item.notes = new_content if (payload.mode == "replace" or not existing) else f"{existing}\n{new_content}"
+        result_text = item.notes
+    else:
+        allowed = SECTIONS_BY_ENTITY_TYPE.get(payload.entity_type)
+        if allowed is None or payload.section == "meta" or payload.section not in allowed:
+            raise HTTPException(400, f"Geçersiz section '{payload.section}' ({payload.entity_type} için)")
+        current_sections = dict(item.sections or {})
+        existing = current_sections.get(payload.section, "")
+        current_sections[payload.section] = new_content if (payload.mode == "replace" or not existing) else f"{existing}\n{new_content}"
+        item.sections = current_sections
+        result_text = current_sections[payload.section]
+
+    db.commit()
+    db.refresh(item)
+    return {
+        "entity_type": payload.entity_type, "id": item.id, "name": item.name,
+        "section": payload.section, "new_content": result_text,
+    }
+
+
 @router.post("/full-scan", response_model=schemas.FullScanResponse)
 def scan_full_novel(
     db: Session = Depends(get_db),
     _user=Depends(rate_limit(max_calls=3, window_seconds=600, label="tam roman taraması")),
-    novel_id: int = Depends(get_novel_id),
+    novel_id: int = Depends(get_novel_id), universe_id: int = Depends(get_universe_id),
 ):
     """Yazılmış TÜM bölümleri tek seferde Qwen'e gönderip roman geneli
-    tutarsızlıkları arar (bölüm bazlı /ai/assist'ten farklı olarak). Uzun
-    romanlarda tek istek büyük olabilir ve context penceresini aşabilir -
-    böyle bir durumda Qwen hata döner, 502 olarak iletilir."""
+    tutarsızlıkları arar (bölüm bazlı /ai/assist'ten farklı olarak). Çok
+    uzun romanlarda (bkz. qwen_client.full_scan) otomatik olarak ardışık
+    parçalara bölünür - context penceresini aşma riski böylece büyük ölçüde
+    azalır, ama sıfıra inmez (bkz. full_scan docstring)."""
     try:
-        result = full_scan(db, novel_id)
+        result = full_scan(db, novel_id, universe_id)
     except Exception as exc:
         logger.exception("Tam roman taraması başarısız oldu")
         raise HTTPException(

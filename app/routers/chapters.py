@@ -10,7 +10,13 @@ from .. import models, schemas
 from ..mentions import detect_and_save_mentions
 from ..entities import ENTITY_MODELS
 from ..import_parser import parse_manuscript, split_paragraphs
-from ..qwen_client import summarize_chapter, suggest_entities_for_chapter, suggest_progressions_for_chapter, split_paragraphs_with_ai
+from ..qwen_client import (
+    summarize_chapter, suggest_entities_for_chapter, suggest_progressions_for_chapter,
+    suggest_entities_for_chapters, suggest_progressions_for_chapters,
+    suggest_relationships_for_chapter, suggest_relationships_for_chapters,
+    suggest_events_for_chapter, suggest_events_for_chapters,
+    split_paragraphs_with_ai,
+)
 from ..ratelimit import rate_limit
 from ..novel_context import get_novel_id
 
@@ -280,7 +286,88 @@ def generate_chapter_summary(
     return schemas.ChapterSummaryGenerateResponse(chapter_id=chapter.id, generated_summary=generated)
 
 
-@router.post("/{chapter_id}/suggest-entities", response_model=List[schemas.AiSuggestion])
+def resolve_chapters_for_part(db: Session, novel_id: int, part_id: int) -> list:
+    """Fihristteki bir Kısım'ın (kind='part') altına düşen TÜM gerçek
+    bölümleri (kind='chapter') bulur - aradaki Alt Başlıklar (subtitle)
+    şeffaftır, onların altındaki bölümler de bu Kısım'a ait sayılır.
+    Frontend'deki buildChapterHierarchy ile BİREBİR aynı mantık - fihrist
+    görünümünde hangi bölümler bir Kısım'ın altında görünüyorsa, toplu
+    tarama da tam onları kapsar."""
+    entries = db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).order_by(models.Chapter.number).all()
+    result = []
+    current_part_id = None
+    for e in entries:
+        if e.kind == "part":
+            current_part_id = e.id
+        elif e.kind == "chapter" and current_part_id == part_id:
+            result.append(e)
+    return result
+
+
+@router.post("/suggest-entities-bulk", response_model=List[schemas.AiSuggestion])
+def suggest_entities_bulk(
+    payload: schemas.BulkSuggestRequest, db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=10, window_seconds=60, label="toplu varlık önerisi")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """suggest-entities'in TOPLU hali - bir Kısım'ın (part_id) TAMAMINI ya
+    da elle seçilmiş bir bölüm grubunu (chapter_ids) TEK bir taramada
+    işler, aynı isim birden fazla bölümde geçse bile öneride sadece bir
+    kez görünür. Fihristteki 'Kısım' seviyesiyle senkron çalışır - bir
+    Kısım'ı yeni bitirdiğinde tek tek her bölümü taramak yerine Kısım'ın
+    tamamını bir kerede tarayabilirsin."""
+    chapters = _resolve_bulk_chapters(db, novel_id, payload)
+    if not chapters:
+        return []
+    try:
+        return suggest_entities_for_chapters(db, chapters)
+    except Exception as exc:
+        logger.exception("Toplu varlık önerisi üretimi başarısız oldu")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Qwen API'ye ulaşılamadı: {exc}. DASHSCOPE_API_KEY doğru mu ve internet bağlantısı var mı kontrol et.",
+        )
+
+
+@router.post("/suggest-progressions-bulk", response_model=List[schemas.ProgressionSuggestion])
+def suggest_progressions_bulk(
+    payload: schemas.BulkSuggestRequest, db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=10, window_seconds=60, label="toplu gelişim önerisi")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """suggest-progressions'ın TOPLU hali - bkz. suggest_entities_bulk
+    docstring'i, aynı mantık gelişim çizelgesi notları için."""
+    chapters = _resolve_bulk_chapters(db, novel_id, payload)
+    if not chapters:
+        return []
+    try:
+        return suggest_progressions_for_chapters(db, chapters)
+    except Exception as exc:
+        logger.exception("Toplu gelişim önerisi üretimi başarısız oldu")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Qwen API'ye ulaşılamadı: {exc}. DASHSCOPE_API_KEY doğru mu ve internet bağlantısı var mı kontrol et.",
+        )
+
+
+def _resolve_bulk_chapters(db: Session, novel_id: int, payload: schemas.BulkSuggestRequest) -> list:
+    if payload.part_id is not None:
+        part = db.query(models.Chapter).filter(
+            models.Chapter.id == payload.part_id, models.Chapter.novel_id == novel_id, models.Chapter.kind == "part"
+        ).first()
+        if not part:
+            raise HTTPException(404, "Kısım bulunamadı")
+        chapters = resolve_chapters_for_part(db, novel_id, part.id)
+    elif payload.chapter_ids:
+        chapters = db.query(models.Chapter).filter(
+            models.Chapter.id.in_(payload.chapter_ids), models.Chapter.novel_id == novel_id, models.Chapter.kind == "chapter"
+        ).all()
+    else:
+        raise HTTPException(400, "part_id ya da chapter_ids parametrelerinden biri gerekli")
+    return [c for c in chapters if c.paragraphs]
+
+
+
 def suggest_chapter_entities(
     chapter_id: int, db: Session = Depends(get_db),
     _user=Depends(rate_limit(max_calls=10, window_seconds=60, label="varlık önerisi")),
@@ -334,6 +421,97 @@ def suggest_chapter_progressions(
             detail=f"Qwen API'ye ulaşılamadı: {exc}. DASHSCOPE_API_KEY doğru mu ve internet bağlantısı var mı kontrol et.",
         )
     return suggestions
+
+
+@router.post("/{chapter_id}/suggest-relationships", response_model=List[schemas.RelationshipSuggestion])
+def suggest_chapter_relationships(
+    chapter_id: int, db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=10, window_seconds=60, label="ilişki önerisi")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Bu bölümde ortaya çıkan, henüz İlişki Haritası'nda kayıtlı olmayan
+    YENİ karakter ilişkilerini önerir. HİÇBİR ŞEY doğrudan kaydedilmez;
+    kullanıcı onayladığı öneriler mevcut POST /relationships/ ile kaydedilir."""
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
+    if not chapter.paragraphs:
+        raise HTTPException(400, "Bu bölümde henüz taranacak paragraf yok")
+    try:
+        return suggest_relationships_for_chapter(db, chapter)
+    except Exception as exc:
+        logger.exception("İlişki önerisi üretimi başarısız oldu")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Qwen API'ye ulaşılamadı: {exc}. DASHSCOPE_API_KEY doğru mu ve internet bağlantısı var mı kontrol et.",
+        )
+
+
+@router.post("/{chapter_id}/suggest-events", response_model=List[schemas.EventSuggestion])
+def suggest_chapter_events(
+    chapter_id: int, db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=10, window_seconds=60, label="olay önerisi")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Bu bölümde geçen, Olaylar/Zaman Çizelgesi'ne eklenmeye değer önemli
+    olayları önerir (yer/karakter bağlantılarıyla birlikte, yapılandırılmış).
+    HİÇBİR ŞEY doğrudan kaydedilmez; kullanıcı onayladığı öneriler mevcut
+    POST /events/ ile kaydedilir."""
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
+    if not chapter.paragraphs:
+        raise HTTPException(400, "Bu bölümde henüz taranacak paragraf yok")
+    try:
+        return suggest_events_for_chapter(db, chapter)
+    except Exception as exc:
+        logger.exception("Olay önerisi üretimi başarısız oldu")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Qwen API'ye ulaşılamadı: {exc}. DASHSCOPE_API_KEY doğru mu ve internet bağlantısı var mı kontrol et.",
+        )
+
+
+@router.post("/suggest-relationships-bulk", response_model=List[schemas.RelationshipSuggestion])
+def suggest_relationships_bulk(
+    payload: schemas.BulkSuggestRequest, db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=10, window_seconds=60, label="toplu ilişki önerisi")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """suggest-relationships'in TOPLU hali - bkz. suggest_entities_bulk
+    docstring'i, aynı mantık karakter ilişkileri için."""
+    chapters = _resolve_bulk_chapters(db, novel_id, payload)
+    if not chapters:
+        return []
+    try:
+        return suggest_relationships_for_chapters(db, chapters)
+    except Exception as exc:
+        logger.exception("Toplu ilişki önerisi üretimi başarısız oldu")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Qwen API'ye ulaşılamadı: {exc}. DASHSCOPE_API_KEY doğru mu ve internet bağlantısı var mı kontrol et.",
+        )
+
+
+@router.post("/suggest-events-bulk", response_model=List[schemas.EventSuggestion])
+def suggest_events_bulk(
+    payload: schemas.BulkSuggestRequest, db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=10, window_seconds=60, label="toplu olay önerisi")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """suggest-events'in TOPLU hali - bkz. suggest_entities_bulk docstring'i,
+    aynı mantık olaylar/zaman çizelgesi için."""
+    chapters = _resolve_bulk_chapters(db, novel_id, payload)
+    if not chapters:
+        return []
+    try:
+        return suggest_events_for_chapters(db, chapters)
+    except Exception as exc:
+        logger.exception("Toplu olay önerisi üretimi başarısız oldu")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Qwen API'ye ulaşılamadı: {exc}. DASHSCOPE_API_KEY doğru mu ve internet bağlantısı var mı kontrol et.",
+        )
 
 
 @router.get("/{chapter_id}", response_model=schemas.ChapterOut)

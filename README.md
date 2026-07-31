@@ -5,8 +5,17 @@ roman yazım destek uygulaması - backend + frontend.
 
 ## Özellikler
 
+- **Çoklu roman desteği**: aynı hesapla birden fazla roman yönetilebilir,
+  her istek `X-Novel-Id` header'ıyla hangi romana ait olduğunu bildirir
+  (frontend bunu otomatik ekler) - romanlar arasında hiçbir kayıt sızmaz.
 - 7 menü: Kişiler (durum: aktif/pasif/öldü), Mekanlar, Olaylar/Zaman Çizelgesi,
   Nesneler, İpuçları, Terimler, Roman Kuralları
+- **Karakter/Mekan derin profili**: isim/açıklama/not dışında, konuya göre
+  bölünmüş bir `sections` alanı var (Kişi: duygusal_yapi, fiziksel_yapi,
+  gecmis, kariyer, iliskiler, konusma_tarzi, meta; Mekan: fiziksel_yapi,
+  atmosfer, gecmis, kurallar, baglantilar, zamansal_degisim, meta). AI'ya
+  context oluştururken bu bölümlerin TAMAMI değil, sadece talimatla ilgili
+  olanı gönderilir (bkz. aşağıdaki "Karakter/Mekan Derin Profili" bölümü).
 - Bölüm/Paragraf yazma + otomatik karakter/mekan/olay tespiti (mentions indeksi)
 - Arama: bir isim yazınca geçtiği tüm (bölüm, paragraf) konumlarını bulur
 - Var olan bir metni içe aktarma + geriye dönük yeniden tarama
@@ -16,12 +25,30 @@ roman yazım destek uygulaması - backend + frontend.
   farklı mekanlarda göründüğü olayları otomatik bulur
 - **Stil eğitimi**: bir paragrafı "stil örneği" işaretlersen, Qwen her yeni
   metni senin o örnekteki tonunda yazmaya çalışır
+- **AI Sohbet Modu**: tek seferlik "talimat → metin" akışının yanında, Qwen
+  ile çok turlu bir sohbet de yürütülebilir. Qwen burada 6 araca sahip:
+  bölüm/paragraf yazma-güncelleme (onaysız, doğrudan), bir karakterin/mekanın
+  tek bir bölümünü okuma (`get_entity_section`), ve sohbette ortaya çıkan
+  yeni bir bilgiyi ÖNERME (`propose_entity_update` - asla doğrudan yazmaz,
+  çelişki tespit ederse kullanıcıya işaretler, onaylanırsa
+  `/ai/approve-entity-update` ile kaydedilir).
+- **Bağlam önizleme**: `/ai/context-preview` ile Qwen'e gerçekte ne
+  gönderileceğini, hiç istek atmadan (ücretsiz) görebilirsin.
 - **Tüm roman tutarlılık taraması**: yazılmış tüm bölümleri tek seferde
   tarayıp roman geneli çelişkileri (karakter bilgisi, zaman çizelgesi, kural
   ihlali) raporlar
 - Kelime sayısı takibi (toplam + bölüm başına)
-- Veritabanı şifreleme (bkz. aşağıdaki "Şifreleme" bölümü)
+- **Dışa/içe aktarma**: aktif romanı tek tıkla JSON olarak indirip
+  (`/admin/export`) başka bir yere yükleyebilirsin (`/admin/import`)
+- **Rate limiting**: AI uçları (assist/sohbet/tam tarama) kullanıcı başına
+  bellek-içi bir sayaçla sınırlanır - yanlışlıkla DashScope faturasını
+  şişirecek bir döngüye karşı
+- Veritabanı şifreleme (bkz. aşağıdaki "Şifreleme" bölümü) - artık `sections`
+  alanı da dahil tüm içerik alanları şifreli
 - JWT ile giriş, loglama, yedekleme betiği
+- Sol menü: dinlenme halinde dar bir ikon şeridi, üzerine gelince (ya da
+  Tab'layınca) genişleyen bir "kitap sırtı" - masaüstünde varsayılan
+  davranış, mobilde klasik açılır/kapanır çekmece
 
 ## Kurulum
 
@@ -65,32 +92,45 @@ Sunucu ayağa kalkınca:
 
 ```
 app/
-  main.py            - FastAPI uygulaması, router'ları birleştirir
-  config.py          - .env'den ayarları okur
-  database.py        - SQLAlchemy engine/session
-  models.py          - Tablolar: Kişiler, Mekanlar, Olaylar, Nesneler,
-                        İpuçları, Terimler, Roman Kuralları, Bölümler,
-                        Paragraflar, Mentions (geçiş indeksi)
-  schemas.py         - Pydantic request/response şemaları
-  auth.py            - JWT login, şifre hash'leme
+  main.py             - FastAPI uygulaması, router'ları birleştirir, migration'ları çalıştırır
+  config.py           - .env'den ayarları okur
+  database.py         - SQLAlchemy engine/session
+  models.py           - Tablolar: Novel, Kişiler, Mekanlar, Olaylar, Nesneler,
+                        İpuçları, Terimler, Roman Kuralları, İlişkiler,
+                        Bölümler, Paragraflar, ParagraphVersion, Progression,
+                        Mentions (geçiş indeksi)
+  schemas.py          - Pydantic request/response şemaları
+  auth.py             - JWT login, şifre hash'leme
   entities.py         - entity_type string'lerini modellere eşler
-  encryption.py        - alan düzeyinde (field-level) şifreleme
+  sections.py         - Kişi/Mekan "derin profil" bölüm tanımları (bkz. aşağı)
+  encryption.py       - alan düzeyinde (field-level) şifreleme (EncryptedString + EncryptedJSON)
   mentions.py         - paragraf kaydedilince otomatik isim tespiti
-  qwen_client.py      - DashScope bağlantısı + sabit/dinamik context oluşturucu
+  novel_context.py    - X-Novel-Id header'ını okuyup doğrulayan dependency
+  migrations.py       - açılışta çalışan, idempotent hafif şema göçleri
+  import_parser.py    - .txt bir el yazmasını Bölüm/Paragraf'a ayrıştırır
+  ratelimit.py        - AI uçları için bellek-içi rate limiter
+  qwen_client.py      - DashScope bağlantısı + context katmanları (fixed/index/dynamic/style)
+                        + tek seferlik ask_qwen + çok turlu chat_with_qwen (tool-calling)
+                        + full_scan + entity/progression öneri çıkarımı
   routers/
     auth_router.py    - POST /auth/token (login)
-    generic_crud.py   - basit menüler için ortak CRUD fabrikası
-    menus.py          - Kişiler/Mekanlar/Olaylar/Nesneler/İpuçları/
-                        Terimler/Kurallar router'ları
-    chapters.py       - Bölüm/Paragraf CRUD + /chapters/search/ arama
-    ai.py             - POST /ai/assist ve /ai/approve-suggestions
+    novels.py         - roman oluşturma/listeleme/yeniden adlandırma/silme
+    generic_crud.py   - basit menüler için ortak CRUD fabrikası (dict alanlarda merge yapar)
+    menus.py          - Kişiler/Mekanlar/Nesneler/İpuçları/Terimler/Kurallar router'ları
+    events.py         - Olaylar + zaman çizelgesi çakışma kontrolü
+    relationships.py  - Karakter ilişki haritası
+    progressions.py   - Gelişim çizelgesi (varlıkların bölüm bazlı kronolojik notları)
+    chapters.py       - Bölüm/Paragraf CRUD + arama + içe aktarma
+    ai.py             - /ai/assist, /ai/chat, /ai/context-preview,
+                        /ai/approve-suggestions, /ai/approve-entity-update, /ai/full-scan
+    admin.py          - /admin/export, /admin/import (aktif romanı JSON olarak yedekle/geri yükle)
 frontend/
-  index.html          - ana ekran iskeleti (sol menü + sağ içerik alanı)
+  index.html          - ana ekran iskeleti (hover ile açılan sol menü + sağ içerik alanı)
   login.html          - giriş sayfası
-  css/style.css        - tüm stiller
-  js/api.js            - JWT token yönetimi + ortak fetch sarmalayıcı
-  js/login.js          - giriş sayfası mantığı
-  js/app.js            - menüler, roman okuma/yazma, AI paneli, arama
+  css/style.css       - tüm stiller
+  js/api.js           - JWT token yönetimi + X-Novel-Id header'lı ortak fetch sarmalayıcı
+  js/login.js         - giriş sayfası mantığı
+  js/app.js           - menüler, roman okuma/yazma, AI paneli (sohbet + talimat), arama
 ```
 
 ## Temel akış
@@ -98,32 +138,40 @@ frontend/
 1. **Giriş yap:** `POST /auth/token` (form-data: username, password) → JWT token al.
    Diğer tüm isteklerde `Authorization: Bearer <token>` header'ı gerekir.
 
-2. **Menüleri doldur:** `/characters/`, `/places/`, `/events/`, `/objects/`,
+2. **Bir roman seç ya da oluştur:** `GET /novels/` (liste) ya da
+   `POST /novels/` (`{"name": "..."}`) ile roman id'sini al. **Auth
+   dışındaki HER istekte** artık `X-Novel-Id: <id>` header'ı da ZORUNLU -
+   yoksa 400 döner (bkz. `novel_context.get_novel_id`). Frontend bunu
+   kullanıcı roman seçtikten sonra otomatik ekliyor (`js/api.js`).
+
+3. **Menüleri doldur:** `/characters/`, `/places/`, `/events/`, `/objects/`,
    `/foreshadowings/`, `/glossary/`, `/rules/` üzerinden kayıt ekle.
    `/rules/` özel: buraya eklediğin her şey **her AI isteğinde otomatik ve
    değişmeden** dahil edilir (romanın sabit/matematiksel kuralları için).
+   Kişi/Mekan oluştururken isteğe bağlı bir `sections` dict'i de
+   gönderebilirsin (bkz. aşağıdaki "Karakter/Mekan Derin Profili").
 
-3. **Bölüm/paragraf yaz:**
+4. **Bölüm/paragraf yaz:**
    `PUT /chapters/{chapter_id}/paragraphs/{number}` — paragrafı kaydeder ve
    içinde geçen karakter/mekan/olay/nesne isimlerini otomatik tespit edip
    `mentions` tablosuna işler.
 
-4. **Ara:** `GET /chapters/search/?q=Ahmet` ya da
+5. **Ara:** `GET /chapters/search/?q=Ahmet` ya da
    `GET /chapters/search/?entity_type=character&entity_id=1` — o varlığın
    geçtiği tüm (bölüm, paragraf) konumlarını döner.
 
-5. **Var olan bir metni içe aktar:** Elinde zaten yazılmış bir el yazması
+6. **Var olan bir metni içe aktar:** Elinde zaten yazılmış bir el yazması
    varsa `POST /chapters/import` ile bir `.txt` dosyası yükle — "Bölüm N"
    başlıklarına göre otomatik bölüm/paragraf oluşturur ve o an menülerde
    kayıtlı isimleri paragraflarda arar. Aynı bölüm/paragraf numarası
    varsa üzerine yazar (tekrar yüklemek güvenlidir).
 
-6. **Geriye dönük yeniden tarama:** Yeni bir karakter/mekan eklediğinde ya
+7. **Geriye dönük yeniden tarama:** Yeni bir karakter/mekan eklediğinde ya
    da bir ismi değiştirdiğinde, `POST /chapters/reindex-mentions` tüm
    romanı yeniden tarayıp mentions indeksini günceller — geçmiş bölümlerde
    o karakterin nerede geçtiğini de bulur.
 
-7. **AI'dan yazım desteği al:** `POST /ai/assist` body'sinde:
+8. **AI'dan tek seferlik yazım desteği al:** `POST /ai/assist` body'sinde:
    ```json
    {
      "chapter_number": 3,
@@ -132,11 +180,52 @@ frontend/
      "existing_text": null
    }
    ```
-   Backend, roman kurallarını (sabit katman) + seçilen karakterin özeti ve
-   geçtiği son paragrafları (dinamik katman) birleştirip Qwen'e gönderir.
-   Dönen `new_entity_suggestions` listesini onaylarsan
-   `POST /ai/approve-suggestions` ile veritabanına yazılır — hiçbir öneri
-   onaysız kaydedilmez.
+   Backend, roman kurallarını (sabit katman) + fihrist özetlerini + seçilen
+   karakterin özeti/notları ve geçtiği son paragrafları (dinamik katman)
+   birleştirip Qwen'e gönderir. Neye gerçekten gittiğini göndermeden önce
+   görmek istersen `POST /ai/context-preview` aynı body ile ücretsiz (Qwen'e
+   hiç istek atmaz) bir önizleme döner. Dönen `new_entity_suggestions`
+   listesini onaylarsan `POST /ai/approve-suggestions` ile veritabanına
+   yazılır — hiçbir öneri onaysız kaydedilmez.
+
+9. **AI ile sohbet et:** `POST /ai/chat` body'sinde `messages` (rol+içerik
+   geçmişi) ve `selected_entities` gönderilir. Qwen burada 6 aracı
+   kullanabilir - bölüm/paragraf yazma/güncelleme onaysız DOĞRUDAN
+   uygulanır (`actions_taken` listesiyle bildirilir), ama bir karakter/
+   mekan hakkında yeni bir bilgi fark ederse bunu asla doğrudan yazmaz -
+   `pending_entity_updates` listesinde bir ÖNERİ olarak döner (varsa
+   çelişki tespiti ve mevcut metinle karşılaştırma dahil). Onaylarsan
+   `POST /ai/approve-entity-update` (`{"entity_type", "entity_id",
+   "section", "content", "mode": "append"|"replace"}`) ile kaydedilir -
+   `mode="append"` (varsayılan) mevcut metnin SONUNA ekler, hiçbir zaman
+   sessizce üzerine yazmaz.
+
+## Karakter/Mekan Derin Profili (`sections`)
+
+Kişi/Mekan kayıtlarının `description`/`notes` alanlarının yanında, konuya
+göre bölünmüş bir `sections` (JSON, şifreli) alanı var - amaç, "bir
+karakterin ruh yapısıyla ilgili yaz" dendiğinde AI'ya o karakterin TÜM
+bilgisini değil sadece ilgili bölümü göndermek (token tasarrufu + alakasız
+bilgiyle context'i kirletmemek).
+
+**Kişi anahtarları:** `duygusal_yapi`, `fiziksel_yapi`, `gecmis`, `kariyer`,
+`iliskiler`, `konusma_tarzi`, `meta`
+**Mekan anahtarları:** `fiziksel_yapi`, `atmosfer`, `gecmis`, `kurallar`,
+`baglantilar`, `zamansal_degisim`, `meta`
+
+Kurallar:
+- `meta` bölümü (sembolizm, okuyucu etkisi, yazar notu) yazar tarafından
+  kaydedilebilir ama **AI'ya asla gönderilmez** - ne context'e ne de
+  `get_entity_section`/`propose_entity_update` araçlarına.
+- Bilinmeyen bir anahtar göndermek (`sections.py`'deki listede yoksa) 422
+  ile reddedilir - yazım hatası sessizce kaybolmaz.
+- `PUT /characters/{id}` ya da `PUT /places/{id}` ile `sections` gönderdiğinde
+  bu **birleştirilir (merge), YERİNE geçmez** - sadece gönderdiğin anahtarlar
+  güncellenir/eklenir, diğer bölümler olduğu gibi kalır (bkz.
+  `generic_crud.py`).
+- AI sohbet modunda `get_entity_section` bu bölümlerden birini OKUR,
+  `propose_entity_update` yeni bir şey ÖNERİR (yazmaz) - bkz. yukarıdaki
+  "AI ile sohbet et" adımı.
 
 ## Sonraki adımlar
 
@@ -160,11 +249,13 @@ anahtar üretimi) hazır ve test edildi - bkz. `DEPLOY.md`.
 
 ## Şifreleme
 
-Karakter/mekan/olay/nesne/ipucu/terim/kural isimleri, açıklamaları, notları
-ve roman metninin tamamı (`Paragraph.text`, `Chapter.title/summary`)
-veritabanında **şifreli** tutulur (Fernet/AES). Şifre çözme anahtarı
-`.env`'deki `DB_ENCRYPTION_KEY`'dir ve ORM üzerinden okuma/yazma tamamen
-şeffaftır - uygulama kodu şifrelemenin farkına bile varmaz.
+Karakter/mekan/olay/nesne/ipucu/terim/kural isimleri, açıklamaları, notları,
+Kişi/Mekan'ın `sections` derin profili ve roman metninin tamamı
+(`Paragraph.text`, `Chapter.title/summary`) veritabanında **şifreli**
+tutulur (Fernet/AES - `sections` için `EncryptedJSON`, geri kalanı için
+`EncryptedString`). Şifre çözme anahtarı `.env`'deki `DB_ENCRYPTION_KEY`'dir
+ve ORM üzerinden okuma/yazma tamamen şeffaftır - uygulama kodu şifrelemenin
+farkına bile varmaz.
 
 **Ne işe yarar:** `roman.db` dosyası (ya da bir yedeği) tek başına ele
 geçirilirse - yanlışlıkla halka açık bir yere kopyalanırsa, disk çalınırsa,

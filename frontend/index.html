@@ -12,40 +12,87 @@
       <h2>Roman Seç</h2>
       <div id="novelList" class="novel-list"></div>
       <div class="field" style="margin-top:16px;">
-        <label>Yeni roman oluştur</label>
+        <label>Yeni bir seri başlat (yepyeni bir evren + ilk kitabı)</label>
         <div style="display:flex;gap:8px;">
-          <input type="text" id="newNovelName" placeholder="Roman adı">
+          <input type="text" id="newNovelName" placeholder="Kitap adı">
           <button class="btn btn-primary" id="createNovelBtn">Oluştur</button>
         </div>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px;">Var olan bir serinin devam kitabını eklemek için o serinin altındaki "+ Bu seriye yeni kitap ekle" butonunu kullan.</div>
       </div>
     </div>
   </div>
   <div class="app-shell">
     <button id="mobileMenuToggle" class="mobile-menu-toggle" aria-label="Menüyü aç/kapat">☰</button>
     <div id="sidebarOverlay" class="sidebar-overlay"></div>
-    <aside class="sidebar" id="sidebar">
-      <div class="brand">Roman Yazım Asistanı</div>
-      <div style="padding:0 16px 12px;">
-        <button id="switchNovelBtn" class="btn btn-sm" style="width:100%;" title="Aktif romanı değiştir">📖 <span id="activeNovelName">Roman</span> — değiştir</button>
+    <aside class="sidebar" id="sidebar" tabindex="0">
+      <div class="brand">
+        <span class="brand-mark">R</span>
+        <span class="brand-word">Roman Yazım Asistanı</span>
+      </div>
+      <div class="novel-switch-box">
+        <button id="switchNovelBtn" class="btn btn-sm nav-item-like" title="Aktif romanı değiştir">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 4.5c2-1 4.5-1 6.5.5v10c-2-1.5-4.5-1.5-6.5-.5v-10Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M17 4.5c-2-1-4.5-1-6.5.5v10c2-1.5 4.5-1.5 6.5-.5v-10Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></span>
+          <span class="nav-label"><span id="activeNovelName">Roman</span> — değiştir</span>
+        </button>
       </div>
       <div class="search-box">
         <input type="text" id="globalSearch" placeholder="Ara: bir isim yaz…">
       </div>
       <nav id="navMenu">
-        <button class="nav-item" data-view="roman">Roman</button>
-        <button class="nav-item" data-view="character">Kişiler</button>
-        <button class="nav-item" data-view="place">Mekanlar</button>
-        <button class="nav-item" data-view="event">Olaylar / Zaman Çizelgesi</button>
-        <button class="nav-item" data-view="relationships">İlişki Haritası</button>
-        <button class="nav-item" data-view="object">Nesneler</button>
-        <button class="nav-item" data-view="foreshadowing">İpuçları</button>
-        <button class="nav-item" data-view="term">Terimler</button>
-        <button class="nav-item" data-view="rule">Roman Kuralları</button>
-        <button class="nav-item" data-view="fullscan">Tutarlılık Taraması</button>
-        <button class="nav-item" data-view="import">İçe Aktar</button>
+        <button class="nav-item" data-view="roman">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2.5 4.2c2.2-1.1 5-1.1 7.5.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M2.5 4.2v10.6c2.2-1.1 5-1.1 7.5.6V5.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M17.5 4.2c-2.2-1.1-5-1.1-7.5.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M17.5 4.2v10.6c-2.2-1.1-5-1.1-7.5.6V5.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="nav-label">Roman</span>
+        </button>
+        <button class="nav-item" data-view="character">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="6.8" r="2.8" stroke="currentColor" stroke-width="1.5"/><path d="M4 16.5c0-3.3 2.7-5.3 6-5.3s6 2 6 5.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+          <span class="nav-label">Kişiler</span>
+        </button>
+        <button class="nav-item" data-view="place">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 17.5s5.5-5 5.5-9.3A5.5 5.5 0 0 0 4.5 8.2c0 4.3 5.5 9.3 5.5 9.3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="10" cy="8.1" r="1.8" stroke="currentColor" stroke-width="1.5"/></svg></span>
+          <span class="nav-label">Mekanlar</span>
+        </button>
+        <button class="nav-item" data-view="event">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2.5 10h15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="5.5" cy="10" r="1.5" fill="currentColor"/><circle cx="10" cy="10" r="1.5" fill="currentColor"/><circle cx="14.5" cy="10" r="1.5" fill="currentColor"/></svg></span>
+          <span class="nav-label">Olaylar / Zaman Çizelgesi</span>
+        </button>
+        <button class="nav-item" data-view="relationships">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="6" r="2" stroke="currentColor" stroke-width="1.5"/><circle cx="15" cy="6" r="2" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="15" r="2" stroke="currentColor" stroke-width="1.5"/><path d="M6.7 7.4 8.6 13M13.3 7.4 11.4 13M7 6h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></span>
+          <span class="nav-label">İlişki Haritası</span>
+        </button>
+        <button class="nav-item" data-view="faction">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 2.5 3 6v4c0 4.2 3 7 7 7.5 4-.5 7-3.3 7-7.5V6l-7-3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></span>
+          <span class="nav-label">Faksiyonlar</span>
+        </button>
+        <button class="nav-item" data-view="object">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 3.5 17 7.2v6.1L10 17l-7-3.7V7.2L10 3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M3 7.2 10 11l7-3.8M10 11v6" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></span>
+          <span class="nav-label">Nesneler</span>
+        </button>
+        <button class="nav-item" data-view="foreshadowing">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8.5" cy="8.5" r="5" stroke="currentColor" stroke-width="1.5"/><path d="m16 16-3.4-3.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+          <span class="nav-label">İpuçları</span>
+        </button>
+        <button class="nav-item" data-view="term">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 3.5h8.5c.8 0 1.5.7 1.5 1.5v11.5l-5.5-3-5.5 3V5c0-.8.7-1.5 1.5-1.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></span>
+          <span class="nav-label">Terimler</span>
+        </button>
+        <button class="nav-item" data-view="rule">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="4" y="3" width="12" height="14" rx="1.3" stroke="currentColor" stroke-width="1.5"/><path d="M7 7.2h6M7 10.2h6M7 13.2h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+          <span class="nav-label">Roman Kuralları</span>
+        </button>
+        <button class="nav-item" data-view="fullscan">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 3 4 5.3v4.4c0 4 2.5 6.8 6 8 3.5-1.2 6-4 6-8V5.3L10 3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="m7.6 10 1.8 1.8 3-3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="nav-label">Tutarlılık Taraması</span>
+        </button>
+        <button class="nav-item" data-view="import">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 3v9.5M6.7 9.2 10 12.5l3.3-3.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 14.5v1a1.5 1.5 0 0 0 1.5 1.5h9a1.5 1.5 0 0 0 1.5-1.5v-1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+          <span class="nav-label">İçe Aktar</span>
+        </button>
       </nav>
       <div class="sidebar-footer">
-        <button id="logoutBtn">Çıkış yap</button>
+        <button id="logoutBtn">
+          <span class="nav-icon"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 3.5H5.3A1.3 1.3 0 0 0 4 4.8v10.4a1.3 1.3 0 0 0 1.3 1.3H8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13 13.5 16.5 10 13 6.5M7.5 10H16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="nav-label">Çıkış yap</span>
+        </button>
       </div>
     </aside>
     <main class="main" id="mainContent">

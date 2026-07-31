@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Optional, List
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+
+from .sections import validate_section_keys
 
 
 # ---- Auth ------------------------------------------------------------------
@@ -54,14 +56,77 @@ class ForeshadowingOut(SimpleEntityOut):
 
 class CharacterCreate(SimpleEntityBase):
     status: str = "aktif"  # aktif | pasif | öldü
+    # Alternatif isimler/unvanlar (ör. "Kral", "Majesteleri") - mentions.py
+    # metinde bunlardan biri geçtiğinde de bu karakteri "geçti" sayar.
+    aliases: List[str] = []
+    # Konuya göre bölünmüş derin profil (bkz. app/sections.py). Boş
+    # bırakılabilir - hiçbir bölüm zorunlu değil, yazar istediği kadarını,
+    # istediği zaman doldurur.
+    sections: dict[str, str] = {}
+
+    @field_validator("sections")
+    @classmethod
+    def _check_sections(cls, v):
+        return validate_section_keys(v, "character")
 
 
 class CharacterUpdate(SimpleEntityUpdate):
     status: Optional[str] = None
+    aliases: Optional[List[str]] = None
+    # ÖNEMLİ: burada gönderilen sections, var olanın YERİNE geçmez - sadece
+    # gönderilen anahtarlar günceller/eklenir (bkz. generic_crud.py update
+    # fonksiyonundaki merge mantığı). Yani {"korkular": "..."} göndermek
+    # diğer bölümleri (fiziksel_yapi, kariyer vb.) SİLMEZ.
+    sections: Optional[dict[str, str]] = None
+
+    @field_validator("sections")
+    @classmethod
+    def _check_sections(cls, v):
+        if v is None:
+            return v
+        return validate_section_keys(v, "character")
 
 
 class CharacterOut(SimpleEntityOut):
     status: str
+    aliases: List[str] = []
+    sections: dict[str, str] = {}
+
+
+# ---- Mekanlar (artık SimpleEntity* paylaşmıyor - sections alanı için) -----
+# Not: Diğer basit menüler (Nesneler, Terimler) hâlâ SimpleEntity* şemasını
+# kullanıyor - sadece Mekanlar'a (Kişiler gibi) bölüm sistemi eklendi.
+
+class PlaceCreate(SimpleEntityBase):
+    aliases: List[str] = []
+    # Bu mekan başka bir mekanın İÇİNDE mi? (ör. bir odanın üst mekanı bir
+    # bina, binanın üst mekanı bir şehir...) Sınırsız iç içe geçebilir.
+    parent_place_id: Optional[int] = None
+    sections: dict[str, str] = {}
+
+    @field_validator("sections")
+    @classmethod
+    def _check_sections(cls, v):
+        return validate_section_keys(v, "place")
+
+
+class PlaceUpdate(SimpleEntityUpdate):
+    aliases: Optional[List[str]] = None
+    parent_place_id: Optional[int] = None
+    sections: Optional[dict[str, str]] = None  # bkz. CharacterUpdate.sections yorumu - merge, replace değil
+
+    @field_validator("sections")
+    @classmethod
+    def _check_sections(cls, v):
+        if v is None:
+            return v
+        return validate_section_keys(v, "place")
+
+
+class PlaceOut(SimpleEntityOut):
+    aliases: List[str] = []
+    parent_place_id: Optional[int] = None
+    sections: dict[str, str] = {}
 
 
 # ---- Karakter ilişkileri (ilişki haritası) ---------------------------------
@@ -120,6 +185,11 @@ class EventOut(BaseModel):
     story_order: Optional[int] = None
     character_ids: List[int] = []
     character_names: List[str] = []
+    # Bu olay hangi KİTAPTA anlatıldı - sadece bilgi amaçlı, filtrelemede
+    # kullanılmaz (evren geneli zaman çizelgesi/çakışma kontrolü tüm
+    # kitapları kapsar).
+    source_novel_id: Optional[int] = None
+    source_novel_name: Optional[str] = None
 
 
 class EventConflict(BaseModel):
@@ -134,6 +204,11 @@ class EventConflict(BaseModel):
 class RuleBase(BaseModel):
     title: str
     description: str = ""
+    # Boş bırakılırsa (varsayılan) bu kural HER ZAMAN AI'ya gönderilir.
+    # Dünya büyüdükçe (bkz. qwen_client.build_fixed_layer) etiketli
+    # kurallar sadece talimat metninde o etiket geçtiğinde dahil edilir -
+    # küçük dünyalarda (az kural) bu filtreleme hiç devreye girmez.
+    tags: List[str] = []
 
 
 class RuleCreate(RuleBase):
@@ -143,6 +218,7 @@ class RuleCreate(RuleBase):
 class RuleUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
+    tags: Optional[List[str]] = None
 
 
 class RuleOut(RuleBase):
@@ -150,6 +226,42 @@ class RuleOut(RuleBase):
     id: int
     created_at: datetime
     updated_at: datetime
+
+
+# ---- Faksiyonlar (Hane/Lonca/Ordu/Tarikat) ---------------------------------
+# İkili (A-B) CharacterRelationship'in kapsayamadığı "bu N karakter aynı
+# gruba mensup" bilgisini tutar - devasa dünyalarda karakterler çoğu zaman
+# tek tek değil gruplar halinde anlamlıdır.
+
+class FactionCreate(SimpleEntityBase):
+    pass
+
+
+class FactionUpdate(SimpleEntityUpdate):
+    pass
+
+
+class FactionOut(SimpleEntityOut):
+    pass
+
+
+class FactionMembershipCreate(BaseModel):
+    faction_id: int
+    character_id: int
+    role: str = ""
+    notes: str = ""
+
+
+class FactionMembershipOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    faction_id: int
+    faction_name: str
+    character_id: int
+    character_name: str
+    role: str
+    notes: str
+    created_at: datetime
 
 
 # ---- Bölüm / Paragraf --------------------------------------------------------
@@ -259,6 +371,17 @@ class AiSuggestion(BaseModel):
     existing_entity_id: Optional[int] = None
 
 
+class BulkSuggestRequest(BaseModel):
+    """Kısım (Part) seviyesinde ya da kullanıcının elle seçtiği bölüm
+    grubunda toplu varlık/gelişim taraması ister. İkisinden TAM OLARAK
+    biri verilmeli:
+    - part_id: bu Kısım'a ait TÜM bölümler taranır (fihristteki hiyerarşiye
+      göre otomatik bulunur, bkz. routers/chapters.py resolve_chapters_for_part)
+    - chapter_ids: sadece bu id'lere sahip bölümler taranır (elle seçim)"""
+    part_id: Optional[int] = None
+    chapter_ids: Optional[List[int]] = None
+
+
 class AiAssistResponse(BaseModel):
     generated_text: str
     consistency_notes: List[str] = []
@@ -282,9 +405,37 @@ class AiChatRequest(BaseModel):
     messages: List[ChatMessage]
 
 
+class EntityUpdateProposal(BaseModel):
+    """AI'nın önerdiği, henüz kaydedilmemiş bir varlık güncellemesi."""
+    entity_type: str
+    entity_id: int
+    entity_name: str
+    section: str  # sections.py'deki bir anahtar, ya da 'notes'
+    content: str  # eklenmesi önerilen yeni bilgi
+    existing_text: str = ""  # o bölümde ŞU AN yazan metin (kullanıcı karşılaştırabilsin diye)
+    conflicts_with_existing: bool = False
+    conflict_note: str = ""
+
+
 class AiChatResponse(BaseModel):
     reply: str
     actions_taken: List[str] = []
+    # Sohbet sırasında AI'nın fark ettiği ama HENÜZ KAYDEDİLMEMİŞ varlık
+    # güncelleme önerileri (bkz. qwen_client.propose_entity_update). Frontend
+    # bunları sohbet balonunun yanında bir onay kartı olarak gösterir;
+    # kullanıcı onaylarsa POST /ai/approve-entity-update ile kaydedilir.
+    pending_entity_updates: List[EntityUpdateProposal] = []
+
+
+class EntityUpdateApproval(BaseModel):
+    """POST /ai/approve-entity-update isteği - kullanıcı bir öneriyi onayladığında gönderilir."""
+    entity_type: str
+    entity_id: int
+    section: str
+    content: str
+    # append: mevcut metnin SONUNA eklenir (varsayılan, veri kaybetmez)
+    # replace: mevcut metnin YERİNE geçer (kullanıcı bilerek "üzerine yaz" seçtiğinde - ör. çelişki durumunda)
+    mode: str = "append"
 
 
 # ---- AI bağlam önizleme ("prompt preview") ---------------------------------
@@ -317,6 +468,11 @@ class ProgressionOut(ProgressionBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     created_at: datetime
+    # Bu not hangi KİTAPTA öğrenildi - sadece bilgi amaçlı ("Kitap 2, Bölüm
+    # 12" gibi göstermek için), filtrelemede kullanılmaz. Oluşturma anında
+    # o an aktif olan kitaba (X-Novel-Id) göre otomatik doldurulur.
+    source_novel_id: Optional[int] = None
+    source_novel_name: Optional[str] = None
 
 
 class ProgressionSuggestion(BaseModel):
@@ -327,6 +483,34 @@ class ProgressionSuggestion(BaseModel):
     entity_name: str
     chapter_number: int
     note: str
+
+
+class RelationshipSuggestion(BaseModel):
+    """AI'nın bir/bir grup bölümü tarayıp önerdiği YENİ karakter ilişkisi
+    taslağı. Kaydedilmez - kullanıcı onaylarsa mevcut POST /relationships/
+    ile kaydedilir."""
+    character_a_id: int
+    character_a_name: str
+    character_b_id: int
+    character_b_name: str
+    label: str
+    notes: str = ""
+
+
+class EventSuggestion(BaseModel):
+    """AI'nın bir/bir grup bölümü tarayıp önerdiği YENİ olay taslağı.
+    Kaydedilmez - kullanıcı onaylarsa mevcut POST /events/ ile (bu şemayla
+    birebir uyumlu alanlarla) kaydedilir. story_order Python tarafında
+    deterministik hesaplanır (bkz. qwen_client.suggest_events_for_chapters) -
+    AI'dan istenmez, tutarsız/çakışan sayı riski olmasın diye."""
+    name: str
+    description: str = ""
+    chapter_number: int
+    story_order: int
+    place_id: Optional[int] = None
+    place_name: Optional[str] = None
+    character_ids: List[int] = []
+    character_names: List[str] = []
 
 
 # ---- Tüm roman tutarlılık taraması -----------------------------------------

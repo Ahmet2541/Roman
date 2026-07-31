@@ -10,6 +10,7 @@ ENTITY_MODELS = {
     "object": models.Object,
     "foreshadowing": models.Foreshadowing,
     "term": models.GlossaryTerm,
+    "faction": models.Faction,
 }
 
 ENTITY_LABELS_TR = {
@@ -19,4 +20,5 @@ ENTITY_LABELS_TR = {
     "object": "NESNE",
     "foreshadowing": "İPUCU",
     "term": "TERİM",
+    "faction": "FAKSİYON",
 }

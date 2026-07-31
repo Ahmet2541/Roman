@@ -1,11 +1,12 @@
 const ENTITY_TYPES = {
-  character: { endpoint: '/characters/', label: 'Kişi', plural: 'Kişiler', hasStatus: true, statusOptions: ['aktif', 'pasif', 'öldü'], isRule: false },
-  place: { endpoint: '/places/', label: 'Mekan', plural: 'Mekanlar', hasStatus: false, isRule: false },
+  character: { endpoint: '/characters/', label: 'Kişi', plural: 'Kişiler', hasStatus: true, statusOptions: ['aktif', 'pasif', 'öldü'], isRule: false, hasAliases: true },
+  place: { endpoint: '/places/', label: 'Mekan', plural: 'Mekanlar', hasStatus: false, isRule: false, hasAliases: true },
   event: { endpoint: '/events/', label: 'Olay', plural: 'Olaylar', hasStatus: false, isRule: false, isCustom: true },
   object: { endpoint: '/objects/', label: 'Nesne', plural: 'Nesneler', hasStatus: false, isRule: false },
   foreshadowing: { endpoint: '/foreshadowings/', label: 'İpucu', plural: 'İpuçları', hasStatus: true, statusOptions: ['açık', 'kapandı'], isRule: false },
   term: { endpoint: '/glossary/', label: 'Terim', plural: 'Terimler', hasStatus: false, isRule: false },
-  rule: { endpoint: '/rules/', label: 'Kural', plural: 'Roman Kuralları', hasStatus: false, isRule: true },
+  rule: { endpoint: '/rules/', label: 'Kural', plural: 'Roman Kuralları', hasStatus: false, isRule: true, hasTags: true },
+  faction: { endpoint: '/factions/', label: 'Faksiyon', plural: 'Faksiyonlar', hasStatus: false, isRule: false },
 };
 
 const main = () => document.getElementById('mainContent');
@@ -15,6 +16,27 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 function truncate(str, n) { return str && str.length > n ? str.slice(0, n) + '…' : (str || ''); }
+
+// Bölüm/Başlık/Alt Başlık metinleri bazen bir AI sohbetinden ya da başka bir
+// yerden kopyala-yapıştır ile geliyor ve markdown işaretlerini ("> alıntı",
+// "**kalın**" vb.) ham haliyle taşıyor. Fihriste bunlar olduğu gibi
+// göründüğünde çirkin duruyor (ör. "> **DİJİTAL DOĞUMUN SANCILARI.**").
+// Bu fonksiyon hem yeni girilen metni temizlemek hem de daha önce böyle
+// kaydedilmiş eski verileri EKRANDA düzgün göstermek için kullanılır -
+// veritabanındaki veriyi değiştirmez, sadece görüntüyü/yeni girdiyi temizler.
+function stripMarkdownArtifacts(str) {
+  if (!str) return str || '';
+  let s = String(str).trim();
+  // Başındaki "> " / ">> " gibi alıntı (blockquote) işaretlerini temizle
+  s = s.replace(/^>+\s*/, '');
+  // **kalın** ve __kalın__
+  s = s.replace(/\*\*(.+?)\*\*/g, '$1');
+  s = s.replace(/__(.+?)__/g, '$1');
+  // *italik* ve _italik_ (kelime ortasındaki tekil * / _ karakterlerine dokunma)
+  s = s.replace(/(^|\s)\*(\S.*?\S|\S)\*(?=\s|$)/g, '$1$2');
+  s = s.replace(/(^|\s)_(\S.*?\S|\S)_(?=\s|$)/g, '$1$2');
+  return s.replace(/\s+/g, ' ').trim();
+}
 
 // ---------------------------------------------------------------------
 // Görünüm değiştirme
@@ -32,6 +54,7 @@ async function switchView(view) {
   if (view === 'event') return renderEventsView();
   if (view === 'relationships') return renderRelationshipsView();
   if (view === 'fullscan') return renderFullScanView();
+  if (view === 'place') return renderPlacesView();
   return renderEntityView(view);
 }
 
@@ -110,6 +133,118 @@ function renderEntityList(type, items) {
 }
 
 // ---------------------------------------------------------------------
+// Mekanlar - iç içe (hiyerarşik) görünüm. Bir mekan başka bir mekanın
+// İÇİNDE olabilir (parent_place_id) - sınır yok, istediğin kadar iç içe
+// geçebilir (bkz. proje sohbet geçmişi). Bölüm fihristindeki açılır/
+// kapanır Kısım mantığıyla AYNI görsel dil kullanılıyor (chapter-toggle
+// class'ı ortak) - kullanıcı zaten o etkileşimi biliyor.
+// ---------------------------------------------------------------------
+
+const collapsedPlaceGroups = new Set();
+
+async function renderPlacesView() {
+  main().innerHTML = `
+    <h1 class="view-title">Mekanlar</h1>
+    <div class="toolbar">
+      <div></div>
+      <button class="btn btn-primary" id="addBtn">+ Yeni Mekan</button>
+    </div>
+    <div class="entity-list" id="placeTree"><div class="empty-state">Yükleniyor…</div></div>
+    <div id="formContainer"></div>`;
+
+  document.getElementById('addBtn').addEventListener('click', () => showEntityForm('place', null));
+
+  try {
+    const places = await api.get('/places/');
+    renderPlaceTree(places);
+  } catch (err) {
+    document.getElementById('placeTree').innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderPlaceTree(places) {
+  const el = document.getElementById('placeTree');
+  if (!places.length) {
+    el.innerHTML = '<div class="empty-state">Henüz mekan yok.</div>';
+    return;
+  }
+
+  const byParent = new Map();
+  places.forEach(p => {
+    const key = p.parent_place_id != null ? String(p.parent_place_id) : 'root';
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(p);
+  });
+  byParent.forEach(list => list.sort((a, b) => a.name.localeCompare(b.name, 'tr')));
+
+  const rows = [];
+  // Döngüsel/hatalı veriye (A'nın üstü B, B'nin üstü A) karşı basit bir
+  // güvenlik ağı - derinlik sınırı olmasa da (kullanıcı isteği) sonsuz
+  // döngüye girmemek için bir üst sınır koyuyoruz.
+  function walk(parentKey, level, hiddenByAncestor) {
+    if (level > 100) return;
+    const children = byParent.get(parentKey) || [];
+    children.forEach(p => {
+      const hasChildren = byParent.has(String(p.id));
+      rows.push({ place: p, level, hasChildren, hidden: hiddenByAncestor });
+      const nowHidden = hiddenByAncestor || collapsedPlaceGroups.has(String(p.id));
+      walk(String(p.id), level + 1, nowHidden);
+    });
+  }
+  walk('root', 0, false);
+
+  el.innerHTML = rows.filter(r => !r.hidden).map(r => {
+    const p = r.place;
+    const indent = r.level * 18;
+    const isCollapsed = collapsedPlaceGroups.has(String(p.id));
+    const toggle = r.hasChildren
+      ? `<button class="chapter-toggle" data-id="${p.id}" title="${isCollapsed ? 'Genişlet' : 'Daralt'}">${isCollapsed ? '▸' : '▾'}</button>`
+      : `<span class="chapter-toggle" style="visibility:hidden;">▸</span>`;
+    const notesLine = p.notes ? `<div class="desc" style="font-style:italic;margin-top:2px;">${escapeHtml(truncate(p.notes, 140))}</div>` : '';
+    return `<div class="entity-row" style="padding-left:${14 + indent}px;flex-wrap:wrap;">
+      ${toggle}
+      <div style="flex:1;min-width:180px;">
+        <div class="name">${escapeHtml(p.name)}</div>
+        <div class="desc">${escapeHtml(truncate(p.description, 120))}</div>
+        ${notesLine}
+      </div>
+      <div class="actions">
+        <button class="btn btn-sm edit-place-btn" data-id="${p.id}">Düzenle</button>
+        <button class="btn btn-sm progression-btn" data-id="${p.id}">Gelişim</button>
+        <button class="btn btn-sm btn-danger del-place-btn" data-id="${p.id}">Sil</button>
+      </div>
+      <div class="progression-panel" data-id="${p.id}" style="display:none;width:100%;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);"></div>
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('.chapter-toggle[data-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      if (collapsedPlaceGroups.has(id)) collapsedPlaceGroups.delete(id); else collapsedPlaceGroups.add(id);
+      renderPlaceTree(places);
+    });
+  });
+  el.querySelectorAll('.edit-place-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = places.find(x => String(x.id) === btn.dataset.id);
+      showEntityForm('place', p);
+    });
+  });
+  el.querySelectorAll('.del-place-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Bu mekanı silmek istediğine emin misin? (Altındaki mekanlar varsa siLİNMEZ, sadece üst mekanları boşa düşer)')) return;
+      try {
+        await api.del(`/places/${btn.dataset.id}`);
+        renderPlacesView();
+      } catch (err) { alert(err.message); }
+    });
+  });
+  el.querySelectorAll('.progression-btn').forEach(btn => {
+    btn.addEventListener('click', () => toggleProgressionPanel('place', btn.dataset.id));
+  });
+}
+
+// ---------------------------------------------------------------------
 // Gelişim çizelgesi (Progressions): bir kaydın zaman içinde değişen
 // bilgisini kronolojik olarak gösterir/düzenler.
 // ---------------------------------------------------------------------
@@ -169,7 +304,7 @@ async function loadProgressionPanel(entityType, entityId) {
   }
 }
 
-function showEntityForm(type, item) {
+async function showEntityForm(type, item) {
   const cfg = ENTITY_TYPES[type];
   const container = document.getElementById('formContainer');
   const isEdit = !!item;
@@ -177,6 +312,35 @@ function showEntityForm(type, item) {
   const descValue = isEdit ? item.description : '';
   const notesValue = isEdit ? (item.notes || '') : '';
   const statusValue = isEdit ? item.status : (cfg.statusOptions ? cfg.statusOptions[0] : '');
+  const aliasesValue = isEdit ? (item.aliases || []).join(', ') : '';
+  const tagsValue = isEdit ? (item.tags || []).join(', ') : '';
+
+  // Mekanlar için "Üst Mekan" seçici - kendi kendinin/altsoyunun üst
+  // mekanı olmasını önlemek için basit bir döngü koruması var (kendi id'si
+  // ve BFS ile bulunan tüm altsoyu seçilemez listesine alınır).
+  let parentSelectHtml = '';
+  if (type === 'place') {
+    let allPlaces = [];
+    try { allPlaces = await api.get('/places/'); } catch (e) { /* seçici olmadan devam - kritik değil */ }
+    const excludeIds = new Set();
+    if (isEdit) {
+      excludeIds.add(item.id);
+      let frontier = [item.id];
+      while (frontier.length) {
+        const next = allPlaces.filter(p => frontier.includes(p.parent_place_id)).map(p => p.id);
+        next.forEach(id => excludeIds.add(id));
+        frontier = next;
+      }
+    }
+    const selectable = allPlaces.filter(p => !excludeIds.has(p.id));
+    parentSelectHtml = `<div class="field">
+      <label>Üst Mekan <span style="font-weight:400;color:var(--text-muted);">(bu mekan başka bir mekanın içindeyse)</span></label>
+      <select id="f_parent_place">
+        <option value="">(yok - en üst seviye)</option>
+        ${selectable.map(p => `<option value="${p.id}" ${isEdit && item.parent_place_id === p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
+      </select>
+    </div>`;
+  }
 
   container.innerHTML = `
     <div class="panel">
@@ -184,10 +348,19 @@ function showEntityForm(type, item) {
         <label>${cfg.isRule ? 'Başlık' : 'İsim'}</label>
         <input type="text" id="f_title" value="${escapeHtml(titleValue)}">
       </div>
+      ${cfg.hasAliases ? `<div class="field">
+        <label>Alternatif isimler / unvanlar <span style="font-weight:400;color:var(--text-muted);">(virgülle ayır - ör. "Kral, Majesteleri")</span></label>
+        <input type="text" id="f_aliases" value="${escapeHtml(aliasesValue)}" placeholder="Kral, Majesteleri">
+      </div>` : ''}
+      ${parentSelectHtml}
       <div class="field">
         <label>Açıklama</label>
         <textarea id="f_desc">${escapeHtml(descValue)}</textarea>
       </div>
+      ${cfg.hasTags ? `<div class="field">
+        <label>Etiketler <span style="font-weight:400;color:var(--text-muted);">(virgülle ayır - boş bırakırsan her zaman dahil edilir)</span></label>
+        <input type="text" id="f_tags" value="${escapeHtml(tagsValue)}" placeholder="buyu, kuzey-hanesi">
+      </div>` : ''}
       ${cfg.isRule ? '' : `<div class="field"><label>Notlar</label><textarea id="f_notes">${escapeHtml(notesValue)}</textarea></div>`}
       ${cfg.hasStatus ? `<div class="field"><label>Durum</label>
         <select id="f_status">
@@ -208,6 +381,16 @@ function showEntityForm(type, item) {
     payload.description = document.getElementById('f_desc').value;
     if (!cfg.isRule) payload.notes = document.getElementById('f_notes').value;
     if (cfg.hasStatus) payload.status = document.getElementById('f_status').value;
+    if (cfg.hasAliases) {
+      payload.aliases = document.getElementById('f_aliases').value.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    if (cfg.hasTags) {
+      payload.tags = document.getElementById('f_tags').value.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    if (type === 'place') {
+      const parentVal = document.getElementById('f_parent_place').value;
+      payload.parent_place_id = parentVal ? parseInt(parentVal, 10) : null;
+    }
 
     if (!payload[titleField]) {
       document.getElementById('formError').textContent = 'İsim/başlık boş olamaz.';
@@ -217,7 +400,8 @@ function showEntityForm(type, item) {
       if (isEdit) await api.put(`${cfg.endpoint}${item.id}`, payload);
       else await api.post(cfg.endpoint, payload);
       container.innerHTML = '';
-      renderEntityView(type);
+      if (type === 'place') renderPlacesView();
+      else renderEntityView(type);
     } catch (err) {
       document.getElementById('formError').textContent = err.message;
     }
@@ -258,6 +442,7 @@ async function renderRomanView() {
     </div>
     <div class="roman-layout">
       <div class="chapter-list" id="chapterList"><div class="empty-state">Yükleniyor…</div></div>
+      <div id="bulkScanPanel" style="display:none;grid-column:1;"></div>
       <div class="reader" id="readerPane"><div class="empty-state">Bir bölüm seç ya da yeni oluştur.</div></div>
       <div class="side-panel" id="aiPanel"></div>
     </div>`;
@@ -289,66 +474,238 @@ async function loadWordCount() {
   } catch (err) { /* sessizce geç */ }
 }
 
+// Başlık (part) ve Alt Başlık (subtitle) satırları artık Word'deki taslak
+// (outline) görünümü gibi hiyerarşik: bir Başlık'ın altındaki Alt Başlık ve
+// Bölümler ona "ait" sayılır (sırayla belirlenir - novel_id+number'a göre
+// gelen liste zaten sıralı). collapsedGroups, kullanıcının kapattığı
+// Başlık/Alt Başlık id'lerini tutar - liste her yeniden çizildiğinde
+// (API'den yeniden çekmeden) bu set'e bakılarak hangi satırların
+// gizleneceğine karar verilir.
+let lastLoadedChapters = [];
+const collapsedGroups = new Set();
+
+function buildChapterHierarchy(chapters) {
+  const items = [];
+  let currentPartId = null;
+  let currentSubtitleId = null;
+  for (const c of chapters) {
+    const id = String(c.id);
+    let level, ancestorIds;
+    if (c.kind === 'part') {
+      ancestorIds = [];
+      level = 0;
+      currentPartId = id;
+      currentSubtitleId = null;
+    } else if (c.kind === 'subtitle') {
+      ancestorIds = currentPartId ? [currentPartId] : [];
+      level = ancestorIds.length;
+      currentSubtitleId = id;
+    } else {
+      ancestorIds = [];
+      if (currentPartId) ancestorIds.push(currentPartId);
+      if (currentSubtitleId) ancestorIds.push(currentSubtitleId);
+      level = ancestorIds.length;
+    }
+    items.push({ chapter: c, level, ancestorIds });
+  }
+  items.forEach((item, idx) => {
+    if (item.chapter.kind === 'chapter') { item.hasChildren = false; return; }
+    item.hasChildren = idx + 1 < items.length && items[idx + 1].level > item.level;
+  });
+  return items;
+}
+
 async function loadChapterList(selectId, skipSelect) {
   const listEl = document.getElementById('chapterList');
   try {
     const chapters = await api.get('/chapters/');
+    lastLoadedChapters = chapters;
     if (!chapters.length) {
       listEl.innerHTML = `<div class="empty-state">Henüz bölüm yok.</div>`;
       if (!skipSelect) renderAiPanel(null);
       return;
     }
-    listEl.innerHTML = chapters.map(c => {
-      if (c.kind === 'part') {
-        return `<div class="chapter-item chapter-part-divider" data-id="${c.id}" style="cursor:default;background:var(--paper-dim);">
-          <div style="flex:1;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;font-size:12.5px;">${escapeHtml(c.title)}</div>
-          <button class="btn-icon-sm del-chapter-btn" data-id="${c.id}" title="Sil">✕</button>
-        </div>`;
-      }
-      if (c.kind === 'subtitle') {
-        return `<div class="chapter-item chapter-subtitle-divider" data-id="${c.id}" style="cursor:default;">
-          <div style="flex:1;font-style:italic;font-size:12.5px;color:var(--text-muted);padding-left:12px;">${escapeHtml(c.title)}</div>
-          <button class="btn-icon-sm del-chapter-btn" data-id="${c.id}" title="Sil">✕</button>
-        </div>`;
-      }
-      const preview = c.summary ? c.summary.slice(0, 80) + (c.summary.length > 80 ? '…' : '') : '';
-      return `<div class="chapter-item${currentChapter && String(currentChapter.id) === String(c.id) ? ' active' : ''}" data-id="${c.id}" title="${escapeHtml(c.summary || 'Henüz özet yok')}">
-        <div style="flex:1;min-width:0;">
-          <span>Bölüm ${c.number}${c.title ? ' — ' + escapeHtml(c.title) : ''}</span>
-          ${preview ? `<div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(preview)}</div>` : ''}
-        </div>
-        <button class="btn-icon-sm del-chapter-btn" data-id="${c.id}" title="Bölümü sil">✕</button>
-      </div>`;
-    }).join('');
-    listEl.querySelectorAll('.chapter-item').forEach(el => {
-      el.addEventListener('click', (e) => {
-        if (e.target.closest('.del-chapter-btn')) return;
-        const c = chapters.find(x => String(x.id) === el.dataset.id);
-        if (c && c.kind !== 'chapter') {
-          const newTitle = prompt('Metni düzenle:', c.title);
-          if (newTitle === null || !newTitle.trim()) return;
-          api.put(`/chapters/${c.id}`, { title: newTitle.trim() }).then(() => loadChapterList(currentChapter ? currentChapter.id : undefined)).catch(err => alert(err.message));
-          return;
-        }
-        selectChapter(el.dataset.id);
-      });
-    });
-    listEl.querySelectorAll('.del-chapter-btn').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (!confirm('Bu bölümü ve içindeki tüm paragrafları silmek istediğine emin misin?')) return;
-        try {
-          await api.del(`/chapters/${btn.dataset.id}`);
-          await loadChapterList();
-        } catch (err) { alert(err.message); }
-      });
-    });
+    renderChapterListDOM();
     if (skipSelect) return;
     const firstRealChapter = chapters.find(c => c.kind === 'chapter');
     if (selectId || firstRealChapter) selectChapter(selectId || firstRealChapter.id);
   } catch (err) {
     listEl.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   }
+}
+
+// API'ye tekrar gitmeden, sadece açma/kapama ya da düzenleme sonrası liste
+// HTML'ini yeniden çizer - collapsedGroups değiştiğinde de bu çağrılır.
+function renderChapterListDOM() {
+  const listEl = document.getElementById('chapterList');
+  const chapters = lastLoadedChapters;
+  const hierarchy = buildChapterHierarchy(chapters);
+
+  listEl.innerHTML = hierarchy.map(item => {
+    const c = item.chapter;
+    const hidden = item.ancestorIds.some(id => collapsedGroups.has(id));
+    if (hidden) return '';
+    const indent = item.level * 18;
+    const cleanTitle = stripMarkdownArtifacts(c.title);
+
+    if (c.kind === 'part' || c.kind === 'subtitle') {
+      const isCollapsed = collapsedGroups.has(String(c.id));
+      const toggle = item.hasChildren
+        ? `<button class="chapter-toggle" data-id="${c.id}" title="${isCollapsed ? 'Genişlet' : 'Daralt'}">${isCollapsed ? '▸' : '▾'}</button>`
+        : `<span class="chapter-toggle" style="visibility:hidden;">▸</span>`;
+      const isPart = c.kind === 'part';
+      const bulkScanBtn = isPart
+        ? `<button class="btn-icon-sm bulk-scan-btn" data-id="${c.id}" title="Bu Kısımdaki TÜM bölümleri tara - yeni varlık ve gelişim notu önerileri">🔍</button>`
+        : '';
+      return `<div class="chapter-item ${isPart ? 'chapter-part-divider' : 'chapter-subtitle-divider'}" data-id="${c.id}" style="cursor:default;padding-left:${14 + indent}px;${isPart ? 'background:var(--paper-dim);' : ''}">
+        ${toggle}
+        <div class="chapter-label-edit" data-id="${c.id}" style="flex:1;cursor:pointer;${isPart ? 'font-weight:700;letter-spacing:0.5px;text-transform:uppercase;font-size:12.5px;' : 'font-style:italic;font-size:12.5px;color:var(--text-muted);'}" title="Düzenlemek için tıkla">${escapeHtml(cleanTitle) || '<span style=\"opacity:0.5;\">(başlıksız)</span>'}</div>
+        ${bulkScanBtn}
+        <button class="btn-icon-sm edit-chapter-btn" data-id="${c.id}" title="Metni düzenle">✎</button>
+        <button class="btn-icon-sm del-chapter-btn" data-id="${c.id}" title="Sil">✕</button>
+      </div>`;
+    }
+
+    const cleanSummary = stripMarkdownArtifacts(c.summary);
+    const isDuplicateOfTitle = cleanTitle && cleanSummary &&
+      cleanSummary.toLowerCase().startsWith(cleanTitle.toLowerCase().slice(0, 40));
+    const preview = (cleanSummary && !isDuplicateOfTitle)
+      ? cleanSummary.slice(0, 80) + (cleanSummary.length > 80 ? '…' : '')
+      : '';
+    return `<div class="chapter-item${currentChapter && String(currentChapter.id) === String(c.id) ? ' active' : ''}" data-id="${c.id}" style="padding-left:${14 + indent}px;" title="${escapeHtml(c.summary || 'Henüz özet yok')}">
+      <div style="flex:1;min-width:0;">
+        <span>Bölüm ${c.number}${cleanTitle ? ' — ' + escapeHtml(cleanTitle) : ''}</span>
+        ${preview ? `<div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(preview)}</div>` : ''}
+      </div>
+      <button class="btn-icon-sm del-chapter-btn" data-id="${c.id}" title="Bölümü sil">✕</button>
+    </div>`;
+  }).join('');
+
+  // Gerçek bölümler (kind === 'chapter') tıklanınca seçilir/okunur.
+  listEl.querySelectorAll('.chapter-item').forEach(el => {
+    const c = chapters.find(x => String(x.id) === el.dataset.id);
+    if (c && c.kind !== 'chapter') return; // part/subtitle satırları bu genel handler'a girmez
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.del-chapter-btn')) return;
+      selectChapter(el.dataset.id);
+    });
+  });
+  // Başlık/Alt Başlık metnine tıklamak DOĞRUDAN düzenlemeyi açar (Word'de
+  // bir başlığa tıklayıp yazmaya başlamak gibi) - açma/kapama okuna ya da
+  // sil butonuna tıklamak bunu tetiklemez.
+  listEl.querySelectorAll('.chapter-label-edit').forEach(el => {
+    el.addEventListener('click', () => openChapterEditPrompt(el.dataset.id));
+  });
+  listEl.querySelectorAll('.chapter-toggle').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      if (collapsedGroups.has(id)) collapsedGroups.delete(id); else collapsedGroups.add(id);
+      renderChapterListDOM();
+    });
+  });
+  listEl.querySelectorAll('.bulk-scan-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openBulkScanForPart(btn.dataset.id);
+    });
+  });
+  listEl.querySelectorAll('.edit-chapter-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openChapterEditPrompt(btn.dataset.id);
+    });
+  });
+  listEl.querySelectorAll('.del-chapter-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('Bu bölümü ve içindeki tüm paragrafları silmek istediğine emin misin?')) return;
+      try {
+        await api.del(`/chapters/${btn.dataset.id}`);
+        await loadChapterList();
+      } catch (err) { alert(err.message); }
+    });
+  });
+}
+
+function openChapterEditPrompt(id) {
+  const c = lastLoadedChapters.find(x => String(x.id) === String(id));
+  if (!c) return;
+  const newTitle = prompt('Metni düzenle:', stripMarkdownArtifacts(c.title));
+  if (newTitle === null || !newTitle.trim()) return;
+  api.put(`/chapters/${c.id}`, { title: stripMarkdownArtifacts(newTitle.trim()) })
+    .then(() => loadChapterList(currentChapter ? currentChapter.id : undefined, true))
+    .catch(err => alert(err.message));
+}
+
+// "Altın vuruş": bir Kısım'ın (Part) TAMAMINI tek seferde tarayıp henüz
+// menülerde kayıtlı olmayan karakter/mekan/nesneleri VE yeni/değişen
+// gelişim notlarını önerir - fihristteki hiyerarşiyle senkron (Kısım
+// seviyesinde). Varsayılan olarak o Kısım'ın altındaki TÜM bölümler
+// seçili gelir, kullanıcı isterse bazılarının işaretini kaldırıp
+// "seçilebilir bütün bölümlerden" tara mantığını da karşılar.
+function getChaptersUnderPart(partId) {
+  const hierarchy = buildChapterHierarchy(lastLoadedChapters);
+  return hierarchy
+    .filter(item => item.chapter.kind === 'chapter' && item.ancestorIds.includes(String(partId)))
+    .map(item => item.chapter);
+}
+
+function openBulkScanForPart(partId) {
+  const chapters = getChaptersUnderPart(partId).filter(c => true);
+  const panel = document.getElementById('bulkScanPanel');
+  if (!panel) return;
+  if (!chapters.length) {
+    alert('Bu Kısım altında henüz bölüm yok.');
+    return;
+  }
+  panel.style.display = 'block';
+  panel.innerHTML = `
+    <div class="panel" style="margin-top:0;">
+      <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">KISIM TARAMASI</strong>
+      <p style="font-size:12.5px;color:var(--text-muted);margin:4px 0 8px;">Bu Kısım'daki bölümler AI ile taranıp yeni varlık ve gelişim notu önerileri çıkarılacak. İstemediğin bölümün işaretini kaldırabilirsin.</p>
+      ${chapters.map(c => `<label style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px;">
+        <input type="checkbox" class="bulk-scan-chapter-check" value="${c.id}" checked>
+        <span>Bölüm ${c.number}${c.title ? ' — ' + escapeHtml(stripMarkdownArtifacts(c.title)) : ''}</span>
+      </label>`).join('')}
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn btn-primary btn-sm" id="runBulkScanBtn">Tara</button>
+        <button class="btn btn-sm" id="closeBulkScanBtn">Kapat</button>
+      </div>
+      <div id="bulkScanResult" style="margin-top:10px;"></div>
+    </div>`;
+
+  document.getElementById('closeBulkScanBtn').addEventListener('click', () => {
+    panel.style.display = 'none';
+    panel.innerHTML = '';
+  });
+  document.getElementById('runBulkScanBtn').addEventListener('click', async (e) => {
+    const chosenIds = Array.from(panel.querySelectorAll('.bulk-scan-chapter-check:checked')).map(cb => parseInt(cb.value, 10));
+    if (!chosenIds.length) { alert('En az bir bölüm seçmelisin.'); return; }
+    e.target.disabled = true;
+    const resultEl = document.getElementById('bulkScanResult');
+    resultEl.innerHTML = '<div class="empty-state">Taranıyor, bölüm sayısına göre biraz sürebilir…</div>';
+    try {
+      const [entitySuggestions, progressionSuggestions, relationshipSuggestions, eventSuggestions] = await Promise.all([
+        api.post('/chapters/suggest-entities-bulk', { chapter_ids: chosenIds }),
+        api.post('/chapters/suggest-progressions-bulk', { chapter_ids: chosenIds }),
+        api.post('/chapters/suggest-relationships-bulk', { chapter_ids: chosenIds }),
+        api.post('/chapters/suggest-events-bulk', { chapter_ids: chosenIds }),
+      ]);
+      resultEl.innerHTML = `
+        <div id="bulkEntityPanel"></div>
+        <div id="bulkProgressionPanel" style="margin-top:10px;"></div>
+        <div id="bulkRelationshipPanel" style="margin-top:10px;"></div>
+        <div id="bulkEventPanel" style="margin-top:10px;"></div>`;
+      renderEntitySuggestionsInto(document.getElementById('bulkEntityPanel'), 'bulk-' + partId, entitySuggestions);
+      renderProgressionSuggestionsInto(document.getElementById('bulkProgressionPanel'), progressionSuggestions);
+      renderRelationshipSuggestionsInto(document.getElementById('bulkRelationshipPanel'), relationshipSuggestions);
+      renderEventSuggestionsInto(document.getElementById('bulkEventPanel'), eventSuggestions);
+    } catch (err) {
+      resultEl.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+    }
+    e.target.disabled = false;
+  });
 }
 
 async function refreshAfterChatActions() {
@@ -375,8 +732,12 @@ async function createChapterPrompt(kind) {
     alert(`"${number}" bir sayı değil. Sıra alanına sadece 1, 2, 3 gibi bir SAYI yazmalısın - başlık/metin bir sonraki adımda soruluyor.`);
     return;
   }
-  const title = prompt(`${kindLabel} metni${kind === 'chapter' ? ' (opsiyonel)' : ''}:`) || '';
-  if (kind !== 'chapter' && !title.trim()) { alert(`${kindLabel} için bir metin gerekli.`); return; }
+  const rawTitle = prompt(`${kindLabel} metni${kind === 'chapter' ? ' (opsiyonel)' : ''}:`) || '';
+  if (kind !== 'chapter' && !rawTitle.trim()) { alert(`${kindLabel} için bir metin gerekli.`); return; }
+  // Bir AI sohbetinden ya da başka bir kaynaktan kopyala-yapıştır yapılırsa
+  // "> **başlık**" gibi markdown işaretleri gelebilir - fihriste çirkin
+  // görünmemesi için kaydetmeden önce temizliyoruz.
+  const title = stripMarkdownArtifacts(rawTitle);
   try {
     const chapter = await api.post('/chapters/', { number: parsedNumber, title, kind });
     await loadChapterList(chapter.id);
@@ -407,13 +768,18 @@ async function selectChapter(id) {
 
 async function runBackgroundChapterScan(chapterId) {
   try {
-    const [entities, progressions] = await Promise.all([
+    const [entities, progressions, relationships, events] = await Promise.all([
       api.post(`/chapters/${chapterId}/suggest-entities`, {}).catch(() => []),
       api.post(`/chapters/${chapterId}/suggest-progressions`, {}).catch(() => []),
+      api.post(`/chapters/${chapterId}/suggest-relationships`, {}).catch(() => []),
+      api.post(`/chapters/${chapterId}/suggest-events`, {}).catch(() => []),
     ]);
-    const total = (entities || []).length + (progressions || []).length;
+    const total = (entities || []).length + (progressions || []).length + (relationships || []).length + (events || []).length;
     if (total > 0) {
-      pendingAiSuggestions[chapterId] = { entities: entities || [], progressions: progressions || [] };
+      pendingAiSuggestions[chapterId] = {
+        entities: entities || [], progressions: progressions || [],
+        relationships: relationships || [], events: events || [],
+      };
       showToast(`Bölüm için ${total} yeni AI önerisi hazır - bölümü tekrar açınca görebilirsin.`);
       // Sidebardaki fihrist satırına küçük bir rozet ekle, farkında ol diye
       const row = document.querySelector(`.chapter-item[data-id="${chapterId}"]`);
@@ -521,7 +887,7 @@ function renderReader(chapter) {
 
   const pending = pendingAiSuggestions[chapter.id];
   if (pending) {
-    const total = pending.entities.length + pending.progressions.length;
+    const total = pending.entities.length + pending.progressions.length + (pending.relationships || []).length + (pending.events || []).length;
     const banner = document.getElementById('pendingAiSuggestionsBanner');
     banner.innerHTML = `
       <div class="panel" style="margin-bottom:12px;border-color:var(--gold);">
@@ -539,6 +905,16 @@ function renderReader(chapter) {
         const progPanel = document.createElement('div');
         banner.appendChild(progPanel);
         renderProgressionSuggestionsInto(progPanel, pending.progressions);
+      }
+      if ((pending.relationships || []).length) {
+        const relPanel = document.createElement('div');
+        banner.appendChild(relPanel);
+        renderRelationshipSuggestionsInto(relPanel, pending.relationships);
+      }
+      if ((pending.events || []).length) {
+        const evtPanel = document.createElement('div');
+        banner.appendChild(evtPanel);
+        renderEventSuggestionsInto(evtPanel, pending.events);
       }
       delete pendingAiSuggestions[chapter.id];
       const badge = document.querySelector(`.chapter-item[data-id="${chapter.id}"] .pending-ai-badge`);
@@ -817,11 +1193,77 @@ function renderChatMessages() {
       ${m.actions && m.actions.length ? `<div style="font-size:11px;color:#2f6b3a;background:#eef7ef;border-radius:6px;padding:4px 6px;margin-bottom:6px;">✓ ${m.actions.map(escapeHtml).join(' · ')}</div>` : ''}
       <div style="white-space:pre-wrap;">${escapeHtml(m.content)}</div>
       ${m.role === 'assistant' ? `<button class="btn btn-sm insert-to-paragraph-btn" data-idx="${i}" style="margin-top:6px;">Bölüme paragraf olarak ekle</button>` : ''}
+      ${(m.pendingUpdates || []).map((p, pIdx) => renderEntityUpdateProposalCard(i, pIdx, p)).join('')}
     </div>`).join('');
   el.querySelectorAll('.insert-to-paragraph-btn').forEach(btn => {
     btn.addEventListener('click', () => insertChatReplyAsParagraph(aiChatMessages[parseInt(btn.dataset.idx, 10)].content));
   });
+  wireEntityUpdateProposalButtons();
   el.scrollTop = el.scrollHeight;
+}
+
+// AI'nın sohbet sırasında önerdiği ama HENÜZ KAYDEDİLMEMİŞ bir varlık
+// güncellemesi (bkz. backend: propose_entity_update / pending_entity_updates).
+// Çelişki yoksa tek bir "Ekle" butonu (sonuna ekler, hiçbir şeyi silmez);
+// çelişki VARSA bunun yerine iki seçenek gösterilir - kullanıcı BİLEREK
+// "üzerine yaz" (mode=replace) ya da "yine de sonuna ekle" (mode=append,
+// ör. karakter zamanla değişmiş olabilir) seçer.
+function renderEntityUpdateProposalCard(msgIdx, propIdx, p) {
+  const key = `${msgIdx}-${propIdx}`;
+  if (p.resolved) {
+    return `<div class="entity-update-proposal resolved" style="margin-top:8px;font-size:12px;color:var(--text-muted);">✓ ${escapeHtml(p.entity_name)} - ${escapeHtml(p.section)} güncellendi (${p.resolvedMode === 'replace' ? 'üzerine yazıldı' : 'sonuna eklendi'})</div>`;
+  }
+  const sectionLabel = escapeHtml(p.section === 'notes' ? 'Notlar' : p.section);
+  const conflictBlock = p.conflicts_with_existing ? `
+    <div style="font-size:12px;color:#8a5a00;background:#fff6e0;border-radius:6px;padding:6px 8px;margin:6px 0;">
+      ⚠️ Mevcut bilgiyle çelişiyor olabilir: ${escapeHtml(p.conflict_note || '')}
+      ${p.existing_text ? `<div style="margin-top:4px;color:var(--text-muted);"><em>Mevcut (${sectionLabel}):</em> "${escapeHtml(truncate(p.existing_text, 120))}"</div>` : ''}
+    </div>` : '';
+  const buttons = p.conflicts_with_existing
+    ? `<button class="btn btn-sm entity-update-approve-btn" data-key="${key}" data-mode="append">Yine de sonuna ekle</button>
+       <button class="btn btn-sm btn-danger entity-update-approve-btn" data-key="${key}" data-mode="replace">Üzerine yaz</button>`
+    : `<button class="btn btn-sm btn-primary entity-update-approve-btn" data-key="${key}" data-mode="append">Ekle</button>`;
+  return `<div class="entity-update-proposal" data-key="${key}" style="margin-top:8px;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--paper-dim);">
+    <div style="font-size:11.5px;color:var(--text-muted);letter-spacing:0.3px;">${escapeHtml(p.entity_name)} · ${sectionLabel}</div>
+    <div style="font-size:13px;margin:4px 0;">${escapeHtml(p.content)}</div>
+    ${conflictBlock}
+    <div style="display:flex;gap:6px;">${buttons}<button class="btn btn-sm entity-update-dismiss-btn" data-key="${key}">Yok say</button></div>
+  </div>`;
+}
+
+function findProposal(key) {
+  const [msgIdx, propIdx] = key.split('-').map(s => parseInt(s, 10));
+  const msg = aiChatMessages[msgIdx];
+  return msg && msg.pendingUpdates ? { msg, prop: msg.pendingUpdates[propIdx] } : null;
+}
+
+function wireEntityUpdateProposalButtons() {
+  document.querySelectorAll('.entity-update-approve-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const found = findProposal(btn.dataset.key);
+      if (!found) return;
+      const { prop } = found;
+      btn.closest('.entity-update-proposal').style.opacity = '0.6';
+      try {
+        await api.post('/ai/approve-entity-update', {
+          entity_type: prop.entity_type, entity_id: prop.entity_id,
+          section: prop.section, content: prop.content, mode: btn.dataset.mode,
+        });
+        prop.resolved = true;
+        prop.resolvedMode = btn.dataset.mode;
+        renderChatMessages();
+      } catch (err) { alert(err.message); btn.closest('.entity-update-proposal').style.opacity = '1'; }
+    });
+  });
+  document.querySelectorAll('.entity-update-dismiss-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const found = findProposal(btn.dataset.key);
+      if (!found) return;
+      const { msg, prop } = found;
+      msg.pendingUpdates = msg.pendingUpdates.filter(p => p !== prop);
+      renderChatMessages();
+    });
+  });
 }
 
 function insertChatReplyAsParagraph(text) {
@@ -858,7 +1300,10 @@ async function sendChatMessage(chapter) {
       messages: aiChatMessages,
     };
     const result = await api.post('/ai/chat', payload);
-    aiChatMessages.push({ role: 'assistant', content: result.reply, actions: result.actions_taken || [] });
+    aiChatMessages.push({
+      role: 'assistant', content: result.reply, actions: result.actions_taken || [],
+      pendingUpdates: (result.pending_entity_updates || []).map(p => ({ ...p, resolved: false })),
+    });
     renderChatMessages();
     if (result.actions_taken && result.actions_taken.length) {
       if (currentChapter) dirtyChapterId = currentChapter.id;
@@ -1090,6 +1535,75 @@ function renderProgressionSuggestionsInto(container, suggestions) {
         });
       }
       container.innerHTML = `<div class="success-text">${chosen.length} gelişim notu haritaya eklendi.</div>`;
+    } catch (err) { alert(err.message); e.target.disabled = false; }
+  });
+}
+
+function renderRelationshipSuggestionsInto(container, suggestions) {
+  if (!suggestions.length) {
+    container.innerHTML = '<div class="empty-state" style="text-align:left;padding:6px 0;">Yeni bir karakter ilişkisi bulunamadı.</div>';
+    return;
+  }
+  container.innerHTML = `
+    <div class="panel" style="margin:8px 0;">
+      <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">ÖNERİLEN İLİŞKİLER</strong>
+      ${suggestions.map((s, i) => `
+        <label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
+          <input type="checkbox" class="relationship-suggestion-check" data-idx="${i}" checked style="margin-top:3px;">
+          <span><strong>${escapeHtml(s.character_a_name)}</strong> — ${escapeHtml(s.label)} — <strong>${escapeHtml(s.character_b_name)}</strong>
+          ${s.notes ? `<br><span style="color:var(--text-muted);">${escapeHtml(s.notes)}</span>` : ''}</span>
+        </label>`).join('')}
+      <button class="btn btn-primary btn-sm" id="approveRelationshipsBtn" style="margin-top:8px;">Seçilenleri Haritaya Ekle</button>
+    </div>`;
+
+  container.querySelector('#approveRelationshipsBtn').addEventListener('click', async (e) => {
+    const checks = container.querySelectorAll('.relationship-suggestion-check:checked');
+    const chosen = Array.from(checks).map(cb => suggestions[parseInt(cb.dataset.idx, 10)]);
+    if (!chosen.length) { alert('Hiç seçim yapılmadı.'); return; }
+    e.target.disabled = true;
+    try {
+      for (const s of chosen) {
+        await api.post('/relationships/', {
+          character_a_id: s.character_a_id, character_b_id: s.character_b_id,
+          label: s.label, notes: s.notes || '',
+        });
+      }
+      container.innerHTML = `<div class="success-text">${chosen.length} ilişki İlişki Haritası'na eklendi.</div>`;
+    } catch (err) { alert(err.message); e.target.disabled = false; }
+  });
+}
+
+function renderEventSuggestionsInto(container, suggestions) {
+  if (!suggestions.length) {
+    container.innerHTML = '<div class="empty-state" style="text-align:left;padding:6px 0;">Zaman çizelgesine eklenmeye değer yeni bir olay bulunamadı.</div>';
+    return;
+  }
+  container.innerHTML = `
+    <div class="panel" style="margin:8px 0;">
+      <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">ÖNERİLEN OLAYLAR</strong>
+      ${suggestions.map((s, i) => `
+        <label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
+          <input type="checkbox" class="event-suggestion-check" data-idx="${i}" checked style="margin-top:3px;">
+          <span><strong>${escapeHtml(s.name)}</strong> (Bölüm ${s.chapter_number}${s.place_name ? ' — ' + escapeHtml(s.place_name) : ''})
+          ${s.character_names.length ? `<br><span style="color:var(--text-muted);">Kişiler: ${escapeHtml(s.character_names.join(', '))}</span>` : ''}
+          ${s.description ? `<br><span style="color:var(--text-muted);">${escapeHtml(s.description)}</span>` : ''}</span>
+        </label>`).join('')}
+      <button class="btn btn-primary btn-sm" id="approveEventsBtn" style="margin-top:8px;">Seçilenleri Zaman Çizelgesine Ekle</button>
+    </div>`;
+
+  container.querySelector('#approveEventsBtn').addEventListener('click', async (e) => {
+    const checks = container.querySelectorAll('.event-suggestion-check:checked');
+    const chosen = Array.from(checks).map(cb => suggestions[parseInt(cb.dataset.idx, 10)]);
+    if (!chosen.length) { alert('Hiç seçim yapılmadı.'); return; }
+    e.target.disabled = true;
+    try {
+      for (const s of chosen) {
+        await api.post('/events/', {
+          name: s.name, description: s.description, place_id: s.place_id,
+          story_order: s.story_order, character_ids: s.character_ids,
+        });
+      }
+      container.innerHTML = `<div class="success-text">${chosen.length} olay Zaman Çizelgesine eklendi.</div>`;
     } catch (err) { alert(err.message); e.target.disabled = false; }
   });
 }
@@ -1471,13 +1985,34 @@ async function loadAndRenderNovelList() {
     listEl.innerHTML = '<div class="empty-state">Henüz roman yok - aşağıdan ilkini oluştur.</div>';
     return novels;
   }
-  listEl.innerHTML = novels.map(n => `
-    <div class="novel-list-item" data-id="${n.id}">
-      <span>${escapeHtml(n.name)}</span>
-      <div class="actions">
-        <button class="btn btn-sm rename-novel-btn" data-id="${n.id}" data-name="${escapeHtml(n.name)}">Yeniden adlandır</button>
-        <button class="btn btn-sm btn-danger delete-novel-btn" data-id="${n.id}">Sil</button>
+
+  // Aynı evrendeki (serideki) kitapları grupluyoruz - karakterler/mekanlar/
+  // kurallar artık kitap değil EVREN düzeyinde paylaşıldığı için (bkz.
+  // backend Universe/Novel modeli), bunu görsel olarak da yansıtmak lazım:
+  // "hangi kitaplar aynı dünyayı paylaşıyor" tek bakışta belli olsun.
+  const groups = new Map();
+  novels.forEach(n => {
+    const key = n.universe_id != null ? `u${n.universe_id}` : `n${n.id}`;
+    if (!groups.has(key)) groups.set(key, { universeId: n.universe_id, universeName: n.universe_name || n.name, novels: [] });
+    groups.get(key).novels.push(n);
+  });
+  groups.forEach(g => g.novels.sort((a, b) => (a.book_number ?? 999) - (b.book_number ?? 999)));
+
+  listEl.innerHTML = Array.from(groups.values()).map(g => `
+    <div class="universe-group">
+      <div class="universe-group-header">
+        <span>${escapeHtml(g.universeName)}${g.novels.length > 1 ? ` <span style="font-weight:400;color:var(--text-muted);">— ${g.novels.length} kitap</span>` : ''}</span>
+        ${g.universeId != null ? `<button class="btn-icon-sm delete-universe-btn" data-id="${g.universeId}" data-name="${escapeHtml(g.universeName)}" title="Bu SERİNİN tamamını (tüm kitaplar + karakterler/mekanlar/kurallar) sil">🗑️ Seriyi tamamen sil</button>` : ''}
       </div>
+      ${g.novels.map(n => `
+        <div class="novel-list-item" data-id="${n.id}">
+          <span>${n.book_number ? `Kitap ${n.book_number}: ` : ''}${escapeHtml(n.name)}</span>
+          <div class="actions">
+            <button class="btn btn-sm rename-novel-btn" data-id="${n.id}" data-name="${escapeHtml(n.name)}">Yeniden adlandır</button>
+            <button class="btn btn-sm btn-danger delete-novel-btn" data-id="${n.id}">Bu kitabı sil</button>
+          </div>
+        </div>`).join('')}
+      ${g.universeId != null ? `<button class="btn btn-sm add-book-btn" data-universe-id="${g.universeId}" style="margin:2px 0 12px;">+ Bu seriye yeni kitap ekle</button>` : ''}
     </div>`).join('');
 
   listEl.querySelectorAll('.novel-list-item').forEach(el => {
@@ -1489,7 +2024,7 @@ async function loadAndRenderNovelList() {
   listEl.querySelectorAll('.rename-novel-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const newName = prompt('Yeni roman adı:', btn.dataset.name);
+      const newName = prompt('Yeni kitap adı:', btn.dataset.name);
       if (!newName || !newName.trim()) return;
       await api.put(`/novels/${btn.dataset.id}`, { name: newName.trim() });
       loadAndRenderNovelList();
@@ -1498,10 +2033,37 @@ async function loadAndRenderNovelList() {
   listEl.querySelectorAll('.delete-novel-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (!confirm('Bu romanı ve İÇİNDEKİ TÜM VERİYİ (karakterler, bölümler, her şey) kalıcı olarak silmek istediğine emin misin? Bu işlem geri alınamaz.')) return;
+      // ÖNEMLİ: artık sadece bu KİTABIN bölüm/paragrafları silinir -
+      // karakterler/mekanlar/kurallar gibi seri genelinde paylaşılan veri
+      // SİLİNMEZ (başka kitaplarda hâlâ kullanılıyor olabilir).
+      if (!confirm('Bu kitabın bölüm/paragraflarını kalıcı olarak silmek istediğine emin misin?\n\nKarakterler/mekanlar/kurallar gibi seri genelinde paylaşılan veriler SİLİNMEYECEK (varsa diğer kitaplarda kullanılmaya devam eder).')) return;
       await api.del(`/novels/${btn.dataset.id}`);
       if (getNovelId() === btn.dataset.id) clearNovelId();
       loadAndRenderNovelList();
+    });
+  });
+  listEl.querySelectorAll('.delete-universe-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const name = btn.dataset.name;
+      if (!confirm(`"${name}" SERİSİNİN TAMAMINI silmek üzeresin: bu seriye ait TÜM kitaplar, TÜM bölümler/paragraflar VE karakterler/mekanlar/kurallar/ilişkiler/gelişim çizelgesi/olaylar/faksiyonlar dahil HER ŞEY kalıcı olarak silinecek.\n\nBu işlem GERİ ALINAMAZ. Emin misin?`)) return;
+      if (!confirm('Son kez soruyorum - gerçekten TÜM SERİYİ silmek istiyor musun?')) return;
+      await api.del(`/universes/${btn.dataset.id}`);
+      if (novels.some(n => n.universe_id != null && String(n.universe_id) === btn.dataset.id && String(n.id) === getNovelId())) clearNovelId();
+      loadAndRenderNovelList();
+    });
+  });
+  listEl.querySelectorAll('.add-book-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const name = prompt('Yeni kitabın adı (ör. "Kışın Külleri - Kitap 2"):');
+      if (!name || !name.trim()) return;
+      const bookNumberRaw = prompt('Kaçıncı kitap? (boş bırakabilirsin, sadece gösterim için kullanılır):');
+      const book_number = bookNumberRaw && bookNumberRaw.trim() ? parseInt(bookNumberRaw.trim(), 10) : null;
+      try {
+        const novel = await api.post('/novels/', { name: name.trim(), universe_id: parseInt(btn.dataset.universeId, 10), book_number });
+        selectNovelAndStart(novel.id);
+      } catch (err) { alert(err.message); }
     });
   });
   return novels;

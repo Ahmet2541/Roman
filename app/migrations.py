@@ -32,7 +32,10 @@ _NOVEL_ID_TABLES = [
 def run_startup_migrations(engine):
     try:
         _add_missing_columns(engine)
+        _add_sections_columns(engine)
+        _add_universe_columns(engine)
         _backfill_default_novel(engine)
+        _backfill_universes(engine)
         _fix_chapter_unique_constraint(engine)
     except Exception:
         logger.exception("Şema göçü sırasında beklenmeyen bir hata oluştu - uygulama yine de başlatılıyor")
@@ -58,6 +61,152 @@ def _add_missing_columns(engine):
                 conn.execute(text(
                     "ALTER TABLE chapters ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'chapter'"
                 ))
+
+
+def _add_sections_columns(engine):
+    """Karakter/Mekan'a sonradan eklenen 'sections' (bölüm bazlı derin
+    profil - bkz. app/sections.py) sütunu. EncryptedJSON altta Text olarak
+    saklandığı için sütun tipi diğer şifreli alanlarla aynı (TEXT)."""
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+
+    with engine.begin() as conn:
+        for table in ("characters", "places"):
+            if table not in existing_tables:
+                continue  # create_all zaten oluşturmuştur, sütun da yeni gelir
+            columns = {c["name"] for c in inspector.get_columns(table)}
+            if "sections" not in columns:
+                logger.info(f"Göç: {table}.sections ekleniyor")
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN sections TEXT"))
+
+
+# Universe (evren/seri) katmanı: bu tablolar artık novel_id DEĞİL,
+# universe_id ile scope ediliyor - bir serinin tüm kitapları aynı
+# karakter/mekan/kural/... havuzunu paylaşsın diye (bkz. models.py
+# Universe/Novel yorumu).
+_UNIVERSE_ID_TABLES = [
+    "characters", "character_relationships", "places", "events", "objects",
+    "foreshadowings", "glossary_terms", "rules", "progressions",
+]
+
+
+def _add_universe_columns(engine):
+    """universe_id (+ book_number, aliases, tags, source_novel_id gibi
+    evren katmanıyla birlikte gelen yeni sütunlar) ekler. factions /
+    faction_memberships tamamen YENİ tablolar olduğu için burada değil,
+    create_all() tarafından otomatik oluşturulur - onlar için ayrı bir
+    ALTER TABLE adımına gerek yok."""
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+
+    with engine.begin() as conn:
+        if "novels" in existing_tables:
+            columns = {c["name"] for c in inspector.get_columns("novels")}
+            if "universe_id" not in columns:
+                logger.info("Göç: novels.universe_id ekleniyor")
+                conn.execute(text("ALTER TABLE novels ADD COLUMN universe_id INTEGER"))
+            if "book_number" not in columns:
+                logger.info("Göç: novels.book_number ekleniyor")
+                conn.execute(text("ALTER TABLE novels ADD COLUMN book_number INTEGER"))
+
+        for table in _UNIVERSE_ID_TABLES:
+            if table not in existing_tables:
+                continue
+            columns = {c["name"] for c in inspector.get_columns(table)}
+            if "universe_id" not in columns:
+                logger.info(f"Göç: {table}.universe_id ekleniyor")
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN universe_id INTEGER"))
+
+        for table in ("characters", "places"):
+            if table not in existing_tables:
+                continue
+            columns = {c["name"] for c in inspector.get_columns(table)}
+            if "aliases" not in columns:
+                logger.info(f"Göç: {table}.aliases ekleniyor")
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN aliases TEXT"))
+
+        if "rules" in existing_tables:
+            columns = {c["name"] for c in inspector.get_columns("rules")}
+            if "tags" not in columns:
+                logger.info("Göç: rules.tags ekleniyor")
+                conn.execute(text("ALTER TABLE rules ADD COLUMN tags TEXT"))
+
+        for table in ("events", "progressions"):
+            if table not in existing_tables:
+                continue
+            columns = {c["name"] for c in inspector.get_columns(table)}
+            if "source_novel_id" not in columns:
+                logger.info(f"Göç: {table}.source_novel_id ekleniyor")
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN source_novel_id INTEGER"))
+
+        if "places" in existing_tables:
+            columns = {c["name"] for c in inspector.get_columns("places")}
+            if "parent_place_id" not in columns:
+                logger.info("Göç: places.parent_place_id ekleniyor")
+                conn.execute(text("ALTER TABLE places ADD COLUMN parent_place_id INTEGER"))
+
+
+def _backfill_universes(engine):
+    """Her Roman (Novel) için, henüz bir evreni yoksa YENİ bir Universe
+    oluşturup bağlar - eski veriler kaybolmaz, her roman kendi (aynı adı
+    taşıyan) evreninde devam eder. Sonra karakterler/mekanlar/kurallar/...
+    tablolarının universe_id'sini, o satırların ESKİ novel_id sütunundan
+    (varsa) novels.universe_id'ye bakarak doldurur.
+
+    ÖNEMLİ SINIR: Bu migration iki farklı Roman'ı OTOMATİK olarak aynı
+    evrende birleştirmez - her biri ayrı evren olarak kalır. Aynı serinin
+    farklı kitaplarını sonradan aynı evrende toplamak istersen, bunu
+    /universes ve /novels uçlarından ELLE yapman gerekir (novel'in
+    universe_id'sini güncelleyerek) - veriyi kaybetmeden bunu otomatik
+    tahmin etmenin güvenli bir yolu yok."""
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    if "novels" not in existing_tables or "universes" not in existing_tables:
+        return  # create_all henüz çalışmamış olabilir - bir sonraki başlangıçta halledilir
+
+    novel_columns = {c["name"] for c in inspector.get_columns("novels")}
+    if "universe_id" not in novel_columns:
+        return  # _add_universe_columns henüz çalışmadı
+
+    with engine.begin() as conn:
+        novels_needing_universe = conn.execute(
+            text("SELECT id, name FROM novels WHERE universe_id IS NULL")
+        ).fetchall()
+
+        for novel_id, encrypted_name in novels_needing_universe:
+            # Universe.name de EncryptedString - romanın zaten şifreli olan
+            # adını AYNEN kopyalıyoruz (aynı Fernet anahtarıyla şifreli
+            # olduğu için tekrar şifrelemeye gerek yok, ORM okurken zaten
+            # doğru çözecek).
+            result = conn.execute(
+                text("INSERT INTO universes (name, created_at) VALUES (:name, NOW()) RETURNING id")
+                if engine.dialect.name == "postgresql"
+                else text("INSERT INTO universes (name, created_at) VALUES (:name, CURRENT_TIMESTAMP)"),
+                {"name": encrypted_name},
+            )
+            if engine.dialect.name == "postgresql":
+                new_universe_id = result.first()[0]
+            else:
+                new_universe_id = conn.execute(text("SELECT last_insert_rowid()")).first()[0]
+
+            conn.execute(
+                text("UPDATE novels SET universe_id = :uid WHERE id = :nid"),
+                {"uid": new_universe_id, "nid": novel_id},
+            )
+            logger.info(f"Göç: Roman id={novel_id} için yeni Universe id={new_universe_id} oluşturuldu")
+
+        for table in _UNIVERSE_ID_TABLES:
+            if table not in existing_tables:
+                continue
+            columns = {c["name"] for c in inspector.get_columns(table)}
+            if "novel_id" not in columns or "universe_id" not in columns:
+                continue  # eski novel_id sütunu hiç yoktu (yepyeni kurulum) - dolduracak bir şey yok
+            conn.execute(text(f"""
+                UPDATE {table}
+                SET universe_id = (SELECT universe_id FROM novels WHERE novels.id = {table}.novel_id)
+                WHERE universe_id IS NULL AND novel_id IS NOT NULL
+            """))
+            logger.info(f"Göç: {table}.universe_id, eski novel_id üzerinden dolduruldu")
 
 
 def _backfill_default_novel(engine):

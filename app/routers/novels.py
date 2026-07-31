@@ -1,8 +1,14 @@
-"""Roman yönetimi: birden fazla roman oluşturup aralarında geçiş
-yapılabilir. Silme, o romana ait TÜM veriyi (karakter/mekan/bölüm/...)
-geri alınamaz şekilde siler - admin.py'deki wipe mantığının aynısı, sadece
-tek bir novel_id'ye scope edilmiş hali."""
-from typing import List
+"""Roman (kitap) yönetimi. Her Roman bir Universe'e (evrene) bağlıdır -
+aynı evrende birden fazla kitap (bir serinin ciltleri) olabilir, hepsi
+aynı karakter/mekan/kural/... havuzunu paylaşır (bkz. models.py).
+
+ÖNEMLİ DAVRANIŞ DEĞİŞİKLİĞİ: Bir Roman'ı (kitabı) silmek artık SADECE o
+kitabın kendi bölüm/paragraf/versiyon/mention verisini siler - evren
+düzeyindeki karakterleri/mekanları/kuralları/ilişkileri/gelişim
+çizelgesini/olayları SİLMEZ, çünkü bunlar serideki BAŞKA kitaplar
+tarafından da kullanılıyor olabilir. Evrenin TAMAMINI (tüm kitapları +
+tüm paylaşılan verisiyle) silmek istiyorsan bkz. DELETE /universes/{id}."""
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -17,19 +23,42 @@ router = APIRouter(prefix="/novels", tags=["Romanlar"])
 
 class NovelCreate(BaseModel):
     name: str
+    # Belirtilmezse: bu isimle YENİ bir evren de oluşturulur (yepyeni bir
+    # seri başlatıyorsun demektir). Belirtilirse: bu kitap VAR OLAN bir
+    # evrene eklenir (serinin 2., 3., ... kitabı) - o evrenin tüm
+    # karakter/mekan/kuralları bu kitapta da otomatik kullanılabilir olur.
+    universe_id: Optional[int] = None
+    book_number: Optional[int] = None
+
+
+class NovelUpdate(BaseModel):
+    name: Optional[str] = None
+    book_number: Optional[int] = None
 
 
 class NovelOut(BaseModel):
     id: int
     name: str
+    universe_id: Optional[int] = None
+    universe_name: Optional[str] = None
+    book_number: Optional[int] = None
 
     class Config:
         from_attributes = True
 
 
+def _to_out(db: Session, novel: models.Novel) -> NovelOut:
+    universe = db.query(models.Universe).filter(models.Universe.id == novel.universe_id).first() if novel.universe_id else None
+    return NovelOut(
+        id=novel.id, name=novel.name, universe_id=novel.universe_id,
+        universe_name=universe.name if universe else None, book_number=novel.book_number,
+    )
+
+
 @router.get("/", response_model=List[NovelOut])
 def list_novels(db: Session = Depends(get_db), _user=Depends(get_current_user)):
-    return db.query(models.Novel).order_by(models.Novel.id).all()
+    novels = db.query(models.Novel).order_by(models.Novel.id).all()
+    return [_to_out(db, n) for n in novels]
 
 
 @router.post("/", response_model=NovelOut, status_code=201)
@@ -37,29 +66,52 @@ def create_novel(payload: NovelCreate, db: Session = Depends(get_db), _user=Depe
     name = payload.name.strip()
     if not name:
         raise HTTPException(400, "Roman adı boş olamaz")
-    novel = models.Novel(name=name)
+
+    universe_id = payload.universe_id
+    if universe_id is not None:
+        if not db.query(models.Universe).filter(models.Universe.id == universe_id).first():
+            raise HTTPException(404, "Evren bulunamadı")
+    else:
+        # universe_id verilmedi -> bu isimle yepyeni bir evren aç (yeni bir seri).
+        universe = models.Universe(name=name)
+        db.add(universe)
+        db.commit()
+        db.refresh(universe)
+        universe_id = universe.id
+
+    novel = models.Novel(name=name, universe_id=universe_id, book_number=payload.book_number)
     db.add(novel)
     db.commit()
     db.refresh(novel)
-    return novel
+    return _to_out(db, novel)
 
 
 @router.put("/{novel_id}", response_model=NovelOut)
-def rename_novel(novel_id: int, payload: NovelCreate, db: Session = Depends(get_db), _user=Depends(get_current_user)):
+def update_novel(novel_id: int, payload: NovelUpdate, db: Session = Depends(get_db), _user=Depends(get_current_user)):
     novel = db.query(models.Novel).filter(models.Novel.id == novel_id).first()
     if not novel:
         raise HTTPException(404, "Roman bulunamadı")
-    name = payload.name.strip()
-    if not name:
-        raise HTTPException(400, "Roman adı boş olamaz")
-    novel.name = name
+    data = payload.model_dump(exclude_unset=True)
+    if "name" in data:
+        name = (data["name"] or "").strip()
+        if not name:
+            raise HTTPException(400, "Roman adı boş olamaz")
+        novel.name = name
+    if "book_number" in data:
+        novel.book_number = data["book_number"]
     db.commit()
     db.refresh(novel)
-    return novel
+    return _to_out(db, novel)
 
 
 @router.delete("/{novel_id}", status_code=204)
 def delete_novel(novel_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)):
+    """SADECE bu kitabın bölüm/paragraf/versiyon/mention verisini siler.
+    Karakterler/mekanlar/kurallar/ilişkiler/gelişim çizelgesi/olaylar
+    evren düzeyinde kaldığı için BURADAN SİLİNMEZ (serideki başka
+    kitaplar hâlâ onlara ihtiyaç duyabilir). source_novel_id ile bu kitabı
+    işaret eden progression/event kayıtları varsa, referans sadece NULL'a
+    çekilir - kayıtların kendisi (evren geçmişi olarak) silinmez."""
     novel = db.query(models.Novel).filter(models.Novel.id == novel_id).first()
     if not novel:
         raise HTTPException(404, "Roman bulunamadı")
@@ -72,15 +124,14 @@ def delete_novel(novel_id: int, db: Session = Depends(get_db), _user=Depends(get
             db.query(models.Mention).filter(models.Mention.paragraph_id.in_(paragraph_ids)).delete(synchronize_session=False)
         db.query(models.Paragraph).filter(models.Paragraph.chapter_id.in_(chapter_ids)).delete(synchronize_session=False)
     db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).delete(synchronize_session=False)
-    db.query(models.Progression).filter(models.Progression.novel_id == novel_id).delete(synchronize_session=False)
-    db.query(models.Event).filter(models.Event.novel_id == novel_id).delete(synchronize_session=False)
-    db.query(models.CharacterRelationship).filter(models.CharacterRelationship.novel_id == novel_id).delete(synchronize_session=False)
-    db.query(models.Character).filter(models.Character.novel_id == novel_id).delete(synchronize_session=False)
-    db.query(models.Place).filter(models.Place.novel_id == novel_id).delete(synchronize_session=False)
-    db.query(models.Object).filter(models.Object.novel_id == novel_id).delete(synchronize_session=False)
-    db.query(models.Foreshadowing).filter(models.Foreshadowing.novel_id == novel_id).delete(synchronize_session=False)
-    db.query(models.GlossaryTerm).filter(models.GlossaryTerm.novel_id == novel_id).delete(synchronize_session=False)
-    db.query(models.Rule).filter(models.Rule.novel_id == novel_id).delete(synchronize_session=False)
+
+    db.query(models.Progression).filter(models.Progression.source_novel_id == novel_id).update(
+        {models.Progression.source_novel_id: None}, synchronize_session=False
+    )
+    db.query(models.Event).filter(models.Event.source_novel_id == novel_id).update(
+        {models.Event.source_novel_id: None}, synchronize_session=False
+    )
+
     db.delete(novel)
     db.commit()
     return None
