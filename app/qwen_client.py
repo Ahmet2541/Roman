@@ -155,6 +155,28 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
             if chain:
                 blocks.append(f"Nerede: {', '.join(chain)} içinde")
 
+        # FAKSİYON ÜYELİĞİ: bir karakter bir ya da daha fazla faksiyona
+        # (Hane/Lonca/Ordu/Tarikat) üyeyse, bunu da mekan zinciri gibi
+        # otomatik ekliyoruz - "Ahmet, Kuzey Hanedanı üyesi (Muhafız)" gibi.
+        # Aynı mantık: veri TEK bir yerde (FactionMembership) tutuluyor,
+        # yazarın her karakter için elle yazmasına gerek kalmıyor.
+        if ref.entity_type == "character":
+            memberships = (
+                db.query(models.FactionMembership)
+                .filter(models.FactionMembership.character_id == record.id, models.FactionMembership.universe_id == universe_id)
+                .all()
+            )
+            if memberships:
+                lines = []
+                for m in memberships:
+                    faction = db.query(models.Faction).filter(models.Faction.id == m.faction_id, models.Faction.universe_id == universe_id).first()
+                    if not faction:
+                        continue
+                    role_part = f" ({m.role})" if m.role else ""
+                    lines.append(f"{faction.name}{role_part}")
+                if lines:
+                    blocks.append(f"Faksiyon üyeliği: {', '.join(lines)}")
+
         # 'sections' (bkz. app/sections.py) İÇERİĞİNİ buraya basmıyoruz -
         # bilerek. Amaç tam olarak bunu önlemek: karakterin TÜM derin
         # profilini (görünüş, kariyer, ilişkiler...) her istekte context'e

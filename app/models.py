@@ -326,6 +326,29 @@ class Progression(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class EntitySnapshot(Base):
+    """Bir varlığın (karakter/mekan/nesne/olay/ipucu/terim/kural/faksiyon)
+    description/notes/sections/aliases/tags/status gibi alanlarından biri
+    PUT ile değiştirildiğinde, DEĞİŞMEDEN ÖNCEKİ hali burada saklanır -
+    Paragraph için zaten var olan ParagraphVersion mekanizmasının menü
+    verisi karşılığı. Amaç: AI (propose_entity_update onayı, approve-
+    suggestions) ya da yazarın kendisi yanlışlıkla önemli bir notu silip
+    üzerine yazarsa geri dönebilmek - şu ana kadar bu tür veri için HİÇBİR
+    güvenlik ağı yoktu.
+
+    old_value_json: alanın tipi ne olursa olsun (düz metin, dict, liste)
+    JSON'a çevrilip EncryptedString olarak (yani şifreli) saklanır - tek
+    sütunla hepsini kapsamak için."""
+    __tablename__ = "entity_snapshots"
+    id = Column(Integer, primary_key=True)
+    universe_id = Column(Integer, ForeignKey("universes.id"), nullable=True)
+    entity_type = Column(String(30), nullable=False)  # character | place | object | ...
+    entity_id = Column(Integer, nullable=False)
+    field_name = Column(String(50), nullable=False)  # description | notes | sections | aliases | tags | status | title
+    old_value_json = Column(EncryptedString, nullable=False)
+    saved_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Mention(Base):
     """Bir paragrafta hangi karakter/mekan/olay/nesne/ipucunun geçtiğini
     tutan indeks tablosu. 'Ahmet gemide' dediğinde ilgili paragrafı bulmayı

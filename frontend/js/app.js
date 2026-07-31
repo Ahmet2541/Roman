@@ -105,14 +105,19 @@ function renderEntityList(type, items) {
       <div class="actions">
         <button class="btn btn-sm edit-btn" data-id="${item.id}">Düzenle</button>
         ${progressionBtn}
+        <button class="btn btn-sm history-btn" data-id="${item.id}" title="Bu kayıtta neler değişti, gerekirse eskiye dön">Geçmiş</button>
         <button class="btn btn-sm btn-danger del-btn" data-id="${item.id}">Sil</button>
       </div>
       ${progressionPanel}
+      <div class="history-panel" data-id="${item.id}" style="display:none;width:100%;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);"></div>
     </div>`;
   }).join('');
 
   listEl.querySelectorAll('.progression-btn').forEach(btn => {
     btn.addEventListener('click', () => toggleProgressionPanel(type, btn.dataset.id));
+  });
+  listEl.querySelectorAll('.history-btn').forEach(btn => {
+    btn.addEventListener('click', () => toggleHistoryPanel(type, btn.dataset.id));
   });
 
   listEl.querySelectorAll('.edit-btn').forEach(btn => {
@@ -211,9 +216,11 @@ function renderPlaceTree(places) {
       <div class="actions">
         <button class="btn btn-sm edit-place-btn" data-id="${p.id}">Düzenle</button>
         <button class="btn btn-sm progression-btn" data-id="${p.id}">Gelişim</button>
+        <button class="btn btn-sm history-btn" data-id="${p.id}" title="Bu kayıtta neler değişti, gerekirse eskiye dön">Geçmiş</button>
         <button class="btn btn-sm btn-danger del-place-btn" data-id="${p.id}">Sil</button>
       </div>
       <div class="progression-panel" data-id="${p.id}" style="display:none;width:100%;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);"></div>
+      <div class="history-panel" data-id="${p.id}" style="display:none;width:100%;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);"></div>
     </div>`;
   }).join('');
 
@@ -242,6 +249,9 @@ function renderPlaceTree(places) {
   el.querySelectorAll('.progression-btn').forEach(btn => {
     btn.addEventListener('click', () => toggleProgressionPanel('place', btn.dataset.id));
   });
+  el.querySelectorAll('.history-btn').forEach(btn => {
+    btn.addEventListener('click', () => toggleHistoryPanel('place', btn.dataset.id));
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -255,6 +265,67 @@ async function toggleProgressionPanel(entityType, entityId) {
   if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
   panel.style.display = 'block';
   await loadProgressionPanel(entityType, entityId);
+}
+
+// ---------------------------------------------------------------------
+// Değişiklik geçmişi: description/notes/sections/aliases/tags/status gibi
+// alanlardan biri PUT ile değiştiğinde eski hali otomatik kaydediliyor
+// (bkz. backend generic_crud.py) - bu panel o geçmişi gösterip istenirse
+// eski hale geri döndürüyor. Paragraf metninde zaten var olan "eski
+// versiyona dön" mantığının menü verisi karşılığı.
+// ---------------------------------------------------------------------
+
+const FIELD_LABELS_TR = {
+  title: 'Başlık', description: 'Açıklama', notes: 'Notlar', sections: 'Derin Profil',
+  aliases: 'Alternatif İsimler', tags: 'Etiketler', status: 'Durum',
+};
+
+function formatHistoryValue(value) {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.join(', ');
+  if (value && typeof value === 'object') {
+    return Object.entries(value).map(([k, v]) => `${k}: ${v}`).join(' · ');
+  }
+  return String(value);
+}
+
+async function toggleHistoryPanel(entityType, entityId) {
+  const panel = document.querySelector(`.history-panel[data-id="${entityId}"]`);
+  if (!panel) return;
+  if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  panel.innerHTML = '<div class="empty-state">Yükleniyor…</div>';
+  try {
+    const history = await api.get(`/entity-history/${entityType}/${entityId}`);
+    renderHistoryPanel(panel, entityType, entityId, history);
+  } catch (err) {
+    panel.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderHistoryPanel(panel, entityType, entityId, history) {
+  if (!history.length) {
+    panel.innerHTML = '<div class="empty-state" style="text-align:left;padding:6px 0;">Bu kayıt için henüz değişiklik geçmişi yok.</div>';
+    return;
+  }
+  panel.innerHTML = `
+    <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">DEĞİŞİKLİK GEÇMİŞİ</strong>
+    ${history.map(h => `
+      <div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;">
+        <div><strong>${escapeHtml(FIELD_LABELS_TR[h.field_name] || h.field_name)}</strong> — <span style="color:var(--text-muted);">${new Date(h.saved_at).toLocaleString('tr-TR')}</span></div>
+        <div style="margin:3px 0;color:var(--text-muted);font-style:italic;">"${escapeHtml(truncate(formatHistoryValue(h.old_value), 150))}"</div>
+        <button class="btn btn-sm restore-history-btn" data-snapshot-id="${h.id}">Bu Haline Geri Dön</button>
+      </div>`).join('')}`;
+
+  panel.querySelectorAll('.restore-history-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Bu alanı gösterilen eski haline geri döndürmek istediğine emin misin?\n\n(Şu anki hali de ayrıca kaydedilecek - istersen bu geri dönüşü de sonra geri alabilirsin.)')) return;
+      try {
+        await api.post(`/entity-history/${btn.dataset.snapshotId}/restore`, {});
+        if (entityType === 'place') renderPlacesView(); else renderEntityView(entityType);
+      } catch (err) { alert(err.message); }
+    });
+  });
 }
 
 async function loadProgressionPanel(entityType, entityId) {
@@ -488,6 +559,11 @@ function buildChapterHierarchy(chapters) {
   const items = [];
   let currentPartId = null;
   let currentSubtitleId = null;
+  // Klasik taslak (outline) numaralaması: Kısım 1 -> "1", altındaki Alt
+  // Başlık/Bölüm -> "1-1", onun altındaki Bölüm -> "1-1-1". Her seviyenin
+  // kendi sayacı var; bir üst seviye ilerleyince alt seviyelerin sayaçları
+  // sıfırlanır (yeni bir Kısım başlayınca alt numaralama 1'den başlar).
+  const counters = [0, 0, 0];
   for (const c of chapters) {
     const id = String(c.id);
     let level, ancestorIds;
@@ -506,13 +582,32 @@ function buildChapterHierarchy(chapters) {
       if (currentSubtitleId) ancestorIds.push(currentSubtitleId);
       level = ancestorIds.length;
     }
-    items.push({ chapter: c, level, ancestorIds });
+    counters[level] = (counters[level] || 0) + 1;
+    for (let l = level + 1; l < counters.length; l++) counters[l] = 0;
+    const displayNumber = counters.slice(0, level + 1).join('-');
+    items.push({ chapter: c, level, ancestorIds, displayNumber });
   }
   items.forEach((item, idx) => {
     if (item.chapter.kind === 'chapter') { item.hasChildren = false; return; }
     item.hasChildren = idx + 1 < items.length && items[idx + 1].level > item.level;
   });
   return items;
+}
+
+// Bir Kısım/Alt Başlık'ın altındaki İLK gerçek bölümü bulur - başlığa
+// tıklanınca artık düzenleme değil, doğrudan o bölüme gitme davranışı
+// için kullanılır (bkz. renderChapterListDOM). Daraltılmış (collapsed)
+// olması bu aramayı etkilemez - veri her zaman tam listede aranır.
+function findFirstChapterUnder(dividerId) {
+  const hierarchy = buildChapterHierarchy(lastLoadedChapters);
+  const idx = hierarchy.findIndex(item => String(item.chapter.id) === String(dividerId));
+  if (idx === -1) return null;
+  const dividerLevel = hierarchy[idx].level;
+  for (let i = idx + 1; i < hierarchy.length; i++) {
+    if (hierarchy[i].level <= dividerLevel) break; // Kısım/Alt Başlık'ın dışına çıkıldı
+    if (hierarchy[i].chapter.kind === 'chapter') return hierarchy[i].chapter;
+  }
+  return null;
 }
 
 async function loadChapterList(selectId, skipSelect) {
@@ -559,7 +654,9 @@ function renderChapterListDOM() {
         : '';
       return `<div class="chapter-item ${isPart ? 'chapter-part-divider' : 'chapter-subtitle-divider'}" data-id="${c.id}" style="cursor:default;padding-left:${14 + indent}px;${isPart ? 'background:var(--paper-dim);' : ''}">
         ${toggle}
-        <div class="chapter-label-edit" data-id="${c.id}" style="flex:1;cursor:pointer;${isPart ? 'font-weight:700;letter-spacing:0.5px;text-transform:uppercase;font-size:12.5px;' : 'font-style:italic;font-size:12.5px;color:var(--text-muted);'}" title="Düzenlemek için tıkla">${escapeHtml(cleanTitle) || '<span style=\"opacity:0.5;\">(başlıksız)</span>'}</div>
+        <div class="chapter-label-edit" data-id="${c.id}" style="flex:1;cursor:pointer;${isPart ? 'font-weight:700;letter-spacing:0.5px;text-transform:uppercase;font-size:12.5px;' : 'font-style:italic;font-size:12.5px;color:var(--text-muted);'}" title="Bu kısımdaki ilk bölüme git">
+          <span style="opacity:0.6;font-weight:600;">${item.displayNumber}</span> ${escapeHtml(cleanTitle) || '<span style=\"opacity:0.5;\">(başlıksız)</span>'}
+        </div>
         ${bulkScanBtn}
         <button class="btn-icon-sm edit-chapter-btn" data-id="${c.id}" title="Metni düzenle">✎</button>
         <button class="btn-icon-sm del-chapter-btn" data-id="${c.id}" title="Sil">✕</button>
@@ -574,7 +671,7 @@ function renderChapterListDOM() {
       : '';
     return `<div class="chapter-item${currentChapter && String(currentChapter.id) === String(c.id) ? ' active' : ''}" data-id="${c.id}" style="padding-left:${14 + indent}px;" title="${escapeHtml(c.summary || 'Henüz özet yok')}">
       <div style="flex:1;min-width:0;">
-        <span>Bölüm ${c.number}${cleanTitle ? ' — ' + escapeHtml(cleanTitle) : ''}</span>
+        <span>${item.displayNumber}${cleanTitle ? ' — ' + escapeHtml(cleanTitle) : ''}</span>
         ${preview ? `<div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(preview)}</div>` : ''}
       </div>
       <button class="btn-icon-sm del-chapter-btn" data-id="${c.id}" title="Bölümü sil">✕</button>
@@ -590,11 +687,18 @@ function renderChapterListDOM() {
       selectChapter(el.dataset.id);
     });
   });
-  // Başlık/Alt Başlık metnine tıklamak DOĞRUDAN düzenlemeyi açar (Word'de
-  // bir başlığa tıklayıp yazmaya başlamak gibi) - açma/kapama okuna ya da
-  // sil butonuna tıklamak bunu tetiklemez.
+  // Kısım/Alt Başlık metnine tıklamak artık DÜZENLEME AÇMIYOR - liste
+  // uzadıkça (12.000 sayfalık bir seri gibi) asıl ihtiyaç o bölgeye HIZLICA
+  // GİTMEK, her tıklamanın bir düzenleme penceresi açması değil. Tıklamak,
+  // o Kısım/Alt Başlık'ın altındaki İLK gerçek bölümü seçip okuyucuya
+  // açar (daraltılmış olsa bile). Metni değiştirmek için ayrı, açık bir
+  // ✎ butonu var - kazara tıklayıp yazı kaybetme riski yok.
   listEl.querySelectorAll('.chapter-label-edit').forEach(el => {
-    el.addEventListener('click', () => openChapterEditPrompt(el.dataset.id));
+    el.addEventListener('click', () => {
+      const target = findFirstChapterUnder(el.dataset.id);
+      if (target) selectChapter(target.id);
+      else alert('Bu kısımda henüz bölüm yok. Metni değiştirmek için ✎ simgesine tıkla.');
+    });
   });
   listEl.querySelectorAll('.chapter-toggle').forEach(btn => {
     btn.addEventListener('click', (e) => {

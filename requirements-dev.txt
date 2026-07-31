@@ -1,0 +1,5 @@
+# Sadece geliştirme/test için - üretim deploy'unda (Railway) gerekmez,
+# bu yüzden ana requirements.txt'e değil ayrı bir dosyaya konuldu.
+-r requirements.txt
+pytest
+httpx

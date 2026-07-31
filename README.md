@@ -227,6 +227,24 @@ Kurallar:
   `propose_entity_update` yeni bir şey ÖNERİR (yazmaz) - bkz. yukarıdaki
   "AI ile sohbet et" adımı.
 
+## Testler
+
+Kritik iş mantığı (evren/kitap paylaşımı, migration, sections merge,
+alias tespiti, mekan hiyerarşisi, kural filtreleme, AI keşif fonksiyonları)
+için otomatik bir pytest paketi var - AI çağrıları gerektiren testler
+`unittest.mock` ile sahte Qwen yanıtlarıyla çalışır, gerçek bir
+`DASHSCOPE_API_KEY` gerekmez.
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+Bir şey değiştirirken (özellikle `migrations.py`, `qwen_client.py`,
+`generic_crud.py`) bu paketi çalıştırmak, bu proje boyunca elle bulduğumuz
+türden sessiz regresyonları (ör. Set'te string/number karışıklığı,
+progression'da yanlış chapter_number) otomatik yakalar.
+
 ## Sonraki adımlar
 
 Geriye gerçekten sadece senin yapabileceğin tek şey kaldı:

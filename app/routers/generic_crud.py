@@ -1,16 +1,25 @@
 from typing import Type, List, Optional
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
+from .. import models
 from ..database import get_db
 from ..auth import get_current_user
 from ..novel_context import get_universe_id
 
+# Bu alanlardan biri değişirse (ve eski değeri BOŞ DEĞİLSE - kaybedecek bir
+# şey yoksa snapshot almanın anlamı yok) eski hali EntitySnapshot'a
+# kaydedilir. title/description/notes serbest metin; sections/aliases/tags
+# dict/liste; status düz bir seçenek ama yine de yanlışlıkla "öldü" yapılıp
+# geri alınamayan bir durum olmasın diye dahil edildi.
+_SNAPSHOT_FIELDS = {"title", "description", "notes", "sections", "aliases", "tags", "status"}
+
 
 def make_crud_router(
     model, create_schema: Type, update_schema: Type, out_schema: Type,
-    prefix: str, tag: str,
+    prefix: str, tag: str, entity_type: Optional[str] = None,
 ) -> APIRouter:
     """Kişiler, Mekanlar, Olaylar, Nesneler, İpuçları, Terimler ve Kurallar
     menülerinin hepsi aynı basit CRUD şekline sahip - tek fabrika fonksiyonu
@@ -21,7 +30,12 @@ def make_crud_router(
     novel_context.get_universe_id), ve her sorgu/oluşturma o evrenle
     filtrelenir/etiketlenir - böylece aynı serideki tüm kitaplar aynı
     karakter/mekan/kural havuzunu paylaşır, farklı evrenler arasında ise
-    hiçbir isim/kayıt sızmaz."""
+    hiçbir isim/kayıt sızmaz.
+
+    entity_type: ENTITY_MODELS'teki anahtarla (ör. "character") aynı olmalı
+    - verilmezse versiyon geçmişi (EntitySnapshot) hiç kaydedilmez (bu
+    router bir alt-kaynak için kullanılıyorsa, ör. gelecekte, buna gerek
+    kalmayabilir)."""
 
     router = APIRouter(prefix=prefix, tags=[tag])
 
@@ -79,6 +93,18 @@ def make_crud_router(
             raise HTTPException(404, f"{tag} bulunamadı")
         for field, value in payload.model_dump(exclude_unset=True).items():
             current = getattr(item, field, None)
+            # DEĞİŞMEDEN ÖNCEKİ hali kaydet - AI ya da yazar yanlışlıkla
+            # önemli bir notu silip üzerine yazarsa geri dönülebilsin diye
+            # (bkz. models.EntitySnapshot). Eski değer zaten boşsa (kaybedecek
+            # bir şey yoksa), bu alan snapshot listesinde değilse, ya da
+            # DEĞER GERÇEKTEN AYNIYSA (ör. form her zaman tüm alanları
+            # gönderiyor ama status değişmemiş olabilir) atla - yoksa her
+            # düzenlemede alakasız "değişiklik" kayıtları birikir.
+            if entity_type and field in _SNAPSHOT_FIELDS and current and current != value:
+                db.add(models.EntitySnapshot(
+                    universe_id=universe_id, entity_type=entity_type, entity_id=item.id,
+                    field_name=field, old_value_json=json.dumps(current, ensure_ascii=False),
+                ))
             if isinstance(current, dict) and isinstance(value, dict):
                 # 'sections' gibi dict alanlarda YERİNE koymak yerine
                 # BİRLEŞTİRİYORUZ - {"korkular": "..."} göndermek diğer

@@ -19,6 +19,7 @@ from .routers.events import router as events_router
 from .routers.relationships import router as relationships_router
 from .routers.progressions import router as progressions_router
 from .routers.factions import router as faction_memberships_router
+from .routers.entity_history import router as entity_history_router
 from .routers.novels import router as novels_router
 from .routers.universes import router as universes_router
 from .routers.admin import router as admin_router
@@ -88,6 +89,7 @@ app.include_router(events_router)
 app.include_router(relationships_router)
 app.include_router(progressions_router)
 app.include_router(faction_memberships_router)
+app.include_router(entity_history_router)
 app.include_router(chapters_router)
 app.include_router(ai_router)
 app.include_router(admin_router)

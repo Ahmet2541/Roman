@@ -1,11 +1,11 @@
 ﻿.env
 *.db
-*.db-journal
-logs/
-backups/
+roman.db
 __pycache__/
 *.pyc
+.pytest_cache/
+logs/
+backups/
+node_modules/
 venv/
 .venv/
-.vscode/
-.idea/

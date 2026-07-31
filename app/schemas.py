@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -538,3 +538,18 @@ class ChapterWordCount(BaseModel):
 class WordCountStats(BaseModel):
     total_words: int
     chapters: List[ChapterWordCount]
+
+
+# ---- Değişiklik geçmişi (EntitySnapshot) ------------------------------------
+
+class EntitySnapshotOut(BaseModel):
+    """Bir varlığın bir alanının DEĞİŞMEDEN ÖNCEKİ hali - bkz. models.py
+    EntitySnapshot yorumu. old_value alanın tipine göre str, dict ya da
+    liste olabilir (field_name'e bakarak anlaşılır: sections->dict,
+    aliases/tags->liste, geri kalanı->düz metin)."""
+    id: int
+    entity_type: str
+    entity_id: int
+    field_name: str
+    old_value: Any
+    saved_at: datetime
