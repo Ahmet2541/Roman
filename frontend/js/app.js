@@ -637,7 +637,19 @@ function renderChapterListDOM() {
   const chapters = lastLoadedChapters;
   const hierarchy = buildChapterHierarchy(chapters);
 
-  listEl.innerHTML = hierarchy.map(item => {
+  // Liste (özellikle uzun bir romanda yüzlerce Kısım/Bölüm birikince) çok
+  // uzayabiliyor - "Tümünü Daralt" tüm Kısım/Alt Başlık'ları tek tıkla
+  // kapatıp sadece üst seviye başlıkları bırakır, "Tümünü Genişlet" hepsini
+  // tekrar açar. Sadece GERÇEKTEN alt öğesi olan (hasChildren) girdiler
+  // daraltılabilir olduğu için sadece onlar collapsedGroups'a eklenir.
+  const collapsibleIds = hierarchy.filter(it => it.hasChildren).map(it => String(it.chapter.id));
+  const controlsHtml = collapsibleIds.length ? `
+    <div style="display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border);background:var(--paper-dim);">
+      <button class="btn-icon-sm" id="collapseAllBtn" style="font-size:11px;">▸ Tümünü Daralt</button>
+      <button class="btn-icon-sm" id="expandAllBtn" style="font-size:11px;">▾ Tümünü Genişlet</button>
+    </div>` : '';
+
+  listEl.innerHTML = controlsHtml + hierarchy.map(item => {
     const c = item.chapter;
     const hidden = item.ancestorIds.some(id => collapsedGroups.has(id));
     if (hidden) return '';
@@ -725,6 +737,20 @@ function renderChapterListDOM() {
       renderChapterListDOM();
     });
   });
+  const collapseAllBtn = document.getElementById('collapseAllBtn');
+  if (collapseAllBtn) {
+    collapseAllBtn.addEventListener('click', () => {
+      collapsibleIds.forEach(id => collapsedGroups.add(id));
+      renderChapterListDOM();
+    });
+  }
+  const expandAllBtn = document.getElementById('expandAllBtn');
+  if (expandAllBtn) {
+    expandAllBtn.addEventListener('click', () => {
+      collapsedGroups.clear();
+      renderChapterListDOM();
+    });
+  }
   listEl.querySelectorAll('.bulk-scan-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1091,8 +1117,9 @@ function renderReader(chapter) {
     </div>`).join('');
 
   const kindWarning = chapter.kind !== 'chapter'
-    ? `<div class="panel" style="border-color:var(--danger);background:#fdf1f0;margin-bottom:12px;">
-        <strong style="font-size:12.5px;color:var(--danger);">⚠ Bu bir ${chapter.kind === 'part' ? 'Kısım' : 'Alt Başlık'} - normalde sadece bir ayraç, paragraf tutmaz.</strong>
+    ? `<div class="panel" id="kindWarningBanner" style="border-color:var(--danger);background:#fdf1f0;margin-bottom:12px;position:relative;">
+        <button id="dismissKindWarningBtn" title="Kapat" style="position:absolute;top:8px;right:10px;background:none;border:none;cursor:pointer;font-size:15px;color:var(--danger);line-height:1;">✕</button>
+        <strong style="font-size:12.5px;color:var(--danger);padding-right:20px;display:block;">⚠ Bu bir ${chapter.kind === 'part' ? 'Kısım' : 'Alt Başlık'} - normalde sadece bir ayraç, paragraf tutmaz.</strong>
         <div style="font-size:12px;margin-top:4px;">Burada gördüğün metin muhtemelen "+ Yeni" ile yanlışlıkla buraya yazılmış. Bu içeriği düzeltmek için: yeni bir "Bölüm" oluştur, metni oraya taşı, sonra buradaki paragrafları sil.</div>
       </div>`
     : '';
@@ -1201,6 +1228,12 @@ function renderReader(chapter) {
     });
   }
 
+  const dismissKindWarningBtn = document.getElementById('dismissKindWarningBtn');
+  if (dismissKindWarningBtn) {
+    dismissKindWarningBtn.addEventListener('click', () => {
+      document.getElementById('kindWarningBanner').style.display = 'none';
+    });
+  }
   document.getElementById('editTitleBtn').addEventListener('click', async () => {
     const newTitle = prompt('Yeni bölüm başlığı:', chapter.title || '');
     if (newTitle === null) return;
