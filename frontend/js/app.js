@@ -1997,8 +1997,10 @@ async function renderAiPanel(chapter) {
     panel.innerHTML = `
       <h3>AI Yazım Desteği</h3>
       ${planHtml}
-      <input type="text" id="entityPickerSearch" placeholder="Kişi/mekan/olay ara…" style="width:100%;margin-bottom:8px;">
-      <div class="entity-picker">${pickerHtml || '<div class="empty-state">Henüz kayıt yok</div>'}</div>
+      <div id="selectedEntityChips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
+      <input type="text" id="entityPickerSearch" placeholder="Kişi/mekan/olay ara… (metinde @isim yazarak da seçebilirsin)" style="width:100%;margin-bottom:6px;">
+      <button type="button" class="btn btn-sm" id="togglePickerBtn" style="margin-bottom:6px;">▸ Listeyi göster</button>
+      <div class="entity-picker" id="entityPickerBox" style="display:none;">${pickerHtml || '<div class="empty-state">Henüz kayıt yok</div>'}</div>
 
       <div class="ai-mode-tabs" style="display:flex;gap:6px;margin:10px 0 4px;">
         <button class="btn btn-sm ai-mode-btn active" data-mode="chat">Sohbet</button>
@@ -2057,6 +2059,22 @@ async function renderAiPanel(chapter) {
         planToggle.querySelector('span:last-child').textContent = hidden ? '▾' : '▸';
       });
     }
+    // Liste varsayılan KAPALI: 30-40 karakterli seride onay kutusu yığını
+    // paneli boğuyordu. Seçilenler üstte rozet olarak görünür; seçim ya
+    // aramayla ya da metinde @isim yazarak yapılır.
+    const pickerBox = document.getElementById('entityPickerBox');
+    const toggleBtn = document.getElementById('togglePickerBtn');
+    toggleBtn.addEventListener('click', () => {
+      const hidden = pickerBox.style.display === 'none';
+      pickerBox.style.display = hidden ? '' : 'none';
+      toggleBtn.textContent = hidden ? '▾ Listeyi gizle' : '▸ Listeyi göster';
+    });
+    // Bölümde geçen varlıklar otomatik işaretli geliyor - kullanıcı en az
+    // bir seçimle karşılaşırsa listeyi açmasına gerek kalmasın diye rozetler.
+    renderSelectedEntityChips();
+    panel.querySelectorAll('.entity-check').forEach(cb =>
+      cb.addEventListener('change', renderSelectedEntityChips));
+
     document.getElementById('entityPickerSearch').addEventListener('input', (e) => {
       const q = e.target.value.trim().toLowerCase();
       panel.querySelectorAll('.entity-picker-label').forEach(label => {
@@ -2081,6 +2099,11 @@ async function renderAiPanel(chapter) {
     });
 
     document.getElementById('aiChatSendBtn').addEventListener('click', () => sendChatMessage(chapter));
+    // @isim yazımı: hem sohbet hem talimat kutusunda çalışır
+    ['aiChatInput', 'aiInstruction'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', () => handleMentionTyping(el));
+    });
     document.getElementById('aiChatInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(chapter); }
     });
@@ -4258,4 +4281,71 @@ async function openMatrixRowEditor(m, rowId) {
       await loadMatrixGrid();
     } catch (err) { document.getElementById('mRowError').textContent = err.message; }
   });
+}
+
+// ---------------------------------------------------------------------------
+// @İSİM ile VARLIK ÇAĞIRMA: uzun kişi listelerinde onay kutusu avlamak yerine
+// yazarken "@vicdan" yazıp seçmek. Yazdıkça öneri listesi çıkar; seçilince
+// (a) üstteki listede o varlık işaretlenir, (b) metindeki @kısaltma tam ada
+// dönüşür. Böylece hem AI'ya doğru varlık gider hem cümle akıcı kalır.
+// ---------------------------------------------------------------------------
+function renderSelectedEntityChips() {
+  const box = document.getElementById('selectedEntityChips');
+  if (!box) return;
+  const checked = Array.from(document.querySelectorAll('.entity-check:checked'));
+  if (!checked.length) {
+    box.innerHTML = '<span style="font-size:11.5px;color:var(--text-muted);">Seçili varlık yok - arayarak ya da metinde @isim yazarak seç</span>';
+    return;
+  }
+  box.innerHTML = checked.map(cb => {
+    const name = cb.parentElement.textContent.trim().replace(/\s*●$/, '');
+    return `<span class="mention-chip" style="cursor:pointer;" data-id="${cb.dataset.id}" data-type="${cb.dataset.type}" title="Seçimden çıkar">${escapeHtml(name)} ✕</span>`;
+  }).join('');
+  box.querySelectorAll('.mention-chip').forEach(chip => chip.addEventListener('click', () => {
+    const cb = document.querySelector(`.entity-check[data-id="${chip.dataset.id}"][data-type="${chip.dataset.type}"]`);
+    if (cb) { cb.checked = false; renderSelectedEntityChips(); }
+  }));
+}
+
+function handleMentionTyping(el) {
+  const value = el.value;
+  const caret = el.selectionStart;
+  const before = value.slice(0, caret);
+  // İmleçten geriye doğru en yakın @ ve sonrasındaki kelime parçası
+  const match = before.match(/@([\wçğıöşüÇĞİÖŞÜ]*)$/);
+  let box = document.getElementById('mentionSuggestBox');
+  if (!match) { if (box) box.remove(); return; }
+
+  const query = _trLowerJs(match[1]);
+  const options = Array.from(document.querySelectorAll('.entity-check')).map(cb => ({
+    cb, name: cb.parentElement.textContent.trim().replace(/\s*●$/, ''),
+  })).filter(o => !query || _trLowerJs(o.name).includes(query)).slice(0, 6);
+
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'mentionSuggestBox';
+    box.style.cssText = 'border:1px solid var(--border);border-radius:8px;background:#fff;margin-top:4px;max-height:180px;overflow-y:auto;';
+    el.parentElement.appendChild(box);
+  }
+  if (!options.length) {
+    box.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:6px 8px;">Eşleşen kayıt yok</div>';
+    return;
+  }
+  box.innerHTML = options.map((o, i) => `
+    <div class="mention-opt" data-idx="${i}" style="padding:5px 8px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);">
+      ${escapeHtml(o.name)} ${o.cb.checked ? '<span style="color:var(--gold);font-size:11px;">✓ seçili</span>' : ''}
+    </div>`).join('');
+  box.querySelectorAll('.mention-opt').forEach(opt => opt.addEventListener('mousedown', (e) => {
+    e.preventDefault(); // blur olmadan seçilsin
+    const o = options[parseInt(opt.dataset.idx, 10)];
+    o.cb.checked = true;
+    renderSelectedEntityChips();
+    // Metindeki "@parça"yı tam adla değiştir
+    const start = caret - match[0].length;
+    el.value = value.slice(0, start) + o.name + value.slice(caret);
+    const pos = start + o.name.length;
+    el.focus();
+    el.setSelectionRange(pos, pos);
+    box.remove();
+  }));
 }
