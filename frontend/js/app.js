@@ -862,14 +862,16 @@ function renderChapterListDOM() {
 
     if (c.kind === 'part' || c.kind === 'subtitle') {
       const isCollapsed = collapsedGroups.has(String(c.id));
-      const toggle = item.hasChildren
-        ? `<button class="chapter-toggle" data-id="${c.id}" title="${isCollapsed ? 'Genişlet' : 'Daralt'}">${isCollapsed ? '▸' : '▾'}</button>`
-        : `<span class="chapter-toggle" style="visibility:hidden;">▸</span>`;
+      // Word'deki gibi: ok her başlıkta var, kapalıyken ▸ açıkken ▾.
+      // Tıklama ÖZYİNELEMELİ gizler - altındaki alt başlıklar ve onların
+      // bölümleri hep birlikte kaybolur (bkz. aşağıdaki `hidden` hesabı:
+      // ancestorIds zinciri sayesinde torunlar da kapsanır).
+      const toggle = `<button class="chapter-toggle" data-id="${c.id}" title="${isCollapsed ? 'Genişlet (altındaki tüm başlık ve bölümler)' : 'Daralt (altındaki tüm başlık ve bölümler)'}">${isCollapsed ? '▸' : '▾'}</button>`;
       // Daraltılmışken altında kaç girdi gizlendiğini göster - "▸ (12)" -
       // uzun bir taslakta hangi kısmın ne kadar dolu olduğunu kapalıyken
       // bile hissettirir.
       let hiddenCount = 0;
-      if (isCollapsed && item.hasChildren) {
+      if (isCollapsed) {
         const selfIdx = hierarchy.indexOf(item);
         for (let i = selfIdx + 1; i < hierarchy.length; i++) {
           if (hierarchy[i].level <= item.level) break;
@@ -914,6 +916,7 @@ function renderChapterListDOM() {
         <span>${item.displayNumber}${cleanTitle ? ' — ' + escapeHtml(cleanTitle) : ''}</span>
         ${preview ? `<div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(preview)}</div>` : ''}
       </div>
+      <button class="btn-icon-sm edit-chapter-btn" data-id="${c.id}" title="Başlığı ve TÜRÜ düzenle - Kısım/Alt Başlık yaparsan altındakiler ona bağlanır ve daraltılabilir olur">✎</button>
       <button class="btn-icon-sm del-chapter-btn" data-id="${c.id}" title="Bölümü sil">✕</button>
     </div>`;
   }).join('');
@@ -921,6 +924,7 @@ function renderChapterListDOM() {
   // Gerçek bölümler (kind === 'chapter') tıklanınca seçilir/okunur.
   listEl.querySelectorAll('.chapter-item').forEach(el => {
     const c = chapters.find(x => String(x.id) === el.dataset.id);
+    // ✎/✕ tıklamaları satır seçimini tetiklemesin (kendi dinleyicileri var)
     if (c && c.kind !== 'chapter') return; // part/subtitle satırları bu genel handler'a girmez
     el.addEventListener('click', (e) => {
       if (e.target.closest('.del-chapter-btn')) return;
