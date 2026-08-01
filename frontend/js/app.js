@@ -773,9 +773,15 @@ function buildChapterHierarchy(chapters) {
     const displayNumber = counters.slice(0, level + 1).join('-');
     items.push({ chapter: c, level, ancestorIds, displayNumber });
   }
-  items.forEach((item, idx) => {
-    if (item.chapter.kind === 'chapter') { item.hasChildren = false; return; }
-    item.hasChildren = idx + 1 < items.length && items[idx + 1].level > item.level;
+  // Daraltılabilirlik: HER Kısım/Alt Başlık daraltılabilir sayılır.
+  // Eskiden şart "hemen altında daha derin bir girdi olması"ydı; bu,
+  // altına henüz bölüm eklenmemiş (ama kendi paragrafları olan ya da
+  // sonradan doldurulacak) başlıklarda oku hiç göstermiyordu ve kullanıcı
+  // "daraltma butonu nerede?" diye arıyordu. Artık ok her zaman var:
+  // altı boşsa daraltmak sadece başlığı tek satıra indirir - zararsız,
+  // beklenen davranış.
+  items.forEach((item) => {
+    item.hasChildren = item.chapter.kind !== 'chapter';
   });
   return items;
 }
@@ -836,10 +842,10 @@ function renderChapterListDOM() {
   // ok görünmediğini AÇIKLA - kullanıcı "buton nerede?" diye aramasın.
   const noGroupsHint = !collapsibleIds.length && hierarchy.length > 3 ? `
     <div style="font-size:11px;color:var(--text-muted);padding:4px 10px;line-height:1.4;">
-      Daraltma okları yalnızca <b>Kısım</b>/<b>Alt Başlık</b> girdilerinde çıkar.
-      Düz bölümlerin altına girinti olmadığı için gizlenecek bir şey yok -
-      bir girdiyi ✎ ile açıp türünü Kısım/Alt Başlık yaparsan altındakiler
-      ona bağlanır ve daraltılabilir olur.
+      Daraltma okları <b>Kısım</b> ve <b>Alt Başlık</b> girdilerinde çıkar.
+      Listedeki tüm girdiler düz "Bölüm" türünde - birini ✎ ile açıp
+      türünü Kısım/Alt Başlık yaparsan hem ▾ oku hem "Tümünü Daralt"
+      belirir ve altındaki bölümler ona bağlanır.
     </div>` : '';
   const controlsHtml = collapsibleIds.length ? `
     <div style="display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border);background:var(--paper-dim);">
