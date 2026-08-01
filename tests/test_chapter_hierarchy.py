@@ -47,3 +47,31 @@ def test_resolve_chapters_for_part_with_no_chapters_returns_empty(client, header
     part = r.json()
     db = _db()
     assert resolve_chapters_for_part(db, novel_id, part["id"]) == []
+
+
+def test_container_chapter_owns_following_subtitles(client, headers):
+    """Bir BÖLÜM'ün hemen ardından Alt Başlık geliyorsa, o bölüm kapsayıcı
+    sayılmalı: alt başlıklar ve onların bölümleri ona bağlanır. Kullanıcı
+    yapısını Kısım'a çevirmeye zorlanmaz (Word taslak davranışı).
+
+    Not: hiyerarşi hesabı frontend'de (buildChapterHierarchy) yapılıyor;
+    bu test veri tarafının bu düzeni desteklediğini (aynı romanda karışık
+    türlerin yan yana durabildiğini) garantiler.
+    """
+    entries = [
+        (1, "chapter", "BİRİNCİ BÖLÜM"),      # kapsayıcı bölüm
+        (2, "subtitle", "Tur 1: Başkan"),
+        (3, "chapter", "Hologram"),
+        (4, "chapter", "Sorgu"),
+        (5, "subtitle", "Tur 2: Jeolog"),
+        (6, "chapter", "Hologram 2"),
+    ]
+    for number, kind, title in entries:
+        r = client.post("/chapters/", json={"number": number, "kind": kind, "title": title}, headers=headers)
+        assert r.status_code == 201, r.text
+    listed = client.get("/chapters/", headers=headers).json()
+    assert [(c["number"], c["kind"]) for c in listed] == [(n, k) for n, k, _ in entries]
+    # Tür değiştirme de çalışmalı (✎ ile Kısım'a çevirme)
+    first = listed[0]
+    r = client.put(f"/chapters/{first['id']}", json={"kind": "part"}, headers=headers)
+    assert r.status_code == 200 and r.json()["kind"] == "part"

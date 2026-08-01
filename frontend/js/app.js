@@ -749,8 +749,22 @@ function buildChapterHierarchy(chapters) {
   // Başlık/Bölüm -> "1-1", onun altındaki Bölüm -> "1-1-1". Her seviyenin
   // kendi sayacı var; bir üst seviye ilerleyince alt seviyelerin sayaçları
   // sıfırlanır (yeni bir Kısım başlayınca alt numaralama 1'den başlar).
-  const counters = [0, 0, 0];
-  for (const c of chapters) {
+  const counters = [0, 0, 0, 0];
+  // BÖLÜM DE KAPSAYICI OLABİLİR: gerçek romanlarda "BİRİNCİ BÖLÜM"ün
+  // altında turlar/sahneler (Alt Başlık) yer alabiliyor. Bir Bölüm'ün
+  // hemen ardından bir Alt Başlık geliyorsa, o Bölüm kapsayıcı sayılır -
+  // kendi ▾ oku olur ve daraltılınca altındaki tüm alt başlıklar ve
+  // onların bölümleri birlikte gizlenir (Word taslak görünümü gibi).
+  // Böylece kullanıcı yapısını Kısım'a çevirmeye ZORLANMAZ.
+  let currentChapterContainerId = null;
+  const isContainerChapter = (idx) => {
+    const c = chapters[idx];
+    if (!c || c.kind !== 'chapter') return false;
+    const next = chapters[idx + 1];
+    return !!next && next.kind === 'subtitle';
+  };
+  for (let idx = 0; idx < chapters.length; idx++) {
+    const c = chapters[idx];
     const id = String(c.id);
     let level, ancestorIds;
     if (c.kind === 'part') {
@@ -758,13 +772,23 @@ function buildChapterHierarchy(chapters) {
       level = 0;
       currentPartId = id;
       currentSubtitleId = null;
+      currentChapterContainerId = null;
     } else if (c.kind === 'subtitle') {
-      ancestorIds = currentPartId ? [currentPartId] : [];
+      ancestorIds = [];
+      if (currentPartId) ancestorIds.push(currentPartId);
+      if (currentChapterContainerId) ancestorIds.push(currentChapterContainerId);
       level = ancestorIds.length;
       currentSubtitleId = id;
+    } else if (isContainerChapter(idx)) {
+      // Kapsayıcı Bölüm: Kısım'ın altında ama Alt Başlıkların üstünde
+      ancestorIds = currentPartId ? [currentPartId] : [];
+      level = ancestorIds.length;
+      currentChapterContainerId = id;
+      currentSubtitleId = null;
     } else {
       ancestorIds = [];
       if (currentPartId) ancestorIds.push(currentPartId);
+      if (currentChapterContainerId) ancestorIds.push(currentChapterContainerId);
       if (currentSubtitleId) ancestorIds.push(currentSubtitleId);
       level = ancestorIds.length;
     }
@@ -780,8 +804,11 @@ function buildChapterHierarchy(chapters) {
   // "daraltma butonu nerede?" diye arıyordu. Artık ok her zaman var:
   // altı boşsa daraltmak sadece başlığı tek satıra indirir - zararsız,
   // beklenen davranış.
-  items.forEach((item) => {
-    item.hasChildren = item.chapter.kind !== 'chapter';
+  // Ok kimde çıkar: her Kısım/Alt Başlık'ta ve KAPSAYICI bölümlerde
+  // (altında gerçekten daha derin girdi olan bölümler).
+  items.forEach((item, idx) => {
+    if (item.chapter.kind !== 'chapter') { item.hasChildren = true; return; }
+    item.hasChildren = idx + 1 < items.length && items[idx + 1].level > item.level;
   });
   return items;
 }
@@ -911,9 +938,21 @@ function renderChapterListDOM() {
     const preview = (cleanSummary && !isDuplicateOfTitle)
       ? cleanSummary.slice(0, 80) + (cleanSummary.length > 80 ? '…' : '')
       : '';
+    // KAPSAYICI BÖLÜM (altında alt başlıklar var): Word gibi kendi ▾ oku
+    // olur ve daraltılınca tüm alt ağacı gizler. Yaprak bölümlerde ok
+    // yerine görünmez yer tutucu - girintiler bozulmasın.
+    const chIsCollapsed = collapsedGroups.has(String(c.id));
+    const chHiddenCount = (item.hasChildren && chIsCollapsed)
+      ? hierarchy.slice(hierarchy.indexOf(item) + 1).findIndex(x => x.level <= item.level) : 0;
+    const chToggle = item.hasChildren
+      ? `<button class="chapter-toggle" data-id="${c.id}" title="${chIsCollapsed ? 'Genişlet' : 'Daralt'} (altındaki tüm başlık ve bölümler)">${chIsCollapsed ? '▸' : '▾'}</button>`
+      : `<span class="chapter-toggle" style="visibility:hidden;">▸</span>`;
+    const chCountBadge = (chHiddenCount > 0)
+      ? ` <span style="font-size:11px;color:var(--text-muted);">(${chHiddenCount})</span>` : '';
     return `<div class="chapter-item${currentChapter && String(currentChapter.id) === String(c.id) ? ' active' : ''}" data-id="${c.id}" style="padding-left:${14 + indent}px;" title="${escapeHtml(c.summary || 'Henüz özet yok')}">
+      ${chToggle}
       <div style="flex:1;min-width:0;">
-        <span>${item.displayNumber}${cleanTitle ? ' — ' + escapeHtml(cleanTitle) : ''}</span>
+        <span>${item.displayNumber}${cleanTitle ? ' — ' + escapeHtml(cleanTitle) : ''}${chCountBadge}</span>
         ${preview ? `<div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(preview)}</div>` : ''}
       </div>
       <button class="btn-icon-sm edit-chapter-btn" data-id="${c.id}" title="Başlığı ve TÜRÜ düzenle - Kısım/Alt Başlık yaparsan altındakiler ona bağlanır ve daraltılabilir olur">✎</button>
