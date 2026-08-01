@@ -2385,10 +2385,36 @@ async function runAiAssist(chapter) {
 
 function renderImportView() {
   main().innerHTML = `
-    <h1 class="view-title">İçe Aktar</h1>
+    <h1 class="view-title">Yedekle & İçe Aktar</h1>
+    <div class="panel" style="border-left:3px solid var(--gold);margin-bottom:14px;">
+      <strong style="font-size:12px;letter-spacing:0.4px;">💾 YEDEK AL (JSON)</strong>
+      <p style="font-size:13px;color:var(--text-muted);margin:6px 0;">
+        Aktif kitabın tüm bölüm/paragrafları + evrenin paylaşılan verisi (kişiler,
+        mekanlar, nesneler, kurallar, olaylar, ilişkiler) tek JSON dosyası olarak iner.
+        Dosya <b>şifresizdir</b> - romanın düz metin okunabilir, güvenli bir yerde sakla.
+      </p>
+      <button class="btn btn-primary" id="exportBackupBtn">Yedeği İndir</button>
+      <span id="exportBackupState" style="font-size:12px;color:var(--text-muted);margin-left:8px;"></span>
+      <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;">
+      <strong style="font-size:12px;letter-spacing:0.4px;">♻ YEDEKTEN GERİ YÜKLE</strong>
+      <p style="font-size:12.5px;color:var(--text-muted);margin:6px 0;">
+        <b>Ekle</b>: yedektekiler yeni kayıt olarak eklenir. <b>Sıfırla</b>: bu kitabın
+        TÜM bölüm/paragrafları önce silinir (kişi/mekan gibi evren verisi hiçbir modda silinmez).
+      </p>
+      <div class="field"><input type="file" id="restoreFile" accept=".json"></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <select id="restoreMode" style="max-width:230px;">
+          <option value="merge">Ekle (güvenli)</option>
+          <option value="wipe">Sıfırla ve yaz (bölümleri siler)</option>
+        </select>
+        <button class="btn" id="restoreBackupBtn">Geri Yükle</button>
+        <span id="restoreState" style="font-size:12px;color:var(--text-muted);"></span>
+      </div>
+    </div>
+    <h2 style="font-size:16px;margin:0 0 6px;">Metin Dosyası İçe Aktar (.txt)</h2>
     <div class="panel">
       <p style="font-size:13.5px;color:var(--text-muted);">Elinde zaten yazılmış bir .txt dosyası varsa yükle — "Bölüm N" başlıklarına göre otomatik olarak bölüm/paragraf oluşturur ve mevcut menülerdeki isimleri paragraflarda arar. İçe aktarma otomatik olarak yeni karakter/mekan oluşturmaz; her bölüm için "AI ile varlık öner" ile Qwen'e henüz kayıtlı olmayan adayları buldurup onaylayarak ekleyebilirsin.</p>
-      <div class="field"><input type="file" id="importFile" accept=".txt"></div>
+      <div class="field"><input type="file" id="importFile" accept=".txt,.json"></div>
       <label style="font-size:13px;display:flex;align-items:center;gap:6px;margin:8px 0;">
         <input type="checkbox" id="aiSplitImportCheck">
         Paragraf araları net değilse (boş satır yoksa) AI ile böl - daha yavaş ama düzensiz yapıştırılmış metinlerde çok daha iyi sonuç verir
@@ -2400,6 +2426,63 @@ function renderImportView() {
       <button class="btn" id="reindexBtn">Tüm romanı yeniden tara</button>
       <div id="reindexResult"></div>
     </div>`;
+
+  // Yedeği indir: api.js JSON parse ettiği için burada doğrudan fetch -
+  // yanıt blob olarak alınıp tarayıcıya indirtilir.
+  document.getElementById('restoreBackupBtn').addEventListener('click', async () => {
+    const fileInput = document.getElementById('restoreFile');
+    const mode = document.getElementById('restoreMode').value;
+    const state = document.getElementById('restoreState');
+    if (!fileInput.files.length) { alert('Önce bir .json yedek dosyası seç.'); return; }
+    if (!confirm(mode === 'wipe'
+      ? 'DİKKAT: Bu kitabın TÜM bölüm ve paragrafları SİLİNİP yedekteki hâliyle değiştirilecek. Devam?'
+      : 'Yedekteki içerik mevcut kayıtlara EKLENECEK. Devam?')) return;
+    const btn = document.getElementById('restoreBackupBtn');
+    btn.disabled = true; state.textContent = 'Geri yükleniyor…';
+    try {
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+      const res = await fetch(`/admin/import?mode=${mode}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${getToken()}`, 'X-Novel-Id': String(getNovelId() || '') },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `Geri yükleme başarısız (${res.status})`);
+      alert('Yedek geri yüklendi. Sayfa yenileniyor.');
+      window.location.reload();
+    } catch (err) {
+      state.textContent = '✕ ' + err.message;
+    } finally { btn.disabled = false; }
+  });
+
+  document.getElementById('exportBackupBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('exportBackupBtn');
+    const state = document.getElementById('exportBackupState');
+    btn.disabled = true; state.textContent = 'Hazırlanıyor…';
+    try {
+      const res = await fetch('/admin/export', {
+        headers: {
+          'Authorization': `Bearer ${getToken()}`,
+          'X-Novel-Id': String(getNovelId() || ''),
+        },
+      });
+      if (!res.ok) throw new Error(`Yedek alınamadı (${res.status})`);
+      const blob = await res.blob();
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `roman-yedek-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      state.textContent = '✓ indirildi';
+      setTimeout(() => { state.textContent = ''; }, 4000);
+    } catch (err) {
+      state.textContent = '✕ ' + err.message;
+    } finally { btn.disabled = false; }
+  });
 
   document.getElementById('importBtn').addEventListener('click', async () => {
     const fileInput = document.getElementById('importFile');
