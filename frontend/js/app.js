@@ -1466,11 +1466,20 @@ function renderReader(chapter) {
       </div>
     </div>`).join('');
 
-  const kindWarning = chapter.kind !== 'chapter'
+  // Uyarı SADECE gerçek sorun varsa: başlık türünde VE içinde paragraf
+  // varken. Ayrıca ✕ ile kapatılırsa bölüm bazında KALICI kapanır (her
+  // dönüşte tekrar çıkıp gürültü yapmasın) ve elle 3 adımlı tarif yerine
+  // tek tıkla düzelten bir düğme var.
+  let kindWarnDismissed = false;
+  try {
+    kindWarnDismissed = JSON.parse(localStorage.getItem('roman_kindwarn_dismissed') || '[]').includes(chapter.id);
+  } catch (e) { /* yoksay */ }
+  const kindWarning = (chapter.kind !== 'chapter' && (chapter.paragraphs || []).length > 0 && !kindWarnDismissed)
     ? `<div class="panel" id="kindWarningBanner" style="border-color:var(--danger);background:#fdf1f0;margin-bottom:12px;position:relative;">
-        <button id="dismissKindWarningBtn" title="Kapat" style="position:absolute;top:8px;right:10px;background:none;border:none;cursor:pointer;font-size:15px;color:var(--danger);line-height:1;">✕</button>
-        <strong style="font-size:12.5px;color:var(--danger);padding-right:20px;display:block;">⚠ Bu bir ${chapter.kind === 'part' ? 'Kısım' : 'Alt Başlık'} - normalde sadece bir ayraç, paragraf tutmaz.</strong>
-        <div style="font-size:12px;margin-top:4px;">Burada gördüğün metin muhtemelen "+ Yeni" ile yanlışlıkla buraya yazılmış. Bu içeriği düzeltmek için: yeni bir "Bölüm" oluştur, metni oraya taşı, sonra buradaki paragrafları sil.</div>
+        <button id="dismissKindWarningBtn" title="Kapat (bir daha gösterme)" style="position:absolute;top:8px;right:10px;background:none;border:none;cursor:pointer;font-size:15px;color:var(--danger);line-height:1;">✕</button>
+        <strong style="font-size:12.5px;color:var(--danger);padding-right:20px;display:block;">⚠ Bu bir ${chapter.kind === 'part' ? 'Kısım' : 'Alt Başlık'} ama içinde metin var.</strong>
+        <div style="font-size:12px;margin-top:4px;">Kısım/Alt Başlık bir ayraçtır; metin normalde Bölüm'de durur (fihrist ve AI bağlamı buna göre çalışır).</div>
+        <button class="btn btn-sm btn-primary" id="moveParagraphsOutBtn" style="margin-top:8px;">↓ Metni yeni bir Bölüm'e taşı</button>
       </div>`
     : '';
 
@@ -1506,6 +1515,7 @@ function renderReader(chapter) {
       </div>
       <p style="font-size:12px;color:var(--text-muted);margin:6px 0 0;">Bu bölümde geçen kişi/mekan/olaylar hakkında öğrenilen yeni bilgiyi bulup Gelişim Çizelgesi'ne (haritaya) ekler - böylece ileride yazılacak bölümler bu bilgiyle çelişmez.</p>
       <div id="progressionScanResult"></div>
+      <div id="eventScanResult"></div>
     </div>
     <div style="height:16px;"></div>
     ${paragraphsHtml || '<div class="empty-state">Henüz paragraf yok.</div>'}
@@ -1599,6 +1609,11 @@ function renderReader(chapter) {
   const dismissKindWarningBtn = document.getElementById('dismissKindWarningBtn');
   if (dismissKindWarningBtn) {
     dismissKindWarningBtn.addEventListener('click', () => {
+      try {
+        const key = 'roman_kindwarn_dismissed';
+        const list = JSON.parse(localStorage.getItem(key) || '[]');
+        if (!list.includes(chapter.id)) { list.push(chapter.id); localStorage.setItem(key, JSON.stringify(list)); }
+      } catch (e) { /* yoksay */ }
       document.getElementById('kindWarningBanner').style.display = 'none';
     });
   }
@@ -1639,6 +1654,10 @@ function renderReader(chapter) {
       const accept = confirm(`Taslak özet:\n\n${result.generated_summary}\n\nBu özeti kaydetmek istiyor musun?`);
       if (accept) {
         await api.put(`/chapters/${chapter.id}`, { summary: result.generated_summary });
+        // Özet kaydedilir kaydedilmez OLAY/ZAMAN ÇİZELGESİ taraması da
+        // çalışır: bölüm metninde tarih/saat zaten geçtiği için olaylar
+        // oradan çıkarılır. Öneriler her zamanki gibi ONAYA düşer.
+        runSuggestEvents(chapter);
         const refreshed = await api.get(`/chapters/${chapter.id}`);
         currentChapter = refreshed;
         renderReader(refreshed);
@@ -3677,7 +3696,7 @@ async function renderChapterHealthStrip(chapter) {
   const paraCount = (chapter.paragraphs || []).length;
   strip.innerHTML =
     chip(!!(chapter.summary || '').trim(), 'Özet', 'Özet yok', 'Özeti olmayan bölüm fihristte ve diğer bölümlerin AI bağlamında GÖRÜNMEZ. Bölümü yazınca "AI ile özet oluştur"a bas.') +
-    chip(planCells.length > 0, 'Plan', 'Plan Matrisi\'nde bulunamadı - tıkla, hemen yaz',
+    chip(planCells.length > 0, 'Plan', 'Plan yok - tıkla, hemen yaz',
       planCells.length ? 'Bu bölüme bağlı plan var - AI ona sadık yazar'
         : 'Bu bölüme bağlı plan hücresi yok: AI plansız yazar. TIKLA - matrise girmeden buradan plan yazabilirsin.', 'healthPlanChip') +
     chip(paraCount > 0, `${paraCount} paragraf`, 'Metin yok', 'Bölümde henüz paragraf yok - planı yazıp "Plandan Bölüm Taslağı Oluştur" kullanabilirsin');
@@ -3705,9 +3724,8 @@ function openQuickPlanEditor(chapter, currentText) {
       <strong style="font-size:11px;letter-spacing:0.4px;">📋 BÖLÜM PLANI${currentText ? ' - DÜZENLE' : ' - YENİ'}</strong>
       <div class="field" style="margin-top:6px;">
         <label>Bu bölümde ne OLACAK? (madde madde - AI buna sadık yazar)</label>
-        <textarea id="quickPlanText" style="min-height:120px;" placeholder="- Vicdan salonu tanıtır, kuralları okur
-- İlk hologram: yaşlı çift, yanmış gecelik
-- Anahtar kelime: ÇÖZÜN. BEKLEYEMEM.">${escapeHtml(currentText)}</textarea>
+        <textarea id="quickPlanText" style="min-height:120px;" placeholder="Buraya KENDİ planını yaz. Örnek biçim:&#10;- Vicdan salonu tanıtır, kuralları okur&#10;- İlk hologram: yaşlı çift&#10;- Anahtar kelime: ÇÖZÜN">${escapeHtml(currentText)}</textarea>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px;">Gri yazı sadece örnektir - kaydedilmez. Kendi maddelerini yazman gerekir.</div>
       </div>
       <div class="form-actions">
         <button class="btn btn-primary btn-sm" id="quickPlanSave">Kaydet</button>
@@ -3719,7 +3737,11 @@ function openQuickPlanEditor(chapter, currentText) {
   document.getElementById('quickPlanCancel').addEventListener('click', () => { box.innerHTML = ''; });
   document.getElementById('quickPlanSave').addEventListener('click', async () => {
     const content = document.getElementById('quickPlanText').value.trim();
-    if (!content) { document.getElementById('quickPlanError').textContent = 'Plan boş olamaz.'; return; }
+    if (!content) {
+      document.getElementById('quickPlanError').textContent =
+        'Kutu boş - gri yazı sadece örnek biçimdir, kaydedilmez. Bu bölümde ne olacağını madde madde yaz.';
+      return;
+    }
     try {
       await api.post('/matrix/quick-plan', { chapter_id: chapter.id, content });
       box.innerHTML = '';
@@ -3791,8 +3813,10 @@ async function finishChapter(chapter) {
       if (sumEl) sumEl.textContent = result.generated_summary;
       chapter.summary = result.generated_summary;
     }
-    btn.textContent = '2/2 Harita…';
+    btn.textContent = '2/3 Harita…';
     await runSuggestProgressions(chapter);
+    btn.textContent = '3/3 Zaman çizelgesi…';
+    await runSuggestEvents(chapter);
     btn.textContent = '✅ Bölüm kapatıldı';
     renderChapterHealthStrip(chapter);
   } catch (err) {
@@ -4032,4 +4056,23 @@ async function chatReplaceParagraph(assistantIdx, pid) {
   await replaceParagraphText(currentChapter.id, para.number, msg.content);
   msg.actions = (msg.actions || []).concat([`P${pid} paragrafı değiştirildi`]);
   renderChatMessages();
+}
+
+// Olay/Zaman Çizelgesi çıkarımı: bölüm metnindeki tarih-saat bilgilerinden
+// olayları önerir. "AI ile özet oluştur" kabul edilince ve "Bölümü Kapat"ta
+// otomatik çalışır; öneriler onaysız KAYDEDİLMEZ (çizelge çöplüğe dönmesin).
+async function runSuggestEvents(chapter) {
+  const container = document.getElementById('eventScanResult');
+  if (!container) return;
+  container.innerHTML = '<div class="empty-state">Zaman çizelgesi için olaylar aranıyor…</div>';
+  try {
+    const suggestions = await api.post(`/chapters/${chapter.id}/suggest-events`, {});
+    if (!suggestions.length) {
+      container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:4px 0;">Zaman çizelgesine eklenecek yeni olay bulunamadı.</div>';
+      return;
+    }
+    renderEventSuggestionsInto(container, suggestions);
+  } catch (err) {
+    container.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
 }

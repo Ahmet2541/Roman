@@ -277,15 +277,19 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   display: flex; align-items: center; justify-content: flex-end;
   gap: 6px; padding-top: 4px; min-height: 26px;
 }
+/* KAPALIYKEN YÜKSEKLİK DE SIFIR: eskiden flex-wrap:wrap + max-width:0
+   yüzünden düğmeler alt alta diziliyor, gizli olsalar da paragraflar
+   arasında kocaman boşluk bırakıyorlardı. nowrap + max-height ile
+   kapalı menü hiç yer kaplamaz. */
 .paragraph-actions {
-  display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end;
-  max-width: 0; overflow: hidden; opacity: 0;
+  display: flex; flex-wrap: nowrap; gap: 6px; justify-content: flex-end;
+  max-width: 0; max-height: 0; overflow: hidden; opacity: 0;
   transform: translateX(12px);
   transition: max-width .28s ease, opacity .2s ease, transform .28s ease;
   pointer-events: none;
 }
 .paragraph-toolbar.open .paragraph-actions {
-  max-width: 640px; opacity: 1; transform: translateX(0); pointer-events: auto;
+  max-width: 640px; max-height: 200px; opacity: 1; transform: translateX(0); pointer-events: auto;
 }
 .paragraph-toolbar .btn { padding: 3px 9px; font-size: 12px; white-space: nowrap; }
 .para-disc-btn {
@@ -355,7 +359,8 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
      focus-within yerine açık toggle kullanılır: odak kaybında düğme yok
      olup dokunuşun boşa gitmesi (iOS blur-önce-click tuzağı) yaşanmaz. */
 
-  .paragraph-toolbar.open .paragraph-actions { max-width: 100%; }
+  /* Dar ekranda düğmeler sarabilsin - burada yükseklik zaten açıkken var */
+  .paragraph-toolbar.open .paragraph-actions { max-width: 100%; flex-wrap: wrap; }
   .paragraph-actions .btn { padding: 4px 10px; font-size: 12px; }
 
   .app-shell { display: block; height: auto; min-height: 100vh; }
