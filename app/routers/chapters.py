@@ -853,3 +853,57 @@ def promote_paragraph_to_heading(
     db.commit()
     db.refresh(heading)
     return heading
+
+
+@router.post("/{chapter_id}/move-paragraphs-out", response_model=schemas.ChapterOut, status_code=201)
+def move_paragraphs_to_new_chapter(
+    chapter_id: int, title: str = "",
+    db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Kısım/Alt Başlık içinde kalmış paragrafları YENİ bir Bölüm'e taşır.
+
+    Neden gerekli: bir Bölüm sonradan Kısım'a çevrildiğinde paragrafları
+    onunla birlikte kalıyor ve "ayraç içinde metin" durumu oluşuyor
+    (fihristte ⚠). Elle çözümü üç adımdı (yeni bölüm aç, metni kopyala,
+    eskileri sil); bu uç tek işlemde yapar: başlığın hemen ALTINA bir
+    Bölüm açar, paragrafları oraya taşır (metin kopyalanmaz, kaydın
+    chapter_id'si değişir - mention/geçmiş bağları korunur)."""
+    heading = db.query(models.Chapter).filter(
+        models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id
+    ).first()
+    if not heading:
+        raise HTTPException(404, "Girdi bulunamadı")
+    if heading.kind not in ("part", "subtitle"):
+        raise HTTPException(400, "Bu işlem sadece Kısım/Alt Başlık için geçerli")
+    paragraphs = (
+        db.query(models.Paragraph)
+        .filter(models.Paragraph.chapter_id == heading.id)
+        .order_by(models.Paragraph.number)
+        .all()
+    )
+    if not paragraphs:
+        raise HTTPException(400, "Bu başlıkta taşınacak paragraf yok")
+
+    # Başlıktan SONRAKİ tüm girdileri bir kaydır (büyükten küçüğe - unique
+    # (novel_id, number) çakışmasın), açılan yere yeni bölümü koy.
+    later = (
+        db.query(models.Chapter)
+        .filter(models.Chapter.novel_id == novel_id, models.Chapter.number > heading.number)
+        .order_by(models.Chapter.number.desc())
+        .all()
+    )
+    for ch in later:
+        ch.number += 1
+        db.flush()
+    new_chapter = models.Chapter(
+        novel_id=novel_id, number=heading.number + 1, kind="chapter",
+        title=(title or heading.title or "").strip(),
+    )
+    db.add(new_chapter)
+    db.flush()
+    for p in paragraphs:
+        p.chapter_id = new_chapter.id
+    db.commit()
+    db.refresh(new_chapter)
+    return new_chapter

@@ -508,10 +508,12 @@ async function showEntityForm(type, item) {
     // kişiyi eklerken görünüşünü/konuşma tarzını aynı anda yazabilmek için.
     const savedSections = (isEdit && item.sections) ? item.sections : {};
     const filledCount = sectionDefs.filter(d => (savedSections[d.key] || '').trim()).length;
-    const startOpen = filledCount > 0; // dolu profil varsa açık gelsin
+    // Varsayılan AÇIK: kutuların kapalı gelmesi "menü eksik" hissi veriyordu.
+    // Kullanıcı isterse başlığa basıp kapatabilir.
+    const startOpen = true;
     sectionsHtml = `
       <div style="margin:14px 0 4px;">
-        <button type="button" class="btn btn-sm" id="toggleSectionsBtn">${startOpen ? '▾' : '▸'} Derin Profil <span style="color:var(--text-muted);font-weight:400;">(${filledCount}/${sectionDefs.length} dolu)</span></button>
+        <button type="button" class="btn btn-sm" id="toggleSectionsBtn" title="Gizlemek için tıkla">${startOpen ? '▾' : '▸'} Derin Profil <span style="color:var(--text-muted);font-weight:400;">(${filledCount}/${sectionDefs.length} dolu)</span></button>
       </div>
       <div id="sectionsBlock" style="${startOpen ? '' : 'display:none;'}border-left:3px solid var(--border);padding-left:12px;margin-bottom:6px;">
         <p style="font-size:12px;color:var(--text-muted);margin:6px 0 10px;">Bu bölümlerin TAMAMI her AI isteğinde gönderilmez - talimatla ilgili olan otomatik seçilir, gerisi sadece isim olarak listelenir. Meta hiç gönderilmez.</p>
@@ -535,20 +537,20 @@ async function showEntityForm(type, item) {
       </div>` : ''}
       ${parentSelectHtml}
       <div class="field">
-        <label>Açıklama</label>
-        <textarea id="f_desc">${escapeHtml(descValue)}</textarea>
+        <label>${cfg.isRule ? 'Açıklama' : 'Kısa tanım'} ${cfg.isRule ? '' : `<span style="font-weight:400;color:var(--text-muted);font-size:11.5px;">(tek cümle - fihriste ve HER AI isteğine giden özet; uzun bilgi aşağıdaki Derin Profil'e)</span>`}</label>
+        <textarea id="f_desc" ${cfg.isRule ? '' : 'style="min-height:52px;"'}>${escapeHtml(descValue)}</textarea>
       </div>
       ${cfg.hasTags ? `<div class="field">
         <label>Etiketler <span style="font-weight:400;color:var(--text-muted);">(virgülle ayır - boş bırakırsan her zaman dahil edilir)</span></label>
         <input type="text" id="f_tags" value="${escapeHtml(tagsValue)}" placeholder="buyu, kuzey-hanesi">
       </div>` : ''}
-      ${cfg.isRule ? '' : `<div class="field"><label>Notlar</label><textarea id="f_notes">${escapeHtml(notesValue)}</textarea></div>`}
       ${cfg.hasStatus ? `<div class="field"><label>Durum</label>
         <select id="f_status">
           ${cfg.statusOptions.map(opt => `<option value="${opt}" ${statusValue === opt ? 'selected' : ''}>${opt.charAt(0).toUpperCase() + opt.slice(1)}</option>`).join('')}
         </select></div>` : ''}
       ${sectionsHtml}
       ${entityRulesHtml}${rulesHintHtml}
+      ${cfg.isRule ? '' : `<div class="field" style="margin-top:10px;"><label>Notlar <span style="font-weight:400;color:var(--text-muted);font-size:11.5px;">(serbest not - kişi seçiliyken AI'ya gider)</span></label><textarea id="f_notes">${escapeHtml(notesValue)}</textarea></div>`}
       <div class="form-actions">
         <button class="btn btn-primary" id="saveBtn">${isEdit ? 'Güncelle' : 'Kaydet'}</button>
         <button class="btn" id="cancelBtn">Vazgeç</button>
@@ -1444,11 +1446,12 @@ function renderReader(chapter) {
         ${p.number}
       </div>
       <div style="flex:1;">
-        <div class="paragraph-text" contenteditable="true" data-number="${p.number}">${escapeHtml(p.text)}</div>
+        <div class="paragraph-text" contenteditable="false" data-number="${p.number}" data-editing="0">${escapeHtml(p.text)}</div>
         <div>${(p.mentions || []).map(m => `<span class="mention-chip">${escapeHtml(m.entity_name)}</span>`).join('')}${p.is_style_sample ? '<span class="mention-chip" style="background:#1b2230;color:#fff;">★ stil örneği</span>' : ''}</div>
+        <button class="btn btn-sm edit-para-btn" data-number="${p.number}" title="Bu paragrafı düzenlemeye aç">✎ Düzenle</button>
         <button class="btn btn-sm para-actions-toggle" data-number="${p.number}" title="Paragraf işlemleri">⋯ İşlemler</button>
         <div class="paragraph-actions">
-          <button class="btn btn-sm save-para-btn" data-number="${p.number}">Kaydet</button>
+          <button class="btn btn-sm btn-primary save-para-btn" data-number="${p.number}" style="display:none;">Kaydet</button>
           <button class="btn btn-sm style-para-btn" data-number="${p.number}">${p.is_style_sample ? 'Stil örneğini kaldır' : 'Stil örneği yap'}</button>
           <button class="btn btn-sm history-para-btn" data-number="${p.number}">Geçmiş</button>
           <button class="btn btn-sm suggest-para-btn" data-number="${p.number}" title="Bu paragrafı bağlama sadık kalarak güçlendirilmiş haliyle yeniden yazdırır - beğenirsen tek tıkla değiştirirsin">✨ Öneri</button>
@@ -1579,6 +1582,18 @@ function renderReader(chapter) {
     });
   }
 
+  document.getElementById('moveParagraphsOutBtn')?.addEventListener('click', async () => {
+    if (!confirm('Bu başlıktaki tüm paragraflar, hemen altına açılacak YENİ bir Bölüm\'e taşınacak. Metin kopyalanmaz, taşınır (geçmiş ve bağlantılar korunur). Devam?')) return;
+    const btn = document.getElementById('moveParagraphsOutBtn');
+    btn.disabled = true; btn.textContent = 'Taşınıyor…';
+    try {
+      const created = await api.post(`/chapters/${chapter.id}/move-paragraphs-out`, {});
+      await loadChapterList(created.id);
+    } catch (err) {
+      alert(err.message);
+      btn.disabled = false; btn.textContent = '↓ Metni yeni bir Bölüm\'e taşı';
+    }
+  });
   const dismissKindWarningBtn = document.getElementById('dismissKindWarningBtn');
   if (dismissKindWarningBtn) {
     dismissKindWarningBtn.addEventListener('click', () => {
@@ -1656,6 +1671,27 @@ function renderReader(chapter) {
     btn.addEventListener('click', () => {
       const actions = btn.nextElementSibling; // .paragraph-actions
       actions.classList.toggle('open');
+    });
+  });
+  // Düzenle: paragrafı yazılabilir yapar, Kaydet'i görünür kılar. Kaydettikten
+  // sonra (renderReader yeniden çizdiği için) paragraf tekrar salt okunur
+  // gelir ve Kaydet gizlenir - "kaydettim mi?" belirsizliği ortadan kalkar.
+  readerPane.querySelectorAll('.edit-para-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const number = btn.dataset.number;
+      const textEl = readerPane.querySelector(`.paragraph-text[data-number="${number}"]`);
+      const saveBtn = readerPane.querySelector(`.save-para-btn[data-number="${number}"]`);
+      if (!textEl) return;
+      textEl.setAttribute('contenteditable', 'true');
+      textEl.dataset.editing = '1';
+      textEl.style.outline = '1px dashed var(--gold)';
+      textEl.focus();
+      btn.style.display = 'none';
+      if (saveBtn) {
+        saveBtn.style.display = '';
+        // Kaydet gizli menüde: düzenlemeye geçince menüyü de aç
+        saveBtn.closest('.paragraph-actions')?.classList.add('open');
+      }
     });
   });
   readerPane.querySelectorAll('.save-para-btn').forEach(btn => {

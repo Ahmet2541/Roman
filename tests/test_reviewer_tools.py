@@ -294,3 +294,36 @@ def test_scoped_rule_rejects_bad_type(client, headers):
         "title": "x", "entity_type": "event", "entity_id": 1,
     }, headers=headers)
     assert r.status_code == 422
+
+
+# ---- Başlıktan metin taşıma (⚠ ayraç içinde metin) -------------------------
+
+def test_move_paragraphs_out_of_heading(client, headers):
+    """Bir Bölüm sonradan Kısım'a çevrilince paragrafları onunla kalıyor;
+    bu uç onları tek işlemde başlığın ALTINA açılan yeni bir Bölüm'e taşır."""
+    ch = _chapter_with_text(client, headers, ["Birinci paragraf.", "İkinci paragraf."], number=1)
+    client.post("/chapters/", json={"number": 2, "kind": "chapter", "title": "Sonraki"}, headers=headers)
+    # Bölümü Kısım'a çevir -> paragraflar "yetim" kalır
+    client.put(f"/chapters/{ch['id']}", json={"kind": "part"}, headers=headers)
+
+    r = client.post(f"/chapters/{ch['id']}/move-paragraphs-out", headers=headers)
+    assert r.status_code == 201, r.text
+    new_ch = r.json()
+    assert new_ch["kind"] == "chapter" and new_ch["number"] == 2  # başlığın hemen altına
+
+    heading = client.get(f"/chapters/{ch['id']}", headers=headers).json()
+    assert heading["paragraphs"] == []                      # başlık temizlendi
+    moved = client.get(f"/chapters/{new_ch['id']}", headers=headers).json()
+    assert [p["text"] for p in moved["paragraphs"]] == ["Birinci paragraf.", "İkinci paragraf."]
+    # Sonraki bölüm kaydırıldı, numaralar kesintisiz
+    numbers = [c["number"] for c in client.get("/chapters/", headers=headers).json()]
+    assert numbers == [1, 2, 3]
+
+
+def test_move_paragraphs_out_rejects_chapter_and_empty(client, headers):
+    ch = _chapter_with_text(client, headers, ["metin"], number=1)
+    r = client.post(f"/chapters/{ch['id']}/move-paragraphs-out", headers=headers)
+    assert r.status_code == 400  # zaten Bölüm
+    part = client.post("/chapters/", json={"number": 2, "kind": "part", "title": "Boş kısım"}, headers=headers).json()
+    r = client.post(f"/chapters/{part['id']}/move-paragraphs-out", headers=headers)
+    assert r.status_code == 400  # taşınacak paragraf yok
