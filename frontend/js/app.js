@@ -4312,7 +4312,9 @@ function handleMentionTyping(el) {
   const caret = el.selectionStart;
   const before = value.slice(0, caret);
   // İmleçten geriye doğru en yakın @ ve sonrasındaki kelime parçası
-  const match = before.match(/@([\wçğıöşüÇĞİÖŞÜ]*)$/);
+  // @ sonrası tek kelime VE "@Şahin Gö" gibi iki kelimelik isimler de
+  // yakalansın diye en fazla bir boşluğa izin verilir.
+  const match = before.match(/@([\wçğıöşüÇĞİÖŞÜ]*(?: [\wçğıöşüÇĞİÖŞÜ]*)?)$/);
   let box = document.getElementById('mentionSuggestBox');
   if (!match) { if (box) box.remove(); return; }
 
@@ -4324,8 +4326,12 @@ function handleMentionTyping(el) {
   if (!box) {
     box = document.createElement('div');
     box.id = 'mentionSuggestBox';
-    box.style.cssText = 'border:1px solid var(--border);border-radius:8px;background:#fff;margin-top:4px;max-height:180px;overflow-y:auto;';
-    el.parentElement.appendChild(box);
+    box.style.cssText = 'border:1px solid var(--gold);border-radius:8px;background:#fff;margin-top:4px;max-height:200px;overflow-y:auto;box-shadow:0 2px 8px rgba(0,0,0,0.08);';
+    // Kutuyu satırın İÇİNE değil ARDINA koy: sohbet giriş satırı flex
+    // düzeninde olduğu için içine eklenen kutu Gönder butonunun yanına
+    // sıkışıp görünmez oluyordu.
+    const anchor = el.closest('.chat-input-row') || el.closest('.field') || el;
+    anchor.insertAdjacentElement('afterend', box);
   }
   if (!options.length) {
     box.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:6px 8px;">Eşleşen kayıt yok</div>';
