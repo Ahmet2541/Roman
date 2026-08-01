@@ -892,7 +892,7 @@ function renderChapterListDOM() {
           <span style="opacity:0.6;font-weight:600;">${item.displayNumber}</span> ${escapeHtml(cleanTitle) || '<span style=\"opacity:0.5;\">(başlıksız)</span>'} ${countBadge} ${orphanBadge}
         </div>
         ${bulkScanBtn}
-        <button class="btn-icon-sm edit-chapter-btn" data-id="${c.id}" title="Metni düzenle">✎</button>
+        <button class="btn-icon-sm edit-chapter-btn" data-id="${c.id}" title="Başlığı ve TÜRÜ düzenle (Bölüm / Kısım / Alt Başlık)">✎</button>
         <button class="btn-icon-sm del-chapter-btn" data-id="${c.id}" title="Sil">✕</button>
       </div>`;
     }
@@ -1003,14 +1003,53 @@ function renderChapterListDOM() {
   });
 }
 
+// Fihrist girdisi düzenleme: başlık + TÜR. Tür değiştirme kritik çünkü
+// içe aktarılan romanlarda her şey düz "Bölüm" olarak gelir; bir girdiyi
+// Kısım/Alt Başlık yapmadan altındakiler ona bağlanmaz ve daraltma okları
+// (▾) hiç çıkmaz. Eskiden burada sadece prompt() ile başlık metni
+// düzenlenebiliyordu - tür değiştirmenin arayüzde hiçbir yolu yoktu.
 function openChapterEditPrompt(id) {
   const c = lastLoadedChapters.find(x => String(x.id) === String(id));
   if (!c) return;
-  const newTitle = prompt('Metni düzenle:', stripMarkdownArtifacts(c.title));
-  if (newTitle === null || !newTitle.trim()) return;
-  api.put(`/chapters/${c.id}`, { title: stripMarkdownArtifacts(newTitle.trim()) })
-    .then(() => loadChapterList(currentChapter ? currentChapter.id : undefined, true))
-    .catch(err => alert(err.message));
+  const overlay = document.getElementById('createItemModalOverlay');
+  if (!overlay) return;
+  const kindLabels = { chapter: 'Bölüm (metin içerir)', part: 'Kısım (üst başlık - altındakileri gruplar)', subtitle: 'Alt Başlık (ara başlık)' };
+  overlay.innerHTML = `
+    <div class="panel" style="max-width:420px;width:92%;">
+      <b>Fihrist Girdisini Düzenle</b>
+      <div class="field" style="margin-top:8px;"><label>Başlık</label>
+        <input type="text" id="editChapterTitle" value="${escapeHtml(stripMarkdownArtifacts(c.title) || '')}"></div>
+      <div class="field"><label>Tür</label>
+        <select id="editChapterKind">
+          ${Object.entries(kindLabels).map(([k, label]) => `<option value="${k}" ${c.kind === k ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px;">
+          Kısım/Alt Başlık yaptığında altındaki girdiler ona bağlanır ve
+          listede ▾ daraltma oku belirir. Bölümdeki paragraflar korunur.
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="editChapterSave">Kaydet</button>
+        <button class="btn" id="editChapterCancel">Vazgeç</button>
+      </div>
+      <div id="editChapterError" class="error-text"></div>
+    </div>`;
+  overlay.style.display = 'flex';
+  const close = () => { overlay.style.display = 'none'; overlay.innerHTML = ''; };
+  document.getElementById('editChapterCancel').addEventListener('click', close);
+  document.getElementById('editChapterSave').addEventListener('click', async () => {
+    const title = document.getElementById('editChapterTitle').value.trim();
+    const kind = document.getElementById('editChapterKind').value;
+    if (!title && kind !== 'chapter') {
+      document.getElementById('editChapterError').textContent = 'Kısım/Alt Başlık için başlık zorunlu.';
+      return;
+    }
+    try {
+      await api.put(`/chapters/${c.id}`, { title: stripMarkdownArtifacts(title), kind });
+      close();
+      await loadChapterList(currentChapter ? currentChapter.id : undefined, true);
+    } catch (err) { document.getElementById('editChapterError').textContent = err.message; }
+  });
 }
 
 // "Altın vuruş": bir Kısım'ın (Part) TAMAMINI tek seferde tarayıp henüz
