@@ -270,11 +270,36 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
 /* Paragraf araç çubuğu: Düzenle + diğer işlemler TEK SATIRDA (dar ekranda
    sarar). Eskiden Düzenle ayrı satırdaydı ve her paragraf iki satır yer
    kaplıyordu - uzun bölümlerde metin arasında boğuluyordu. */
-.paragraph-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 6px; }
-.paragraph-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.paragraph-toolbar .btn { padding: 4px 10px; font-size: 12px; }
+/* Paragraf araç çubuğu: sağda tek bir yuvarlak "D" düğmesi durur; tıklanınca
+   işlem düğmeleri SOLA doğru kayarak açılır. Kapalıyken metin akışı hiç
+   bölünmez - okurken/yazarken dikkat dağılmaz. */
+.paragraph-toolbar {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 6px; padding-top: 4px; min-height: 26px;
+}
+.paragraph-actions {
+  display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end;
+  max-width: 0; overflow: hidden; opacity: 0;
+  transform: translateX(12px);
+  transition: max-width .28s ease, opacity .2s ease, transform .28s ease;
+  pointer-events: none;
+}
+.paragraph-toolbar.open .paragraph-actions {
+  max-width: 640px; opacity: 1; transform: translateX(0); pointer-events: auto;
+}
+.paragraph-toolbar .btn { padding: 3px 9px; font-size: 12px; white-space: nowrap; }
+.para-disc-btn {
+  flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%;
+  border: 1px solid var(--border); background: #fff; color: var(--text-muted);
+  cursor: pointer; font-size: 12px; font-weight: 600; line-height: 1; padding: 0;
+}
+.para-disc-btn:hover { color: var(--text-ink); border-color: var(--gold); }
+.paragraph-toolbar.open .para-disc-btn { background: var(--paper-dim); color: var(--text-ink); }
+.para-save-state { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+/* Kaydedilmemiş paragraf: sol kenarda ince altın çizgi */
+.paragraph-text.dirty { box-shadow: -3px 0 0 var(--gold); padding-left: 6px; }
 /* Masaüstünde "⋯ İşlemler" düğmesi gereksiz - aksiyonlar zaten görünür */
-.para-actions-toggle { display: none; }
+
 
 .side-panel { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
 .side-panel h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); margin: 0 0 12px; }
@@ -329,9 +354,8 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
      her paragrafın altında 4 koca düğmenin sürekli durması metni boğuyordu.
      focus-within yerine açık toggle kullanılır: odak kaybında düğme yok
      olup dokunuşun boşa gitmesi (iOS blur-önce-click tuzağı) yaşanmaz. */
-  .para-actions-toggle { display: inline-block; padding: 3px 10px; font-size: 12px; }
-  .paragraph-actions { display: none; }
-  .paragraph-actions.open { display: flex; flex-wrap: wrap; gap: 4px; width: 100%; }
+
+  .paragraph-toolbar.open .paragraph-actions { max-width: 100%; }
   .paragraph-actions .btn { padding: 4px 10px; font-size: 12px; }
 
   .app-shell { display: block; height: auto; min-height: 100vh; }

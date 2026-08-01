@@ -1446,13 +1446,11 @@ function renderReader(chapter) {
         ${p.number}
       </div>
       <div style="flex:1;">
-        <div class="paragraph-text" contenteditable="false" data-number="${p.number}" data-editing="0">${escapeHtml(p.text)}</div>
+        <div class="paragraph-text" contenteditable="true" data-number="${p.number}">${escapeHtml(p.text)}</div>
         <div>${(p.mentions || []).map(m => `<span class="mention-chip">${escapeHtml(m.entity_name)}</span>`).join('')}${p.is_style_sample ? '<span class="mention-chip" style="background:#1b2230;color:#fff;">★ stil örneği</span>' : ''}</div>
         <div class="paragraph-toolbar">
-        <button class="btn btn-sm edit-para-btn" data-number="${p.number}" title="Bu paragrafı düzenlemeye aç">✎ Düzenle</button>
-        <button class="btn btn-sm para-actions-toggle" data-number="${p.number}" title="Paragraf işlemleri">⋯ İşlemler</button>
         <div class="paragraph-actions">
-          <button class="btn btn-sm btn-primary save-para-btn" data-number="${p.number}" style="display:none;">Kaydet</button>
+          <button class="btn btn-sm btn-primary save-para-btn" data-number="${p.number}" disabled title="Değişiklik yapılmadı - paragraf zaten kayıtlı">Kaydet</button>
           <button class="btn btn-sm style-para-btn" data-number="${p.number}">${p.is_style_sample ? 'Stil örneğini kaldır' : 'Stil örneği yap'}</button>
           <button class="btn btn-sm history-para-btn" data-number="${p.number}">Geçmiş</button>
           <button class="btn btn-sm suggest-para-btn" data-number="${p.number}" title="Bu paragrafı bağlama sadık kalarak güçlendirilmiş haliyle yeniden yazdırır - beğenirsen tek tıkla değiştirirsin">✨ Öneri</button>
@@ -1460,6 +1458,8 @@ function renderReader(chapter) {
           ${(p.text || '').trim().startsWith('#') ? `<button class="btn btn-sm promote-para-btn" data-number="${p.number}" title="Bu satır içe aktarmadan kalmış bir başlık - gerçek bir Alt Başlık girdisine dönüştür (bölümün önüne taşınır)">↑ Başlığa Dönüştür</button>` : ''}
           <button class="btn btn-sm btn-danger del-para-btn" data-number="${p.number}">Sil</button>
         </div>
+        <button class="para-disc-btn" data-number="${p.number}" title="Paragraf işlemleri (aç/kapa)">D</button>
+        <span class="para-save-state" data-number="${p.number}"></span>
         </div>
         <div class="paragraph-ai-panel" data-number="${p.number}" style="display:none;margin-top:8px;"></div>
         <div class="paragraph-history-panel" data-number="${p.number}" style="display:none;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);"></div>
@@ -1669,31 +1669,44 @@ function renderReader(chapter) {
       } catch (err) { alert(err.message); }
     });
   });
-  readerPane.querySelectorAll('.para-actions-toggle').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const actions = btn.nextElementSibling; // .paragraph-actions
-      actions.classList.toggle('open');
+  // "D" düğmesi: işlem düğmeleri normalde gizli (dikkat dağıtmasın), tıklayınca
+  // sağdan sola kayarak açılır. Aynı anda tek paragrafın menüsü açık kalır.
+  readerPane.querySelectorAll('.para-disc-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const toolbar = btn.closest('.paragraph-toolbar');
+      const wasOpen = toolbar.classList.contains('open');
+      readerPane.querySelectorAll('.paragraph-toolbar.open').forEach(t => t.classList.remove('open'));
+      if (!wasOpen) toolbar.classList.add('open');
     });
   });
-  // Düzenle: paragrafı yazılabilir yapar, Kaydet'i görünür kılar. Kaydettikten
-  // sonra (renderReader yeniden çizdiği için) paragraf tekrar salt okunur
-  // gelir ve Kaydet gizlenir - "kaydettim mi?" belirsizliği ortadan kalkar.
-  readerPane.querySelectorAll('.edit-para-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const number = btn.dataset.number;
-      const textEl = readerPane.querySelector(`.paragraph-text[data-number="${number}"]`);
-      const saveBtn = readerPane.querySelector(`.save-para-btn[data-number="${number}"]`);
-      if (!textEl) return;
-      textEl.setAttribute('contenteditable', 'true');
-      textEl.dataset.editing = '1';
-      textEl.style.outline = '1px dashed var(--gold)';
-      textEl.focus();
-      btn.style.display = 'none';
+
+  // OTOMATİK KAYIT (araştırılan kalıp: dirty-check + blur autosave):
+  // - Metin değişmediyse HİÇ istek atılmaz (paragraf zaten kayıtlı).
+  // - Değiştiği an Kaydet aktifleşir ve "• kaydedilmedi" işareti çıkar.
+  // - Odaktan çıkınca (blur) otomatik kaydedilir; "✓ kaydedildi" görünür.
+  // - Kaydetmek tam sayfayı yeniden ÇİZMEZ: sadece mention rozetleri ve
+  //   K/M/N balonları tazelenir - böylece yazarken imleç/kaydırma kaybolmaz.
+  readerPane.querySelectorAll('.paragraph-text').forEach(el => {
+    el.dataset.original = el.innerText.trim();
+    const number = el.dataset.number;
+    const saveBtn = readerPane.querySelector(`.save-para-btn[data-number="${number}"]`);
+    const state = readerPane.querySelector(`.para-save-state[data-number="${number}"]`);
+    const setDirty = (dirty) => {
       if (saveBtn) {
-        saveBtn.style.display = '';
-        // Kaydet gizli menüde: düzenlemeye geçince menüyü de aç
-        saveBtn.closest('.paragraph-actions')?.classList.add('open');
+        saveBtn.disabled = !dirty;
+        saveBtn.title = dirty ? 'Değişiklikleri kaydet' : 'Değişiklik yapılmadı - paragraf zaten kayıtlı';
       }
+      if (state) {
+        state.textContent = dirty ? '• kaydedilmedi' : '';
+        state.style.color = 'var(--danger)';
+      }
+      el.classList.toggle('dirty', dirty);
+    };
+    el.addEventListener('input', () => setDirty(el.innerText.trim() !== el.dataset.original));
+    el.addEventListener('blur', () => {
+      if (el.innerText.trim() === el.dataset.original) return; // değişmedi -> istek yok
+      autoSaveParagraph(chapter, parseInt(number, 10), el, state, saveBtn);
     });
   });
   readerPane.querySelectorAll('.save-para-btn').forEach(btn => {
@@ -1787,6 +1800,38 @@ function addEmptyParagraphBlock(number) {
   readerPane.insertBefore(div, addBtn);
   div.querySelector('.save-para-btn').addEventListener('click', () => saveParagraph(currentChapter.id, number));
   div.querySelector('.paragraph-text').focus();
+}
+
+// Otomatik kayıt: tam sayfa yenilemeden kaydeder, rozetleri yerinde
+// tazeler. Uç, mention'larıyla birlikte paragrafı döndürdüğü için
+// kişilerin/mekanların otomatik yakalanması aynen çalışır.
+async function autoSaveParagraph(chapter, number, el, state, saveBtn) {
+  const text = el.innerText.trim();
+  if (!text) { state.textContent = 'boş - kaydedilmedi'; return; }
+  if (state) { state.textContent = 'kaydediliyor…'; state.style.color = 'var(--text-muted)'; }
+  try {
+    const saved = await api.put(`/chapters/${chapter.id}/paragraphs/${number}`, { number, text });
+    el.dataset.original = text;
+    el.classList.remove('dirty');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.title = 'Değişiklik yapılmadı - paragraf zaten kayıtlı'; }
+    if (state) {
+      state.textContent = '✓ kaydedildi';
+      state.style.color = 'var(--text-muted)';
+      setTimeout(() => { if (state.textContent === '✓ kaydedildi') state.textContent = ''; }, 2500);
+    }
+    dirtyChapterId = chapter.id;
+    // Mention rozetlerini YERİNDE güncelle (tam çizim yok - imleç korunur)
+    const chipRow = el.nextElementSibling;
+    if (chipRow && saved.mentions) {
+      chipRow.innerHTML = saved.mentions.map(m => `<span class="mention-chip">${escapeHtml(m.entity_name)}</span>`).join('')
+        + (saved.is_style_sample ? '<span class="mention-chip" style="background:#1b2230;color:#fff;">★ stil örneği</span>' : '');
+    }
+    // Yeni kişi/mekan/nesne balonları
+    detectParagraphBalloons(chapter, number, text).catch(() => {});
+  } catch (err) {
+    if (state) { state.textContent = '✕ kaydedilemedi'; state.style.color = 'var(--danger)'; }
+    alert(err.message);
+  }
 }
 
 async function saveParagraph(chapterId, number) {
