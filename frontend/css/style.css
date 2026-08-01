@@ -268,6 +268,8 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   padding: 1px 7px; border-radius: 999px; background: var(--gold-dim); color: #5a4a10; margin-right: 4px;
 }
 .paragraph-actions { display: flex; gap: 6px; padding-top: 6px; }
+/* Masaüstünde "⋯ İşlemler" düğmesi gereksiz - aksiyonlar zaten görünür */
+.para-actions-toggle { display: none; }
 
 .side-panel { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
 .side-panel h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); margin: 0 0 12px; }
@@ -304,6 +306,15 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
 
 @media (max-width: 768px) {
   .mobile-menu-toggle { display: block; }
+
+  /* Paragraf işlemleri mobilde tek "⋯" düğmesinin arkasında - dar ekranda
+     her paragrafın altında 4 koca düğmenin sürekli durması metni boğuyordu.
+     focus-within yerine açık toggle kullanılır: odak kaybında düğme yok
+     olup dokunuşun boşa gitmesi (iOS blur-önce-click tuzağı) yaşanmaz. */
+  .para-actions-toggle { display: inline-block; padding: 3px 10px; font-size: 12px; }
+  .paragraph-actions { display: none; }
+  .paragraph-actions.open { display: flex; flex-wrap: wrap; gap: 4px; }
+  .paragraph-actions .btn { padding: 4px 10px; font-size: 12px; }
 
   .app-shell { display: block; height: auto; min-height: 100vh; }
 

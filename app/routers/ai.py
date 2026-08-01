@@ -5,9 +5,9 @@ import logging
 from ..database import get_db
 from ..auth import get_current_user
 from .. import schemas, models
-from ..qwen_client import build_context, ask_qwen, full_scan, chat_with_qwen
+from ..qwen_client import build_context, ask_qwen, full_scan, chat_with_qwen, reader_test_chapter, suggest_paragraph_entities
 from ..entities import ENTITY_MODELS
-from ..sections import SECTIONS_BY_ENTITY_TYPE
+from ..sections import SECTIONS_BY_ENTITY_TYPE, _tr_lower
 from ..ratelimit import rate_limit
 from ..novel_context import get_novel_id, get_universe_id
 
@@ -28,6 +28,7 @@ def assist(
     context = build_context(
         db, novel_id, universe_id, payload.selected_entities,
         chapter_number=payload.chapter_number, instruction_text=payload.instruction,
+        include_hidden=payload.include_hidden,
     )
     try:
         result = ask_qwen(context, payload.instruction, payload.existing_text)
@@ -56,7 +57,7 @@ def preview_context(
     gösterir - Qwen'e hiç istek atmadığı için ücretsiz ve rate-limitsizdir.
     Amaç: 'AI'ya gerçekte ne gidiyor' sorusuna güvenle cevap bulabilmek
     (Novelcrafter'daki 'prompt preview' fikrinin karşılığı)."""
-    context = build_context(db, novel_id, universe_id, payload.selected_entities, chapter_number=payload.chapter_number)
+    context = build_context(db, novel_id, universe_id, payload.selected_entities, chapter_number=payload.chapter_number, instruction_text=payload.instruction, include_hidden=payload.include_hidden)
     return schemas.ContextPreviewResponse(
         context=context,
         char_count=len(context),
@@ -84,6 +85,7 @@ def chat(
     context = build_context(
         db, novel_id, universe_id, payload.selected_entities,
         chapter_number=payload.chapter_number, instruction_text=last_user_message,
+        include_hidden=payload.include_hidden,
     )
     try:
         reply, actions_taken, pending_entity_updates, draft_result = chat_with_qwen(
@@ -120,16 +122,49 @@ def approve_suggestions(
         if model is None:
             continue
 
+        # AI'dan gelen sections anahtarları önce SANİTİZE edilir (geçerli
+        # olmayan atılır, meta asla) - 422 yerine temizleme: kullanıcının
+        # onayladığı iyi kısımlar, modelin bir uydurma anahtarı yüzünden
+        # boşa düşmesin.
+        valid_keys = set(SECTIONS_BY_ENTITY_TYPE.get(suggestion.entity_type, {})) - {"meta"}
+        clean_sections = {
+            k: v.strip() for k, v in (suggestion.sections or {}).items()
+            if k in valid_keys and isinstance(v, str) and v.strip()
+        }
+        clean_aliases = [a.strip() for a in (suggestion.aliases or []) if a and a.strip()]
+
         if suggestion.existing_entity_id:
             item = db.query(model).filter(model.id == suggestion.existing_entity_id, model.universe_id == universe_id).first()
             if item is None:
                 continue
             extra = f"\n[Bölüm güncellemesi] {suggestion.description}"
             item.notes = (item.notes or "") + extra
+            # Alias birleştirme: sadece eksik olanlar eklenir (yeni liste
+            # ATANIR - EncryptedJSON in-place mutasyonu fark etmeyebilir).
+            if clean_aliases and hasattr(item, "aliases"):
+                # Türkçe İ/ı tuzağı: "SİSTEM".lower() != "sistem" (İ -> i+nokta).
+                # Karşılaştırma _tr_lower ile - "SİSTEM", kayıtlı "sistem"in
+                # kopyası olarak doğru şekilde elenir.
+                current = list(item.aliases or [])
+                current_lower = {_tr_lower(a) for a in current} | {_tr_lower(item.name or "")}
+                merged = current + [a for a in clean_aliases if _tr_lower(a) not in current_lower]
+                if merged != current:
+                    item.aliases = merged
+            # Profil ekleme: ilgili bölümün SONUNA, kaynağı belli etiketle.
+            if clean_sections and hasattr(item, "sections"):
+                merged_sections = dict(item.sections or {})
+                for k, v in clean_sections.items():
+                    existing_val = (merged_sections.get(k) or "").strip()
+                    merged_sections[k] = f"{existing_val}\n\n[Bölümden] {v}".strip() if existing_val else v
+                item.sections = merged_sections
             db.commit()
             updated.append({"entity_type": suggestion.entity_type, "id": item.id, "name": item.name})
         else:
             item = model(universe_id=universe_id, name=suggestion.name, description=suggestion.description)
+            if clean_aliases and hasattr(model, "aliases"):
+                item.aliases = clean_aliases
+            if clean_sections and hasattr(model, "sections"):
+                item.sections = clean_sections
             db.add(item)
             db.flush()
             db.commit()
@@ -206,4 +241,48 @@ def scan_full_novel(
     return schemas.FullScanResponse(
         issues=result.get("issues", []),
         summary=result.get("summary", ""),
+    )
+
+
+@router.post("/reader-test/{chapter_id}", response_model=schemas.ReaderTestResponse)
+def reader_test(
+    chapter_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=6, window_seconds=60, label="okur testi")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Bölümü "okuru düşürecek nokta" taramasından geçirir (tempo, bilgi
+    bocası, klişe, anlaşılmazlık, gerilim kırılması, inandırıcılık).
+    SADECE uyarır - metne dokunmaz, hiçbir şey kaydetmez."""
+    chapter = db.query(models.Chapter).filter(
+        models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id
+    ).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
+    try:
+        findings = reader_test_chapter(db, chapter)
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+    return schemas.ReaderTestResponse(
+        chapter_number=chapter.number,
+        findings=[schemas.ReaderTestFinding(**f) for f in findings],
+    )
+
+
+@router.post("/paragraph-entities", response_model=schemas.ParagraphEntitiesResponse)
+def paragraph_entities(
+    payload: schemas.ParagraphEntitiesRequest,
+    db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=20, window_seconds=60, label="paragraf tarama")),
+    universe_id: int = Depends(get_universe_id),
+):
+    """Tek paragraf için K/M/N balonu adayları. Her paragraf kaydında bir
+    kez çağrılır - bu yüzden limit geniş (20/dk) ama var: metin editöründe
+    seri kayıtlar DashScope faturasına dönüşmesin."""
+    try:
+        suggestions = suggest_paragraph_entities(db, universe_id, payload.text)
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+    return schemas.ParagraphEntitiesResponse(
+        suggestions=[schemas.AiSuggestion(**s) for s in suggestions]
     )

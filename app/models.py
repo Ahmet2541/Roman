@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, Integer, String, Text, Boolean, ForeignKey, DateTime, UniqueConstraint,
+    Column, Integer, String, Text, Boolean, Float, ForeignKey, DateTime, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -184,13 +184,16 @@ class Event(Base):
 
 
 class Object(Base):
-    """Nesneler / önemli eşyalar."""
+    """Nesneler / önemli eşyalar. Kişi/Mekan gibi derin profil (sections)
+    taşır ama daha kompakt: 4 başlık + meta (bkz. sections.OBJECT_SECTIONS)."""
     __tablename__ = "objects"
     id = Column(Integer, primary_key=True)
     universe_id = Column(Integer, ForeignKey("universes.id"), nullable=True)
     name = Column(EncryptedString, nullable=False)
+    aliases = Column(EncryptedJSON(default_empty=list), default=list)  # "Kül Şişesi"ne "şişe" da denebilir - mention tespiti bunlardan beslenir
     description = Column(EncryptedString, default="")
     notes = Column(EncryptedString, default="")
+    sections = Column(EncryptedJSON, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -231,6 +234,14 @@ class Rule(Base):
     __tablename__ = "rules"
     id = Column(Integer, primary_key=True)
     universe_id = Column(Integer, ForeignKey("universes.id"), nullable=True)
+    # KAPSAM: ikisi de doluysa kural bir kayda özeldir ("Vicdan yargıç
+    # değil" -> character #12) ve SABİT katmandan çıkar - SADECE o kayıt
+    # seçili varlıklardayken dinamik katmanla gider (bkz. build_dynamic_layer).
+    # Boşsa (varsayılan) genel kuraldır, davranış eskisi gibi.
+    # 100+ kurallı dünyada asıl kazanç bu: kişiye özel kural, kişinin
+    # geçmediği bölümün context'ini şişirmez.
+    entity_type = Column(String(20), nullable=True)  # character | place | object
+    entity_id = Column(Integer, nullable=True)
     title = Column(EncryptedString, nullable=False)
     description = Column(EncryptedString, default="")
     tags = Column(EncryptedJSON(default_empty=list), default=list)
@@ -366,3 +377,145 @@ class Mention(Base):
     entity_name = Column(EncryptedString, nullable=False)  # arama/gösterim için tekrar tutulur
 
     paragraph = relationship("Paragraph", back_populates="mentions")
+
+# ---- Üslup taraması (yazım tiki dedektörü) ---------------------------------
+# Amaç: "gibi/sanki/X yerine Y" tarzı, yazarın farkında olmadan aşırı
+# kullandığı kalıpları TÜM seri metninde saymak ve eşiği aşanları her AI
+# isteğinin context'ine "bundan kaçın" uyarısı olarak enjekte etmek.
+# Tasarım kararları:
+#   - Kalıplar sabit kod DEĞİL, düzenlenebilir DB kaydı (StylePattern) -
+#     bugün "gibi"yi biliyoruz, yarın yeni bir tik keşfedilir, kod
+#     değişikliği gerekmeden eklenir.
+#   - Tarama HER AI isteğinde çalışmaz - full_scan ile aynı desen: elle
+#     "Tara" ile çalışır, sonuç StyleScanResult'a önbelleklenir, AI
+#     istekleri bu ucuz önbellekten okur. 12.000 sayfada her istekte tüm
+#     romanı taramak hem yavaş hem gereksiz olurdu.
+#   - Eşik ÇİFT koşullu: 1000 kelime başına yoğunluk (threshold_per_1000)
+#     VE mutlak minimum tekrar (min_count). Tek başına yoğunluk, kısa
+#     metinlerde tek bir kelimeyi bile "aşırı kullanım" sayar (10 kelimede
+#     1 tekrar = binde 100) - min_count bu hatayı kökten kapatır.
+
+
+class StylePattern(Base):
+    """Bir yazım tiki tanımı: isim + regex + eşikler. Evren düzeyinde -
+    3. kitaptaki bir tik 1. kitaptan da geliyor olabilir, o yüzden sayım
+    seri geneli yapılır.
+
+    pattern şifrelidir (roman içeriğine özgü bir kelime/isim içerebilir);
+    zaten SQL tarafında regex ile filtreleme yapılmıyor, tüm kalıplar
+    Python'a çekilip orada derleniyor - şifreleme bir şey kaybettirmiyor.
+
+    Regex'ler KÜÇÜK HARFLE yazılmalı - tarama motoru metni Türkçe'ye uygun
+    şekilde (İ->i, I->ı) küçülterek eşleştirir (bkz. style_scan._tr_lower),
+    çünkü Python'un re.IGNORECASE'i Türkçe İ/ı ayrımını bilmez."""
+    __tablename__ = "style_patterns"
+    id = Column(Integer, primary_key=True)
+    universe_id = Column(Integer, ForeignKey("universes.id"), nullable=True)
+    name = Column(EncryptedString, nullable=False)          # ör: "yalın 'gibi' benzetmesi"
+    pattern = Column(EncryptedString, nullable=False)       # küçük harf regex, ör: \bgibi\w*
+    threshold_per_1000 = Column(Float, default=2.0)         # 1000 kelimede kaç tekrar "aşırı" sayılır
+    min_count = Column(Integer, default=5)                  # eşik aşımı için mutlak minimum tekrar
+    enabled = Column(Boolean, default=True)
+    # NAKARAT koruması: bilinçli leitmotif'ler ("Biz size güvendik" gibi)
+    # sayılır ve raporda görünür ama ASLA "aşırı kullanım" uyarısına
+    # dönüşmez - kasıtlı tekrar, tik değildir. Silmekten farkı: sayacı
+    # görmeye devam edersin (nakarat kontrolden çıkarsa fark edersin).
+    is_refrain = Column(Boolean, default=False)
+    notes = Column(EncryptedString, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StyleScanResult(Base):
+    """En son üslup taramasının önbelleği - evren başına TEK satır (yeni
+    tarama eskisinin üzerine yazar). result_json, raporun tamamının
+    (kalıp sayımları, yoğunluklar, en yoğun bölümler) şifreli JSON hali.
+    build_context her AI isteğinde buradan okur - canlı tarama yapmaz."""
+    __tablename__ = "style_scan_results"
+    id = Column(Integer, primary_key=True)
+    universe_id = Column(Integer, ForeignKey("universes.id"), nullable=True)
+    result_json = Column(EncryptedString, nullable=False)
+    scanned_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("universe_id", name="uq_style_scan_universe"),)
+
+
+# ---- Plan Matrisi (Excel benzeri eşleştirme tablosu) -----------------------
+# Kullanım örneği: 8 sanık × 7 aşama = 56 hücrelik bir tur yapısı. Kolonlar
+# "kişiler/turlar" (üstte), satırlar "aşamalar" (yanda), her hücre o
+# kesişimin PLANI (madde madde: görüntüler, anahtar kelime, sorular...).
+# Genel amaçlı: her roman kendi matrislerini, kendi boyutlarında kurar.
+#
+# KRİTİK BAĞLANTI: bir hücre bir Bölüme bağlanabilir (chapter_id) - o bölüm
+# üzerinde çalışılırken hücrenin içeriği AI context'ine "BÖLÜM PLANI"
+# katmanı olarak OTOMATİK girer (bkz. qwen_client.build_plan_layer). Yani
+# plan artık dosyalarda değil, tam yazıldığı bölümün AI'ına akıyor.
+# Matris bir KİTABA bağlıdır (novel_id) - bölümler gibi; plan kitaba özel.
+
+
+class PlanMatrix(Base):
+    __tablename__ = "plan_matrices"
+    id = Column(Integer, primary_key=True)
+    novel_id = Column(Integer, ForeignKey("novels.id"), nullable=False)
+    name = Column(EncryptedString, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    columns = relationship("MatrixColumn", back_populates="matrix", cascade="all, delete-orphan", order_by="MatrixColumn.position")
+    rows = relationship("MatrixRow", back_populates="matrix", cascade="all, delete-orphan", order_by="MatrixRow.position")
+    cells = relationship("MatrixCell", back_populates="matrix", cascade="all, delete-orphan")
+
+
+class MatrixColumn(Base):
+    """Bir kolon = bir kişi/tur (ör. 'TUR 1: BAŞKAN'). character_id
+    opsiyonel: kolonu bir Kişi kaydına bağlarsan, o kolonun hücreleri
+    yazılırken karakterin derin profili de zaten seçilebilir durumda."""
+    __tablename__ = "matrix_columns"
+    id = Column(Integer, primary_key=True)
+    matrix_id = Column(Integer, ForeignKey("plan_matrices.id"), nullable=False)
+    position = Column(Integer, nullable=False, default=0)
+    label = Column(EncryptedString, nullable=False)
+    character_id = Column(Integer, ForeignKey("characters.id"), nullable=True)
+
+    matrix = relationship("PlanMatrix", back_populates="columns")
+
+
+class MatrixRow(Base):
+    """Bir satır = bir aşama (ör. '1. Hologram (5 dk)').
+
+    kind: 'main' (ana başlık) | 'sub' (ara başlık - girintili/italik
+    gösterilir). Ara başlıklar da tam satırdır (hücreleri olur, bölüme
+    bağlanabilir) - amaç yapı büyüdükçe bir aşamanın İÇİNE alt adımlar
+    ekleyebilmek (ör. '5. Sorgu' altına '5a. Kanıt yüzleşmesi'). Sıraya
+    ARAYA ekleme desteklenir (bkz. router add_row: after_row_id)."""
+    __tablename__ = "matrix_rows"
+    id = Column(Integer, primary_key=True)
+    matrix_id = Column(Integer, ForeignKey("plan_matrices.id"), nullable=False)
+    position = Column(Integer, nullable=False, default=0)
+    kind = Column(String(10), nullable=False, default="main")  # main | sub
+    label = Column(EncryptedString, nullable=False)
+
+    matrix = relationship("PlanMatrix", back_populates="rows")
+
+
+class MatrixCell(Base):
+    """Kolon × satır kesişimi. content: serbest, madde madde plan metni
+    (şifreli). chapter_id: bu hücrenin yazıldığı bölüm - doluysa o bölümün
+    her AI isteğine bu plan otomatik enjekte edilir."""
+    __tablename__ = "matrix_cells"
+    id = Column(Integer, primary_key=True)
+    matrix_id = Column(Integer, ForeignKey("plan_matrices.id"), nullable=False)
+    column_id = Column(Integer, ForeignKey("matrix_columns.id"), nullable=False)
+    row_id = Column(Integer, ForeignKey("matrix_rows.id"), nullable=False)
+    content = Column(EncryptedString, default="")
+    chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=True)
+    # SABİT referans kodu (MP1, MP2, ...): hücre İLK oluşturulduğunda roman
+    # genelinde artan sırayla atanır ve bir daha ASLA değişmez - satır/kolon
+    # araya eklense, sıralar kaysa bile kod aynı kalır. Amaç: başka bir
+    # bölüm yazarken talimata "MP13'teki gibi" yazınca AI'nın o planı
+    # kıyas için çekebilmesi (bkz. qwen_client.build_plan_layer). Kodun
+    # kendisi anlam taşımaz (şifresiz düz ID), içerik ayrıca şifreli.
+    code = Column(String(20), nullable=True)
+
+    matrix = relationship("PlanMatrix", back_populates="cells")
+
+    __table_args__ = (UniqueConstraint("column_id", "row_id", name="uq_matrix_cell"),)

@@ -8,8 +8,12 @@ from .config import settings
 from . import models
 from .entities import ENTITY_MODELS, ENTITY_LABELS_TR
 from .mentions import detect_and_save_mentions
-from .sections import SECTIONS_BY_ENTITY_TYPE, ai_visible_sections, describe_sections_for_tool
+from .sections import (
+    SECTIONS_BY_ENTITY_TYPE, ai_visible_sections, describe_sections_for_tool,
+    relevant_sections_for_instruction, _tr_lower,
+)
 from .novel_context import get_universe_id_for_novel
+from .style_scan import build_style_warning_layer
 
 _client = None
 
@@ -35,6 +39,9 @@ def build_fixed_layer(db: Session, universe_id: int, instruction_text: str = "")
     (evrensel) kurallar HER ZAMAN gider, etiketli kurallar SADECE o etiket
     talimat metninde geçiyorsa gider - basit ama etkili bir alt küme."""
     rules = db.query(models.Rule).filter(models.Rule.universe_id == universe_id).all()
+    # Kayda özel kurallar (entity_id dolu) SABİT katmana girmez - sadece o
+    # kayıt seçiliyken dinamik katmanla gider (bkz. build_dynamic_layer).
+    rules = [r for r in rules if not r.entity_id]
     if not rules:
         return ""
 
@@ -113,7 +120,7 @@ def build_index_layer(db: Session, universe_id: int, current_novel_id: int, excl
 # + bu varlıkların geçtiği en alakalı geçmiş paragraflar.
 # ---------------------------------------------------------------------------
 
-def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3) -> str:
+def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3, instruction_text: str = "", include_hidden: bool = False) -> str:
     if not selected_entities:
         return ""
 
@@ -177,17 +184,59 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
                 if lines:
                     blocks.append(f"Faksiyon üyeliği: {', '.join(lines)}")
 
-        # 'sections' (bkz. app/sections.py) İÇERİĞİNİ buraya basmıyoruz -
-        # bilerek. Amaç tam olarak bunu önlemek: karakterin TÜM derin
-        # profilini (görünüş, kariyer, ilişkiler...) her istekte context'e
-        # basıp token israf etmek. Bunun yerine sadece HANGİ bölümlerin
-        # DOLU olduğunu (birkaç kelime, neredeyse maliyetsiz) belirtiyoruz -
-        # AI, talimatla ilgiliyse get_entity_section aracıyla (bkz.
-        # CHAT_TOOLS) sadece ihtiyaç duyduğu bölümü kendisi çeker.
+        # 'sections' (bkz. app/sections.py) İÇERİĞİNİN TAMAMINI buraya
+        # basmıyoruz - bilerek. Amaç tam olarak bunu önlemek: karakterin TÜM
+        # derin profilini (görünüş, geçmiş, ilişkiler...) her istekte
+        # context'e basıp token israf etmek. Bunun yerine:
+        #   1. Talimat metninde ilgili anahtar kelimeler geçiyorsa (ör.
+        #      "görünüşünü betimle" -> fiziksel_yapi) SADECE O bölümün
+        #      içeriği enjekte edilir - tek seferlik assist modunda aracı
+        #      olmayan AI'nın ihtiyacı olan bilgiye erişmesinin TEK yolu bu.
+        #   2. Geri kalan dolu bölümlerin sadece İSMİ listelenir - sohbet
+        #      modundaki AI gerekirse get_entity_section aracıyla çeker.
+        # 'meta' hiçbir koşulda gitmez (ai_visible_sections dışlar,
+        # relevant_sections_for_instruction haritasında hiç yok).
         entity_sections = getattr(record, "sections", None) or {}
-        filled_sections = [k for k, v in ai_visible_sections(entity_sections).items() if v]
-        if filled_sections:
-            blocks.append(f"Ek detay bölümleri mevcut (gerekirse get_entity_section ile çek): {', '.join(filled_sections)}")
+        visible = ai_visible_sections(entity_sections)
+        relevant_keys = relevant_sections_for_instruction(instruction_text, ref.entity_type)
+        injected = []
+        for key in relevant_keys:
+            content = (visible.get(key) or "").strip()
+            if content:
+                section_label = SECTIONS_BY_ENTITY_TYPE.get(ref.entity_type, {}).get(key, key).split(":", 1)[0]
+                blocks.append(f"{section_label} ({key}): {content}")
+                injected.append(key)
+        remaining = [k for k, v in visible.items() if v and k not in injected]
+        if remaining:
+            blocks.append(f"Ek detay bölümleri mevcut (gerekirse get_entity_section ile çek): {', '.join(remaining)}")
+
+        # GİZLİ KATMAN: sadece include_hidden (alt-metin modu) açıkken ve
+        # SADECE sert bir sızdırmama direktifiyle girer. Amaç dramatik
+        # ironi: "baş tabip Lümen'in suçlarını biliyor ama susuyor" bilgisini
+        # AI bilirse diyalogları fark ettirmeden kaçamaklaşır - ama metne
+        # asla açıkça yazmaz. Varsayılanda (include_hidden=False) bu blok
+        # hiç oluşmaz; anahtar kelime eşleşmesi de gizli'yi asla seçemez
+        # (SECTION_KEYWORDS'te yok, ai_visible_sections dışlıyor).
+        if include_hidden:
+            hidden_val = (entity_sections.get("gizli") or "").strip()
+            if hidden_val:
+                blocks.append(
+                    "🔒 GİZLİ KATMAN (SIR - romanda ASLA açıkça yazma, ima ötesine geçme; "
+                    "sadece davranış tutarlılığı ve alt-metin için bil): " + hidden_val
+                )
+
+        # Bu kayda ÖZEL kurallar: sabit katmandan bilerek dışlandılar -
+        # sadece kayıt sahnedeyken (seçili varlıklardayken) buradan girerler.
+        scoped_rules = (
+            db.query(models.Rule)
+            .filter(models.Rule.entity_type == ref.entity_type, models.Rule.entity_id == ref.entity_id)
+            .all()
+        )
+        if scoped_rules:
+            rule_lines = "\n".join(
+                f"- {r.title}" + (f": {r.description}" if r.description else "") for r in scoped_rules
+            )
+            blocks.append(f"Bu kayda ÖZEL kurallar (İHLAL ETME):\n{rule_lines}")
 
         progressions = (
             db.query(models.Progression)
@@ -266,9 +315,79 @@ def build_style_layer(db: Session, universe_id: int, max_samples: int = 5) -> st
     return "\n".join(lines)
 
 
+def build_plan_layer(db: Session, novel_id: int, chapter_number: int | None, instruction_text: str = "") -> str:
+    """BÖLÜM PLANI katmanı: üzerinde çalışılan bölüme bağlı Plan Matrisi
+    hücresi varsa (bkz. models.MatrixCell.chapter_id), hücrenin içeriği +
+    kolon/satır etiketi context'e girer. Yani "Tur 3 × Aşama 5'te şu 7 soru
+    sorulacak" bilgisi artık dosyada değil, tam o bölüm yazılırken AI'nın
+    önünde. Bölüm numarası yoksa ya da bağlı hücre yoksa boş döner -
+    plansız bölümler hiçbir ek maliyet ödemez.
+
+    summary ile fark: summary "ne OLDU"nun kaydı (yazıldıktan sonra) ve o
+    bölümde çalışılırken bilerek dışlanır; plan "ne OLACAK"ın kaydı ve tam
+    tersine, sadece o bölümde çalışılırken dahil edilir."""
+    def _cell_block(cell: "models.MatrixCell") -> str | None:
+        content = (cell.content or "").strip()
+        if not content:
+            return None
+        col = db.query(models.MatrixColumn).filter(models.MatrixColumn.id == cell.column_id).first()
+        row = db.query(models.MatrixRow).filter(models.MatrixRow.id == cell.row_id).first()
+        header = " × ".join(x.label for x in (col, row) if x)
+        code_part = f"{cell.code}: " if cell.code else ""
+        return f"[{code_part}{header}]\n{content}" if header or code_part else content
+
+    parts = []
+    own_cell_ids = set()
+
+    # 1) Üzerinde çalışılan bölüme BAĞLI hücre(ler): plana sadık kal.
+    if chapter_number is not None:
+        chapter = (
+            db.query(models.Chapter)
+            .filter(models.Chapter.novel_id == novel_id, models.Chapter.number == chapter_number)
+            .first()
+        )
+        if chapter:
+            cells = db.query(models.MatrixCell).filter(models.MatrixCell.chapter_id == chapter.id).all()
+            own_cell_ids = {c.id for c in cells}
+            blocks = [b for b in (_cell_block(c) for c in cells) if b]
+            if blocks:
+                parts.append(
+                    "=== BÖLÜM PLANI (bu bölümde OLACAKLAR - plana sadık kal) ===\n"
+                    + "\n\n".join(blocks)
+                )
+
+    # 2) Talimatta GEÇEN referans kodları (MP13 gibi): kıyas için çekilir.
+    #    "MP5'teki sorgu ritmiyle kıyasla" dendiğinde, o hücrenin planı da
+    #    context'e girer - AI turlar arası paraleli görebilsin diye. Sadece
+    #    talimatta AÇIKÇA anılan kodlar gider (56 hücrenin tamamı asla).
+    if instruction_text:
+        codes = set(re.findall(r"\bMP\d+\b", instruction_text, flags=re.IGNORECASE))
+        if codes:
+            codes_norm = {c.upper() for c in codes}
+            ref_cells = (
+                db.query(models.MatrixCell)
+                .join(models.PlanMatrix, models.MatrixCell.matrix_id == models.PlanMatrix.id)
+                .filter(
+                    models.PlanMatrix.novel_id == novel_id,
+                    models.MatrixCell.code.in_(codes_norm),
+                    models.MatrixCell.id.notin_(own_cell_ids) if own_cell_ids else True,  # noqa: E712
+                )
+                .all()
+            )
+            blocks = [b for b in (_cell_block(c) for c in ref_cells) if b]
+            if blocks:
+                parts.append(
+                    "=== REFERANS PLANLAR (talimatta anılan kodlar - KIYAS için, bu bölümde yazılacak içerik DEĞİL) ===\n"
+                    + "\n\n".join(blocks)
+                )
+
+    return "\n\n".join(parts)
+
+
 def build_context(
     db: Session, novel_id: int, universe_id: int, selected_entities: list,
     chapter_number: int | None = None, instruction_text: str = "",
+    include_hidden: bool = False,
 ) -> str:
     """chapter_number verilirse (o an üzerinde çalışılan bölüm), fihrist
     katmanında o bölüm dışlanır - bir bölümün kendi özetini kendi context'i
@@ -282,8 +401,14 @@ def build_context(
     fixed = build_fixed_layer(db, universe_id, instruction_text=instruction_text)
     index = build_index_layer(db, universe_id, novel_id, exclude_chapter_number=chapter_number)
     style = build_style_layer(db, universe_id)
-    dynamic = build_dynamic_layer(db, universe_id, selected_entities)
-    return "\n\n".join(part for part in [fixed, index, style, dynamic] if part)
+    # Üslup uyarıları: son üslup taramasının ÖNBELLEĞİNDEN, sadece eşiği
+    # aşan yazım tiklerini "bundan kaçın" olarak ekler. build_style_layer
+    # ("böyle yaz" örnekleri) ile ters yönlü, kasıtlı olarak ayrı iki
+    # katman - bkz. style_scan.build_style_warning_layer.
+    style_warnings = build_style_warning_layer(db, universe_id)
+    plan = build_plan_layer(db, novel_id, chapter_number, instruction_text=instruction_text)
+    dynamic = build_dynamic_layer(db, universe_id, selected_entities, instruction_text=instruction_text, include_hidden=include_hidden)
+    return "\n\n".join(part for part in [fixed, index, style, style_warnings, plan, dynamic] if part)
 
 
 # ---------------------------------------------------------------------------
@@ -402,13 +527,27 @@ Kurallar:
 - Önemsiz, tek seferlik geçen, hikâye için gereksiz varlıkları atla (ör.
   arka planda bahsi geçen isimsiz bir kalabalık).
 
+ZENGİN ÇIKARIM - isim tek başına yetmez, metin ne veriyorsa onu da topla:
+- aliases: Bu varlığa metinde başka nasıl atıf yapılıyor? ("Vicdan"a
+  "sistem" ya da "yargıç makinesi" de deniyorsa bunlar alias'tır; unvanlar,
+  lakaplar, kısaltmalar dahil). Metinde geçmeyen alias UYDURMA.
+- sections: SADECE metindeki kanıta dayanarak, varlık tipine uygun derin
+  profil bölümlerini kısaca doldur. Kullanılabilir anahtarlar:
+  * character: fiziksel_yapi, duygusal_yapi, gecmis, iliskiler, konusma_tarzi
+  * place: fiziksel_yapi, atmosfer, gecmis, kurallar, baglantilar
+  * object: fiziksel_yapi, gecmis, islev, sahiplik
+  Metinde o bölüme dair bilgi YOKSA anahtarı hiç koyma - boş string ya da
+  tahmin yazma. event/foreshadowing/term için sections hiç kullanılmaz.
+
 Yanıtını SADECE aşağıdaki JSON formatında ver:
 {
   "suggestions": [
-    {"entity_type": "character", "name": "...", "description": "..."}
+    {"entity_type": "character", "name": "...", "description": "...",
+     "aliases": ["..."], "sections": {"fiziksel_yapi": "..."}}
   ]
 }
-Yeni bir şey bulamazsan suggestions boş liste olsun."""
+aliases ve sections yoksa boş bırakılabilir. Yeni bir şey bulamazsan
+suggestions boş liste olsun."""
 
 
 
@@ -432,7 +571,9 @@ def suggest_entities_for_chapters(db: Session, chapters: list) -> list[dict]:
     for entity_type, model in ENTITY_MODELS.items():
         label = ENTITY_LABELS_TR.get(entity_type, entity_type)
         for record in db.query(model).filter(model.universe_id == universe_id).all():
-            existing_lines.append(f"{label}: {record.name}")
+            aliases = list(getattr(record, "aliases", None) or [])
+            alias_part = f" (diğer adları: {', '.join(aliases)})" if aliases else ""
+            existing_lines.append(f"{label}: {record.name}{alias_part}")
 
     chapter_blocks = []
     for chapter in sorted(chapters, key=lambda c: c.number):
@@ -461,19 +602,46 @@ def suggest_entities_for_chapters(db: Session, chapters: list) -> list[dict]:
     except json.JSONDecodeError:
         return []
 
-    existing_names_lower = {line.split(": ", 1)[1].lower() for line in existing_lines if ": " in line}
+    # Tekilleştirme artık İSİM + KAYITLI ALIAS'lar üzerinden: "Şahin Göz"
+    # bir karakterin kayıtlı takma adıysa, yeni varlık diye önerilmez.
+    existing_names_lower = set()
+    for entity_type, model in ENTITY_MODELS.items():
+        for record in db.query(model).filter(model.universe_id == universe_id).all():
+            existing_names_lower.add((record.name or "").lower())
+            for alias in (getattr(record, "aliases", None) or []):
+                if alias and alias.strip():
+                    existing_names_lower.add(alias.strip().lower())
     seen_names_lower = set()
     filtered = []
     for s in data.get("suggestions", []):
         if not isinstance(s, dict):
             continue
-        if s.get("entity_type") not in ENTITY_MODELS:
+        entity_type = s.get("entity_type")
+        if entity_type not in ENTITY_MODELS:
             continue
         name = (s.get("name") or "").strip()
         if not name or name.lower() in existing_names_lower or name.lower() in seen_names_lower:
             continue
         seen_names_lower.add(name.lower())
-        filtered.append({"entity_type": s["entity_type"], "name": name, "description": s.get("description", "")})
+        # aliases: sadece dolu stringler, ismin kendisi hariç, tekrarsız
+        aliases = []
+        for a in (s.get("aliases") or []):
+            a = (a or "").strip() if isinstance(a, str) else ""
+            if a and a.lower() != name.lower() and a.lower() not in {x.lower() for x in aliases}:
+                aliases.append(a)
+        # sections: sadece bu tipin GEÇERLİ anahtarları (meta asla), dolu
+        # değerler - model uydurma anahtar döndürürse sessizce atılır
+        # (AI çıktısı 422 ile reddedilmez, temizlenir).
+        valid_keys = set(SECTIONS_BY_ENTITY_TYPE.get(entity_type, {})) - {"meta"}
+        sections = {}
+        for k, v in (s.get("sections") or {}).items():
+            if k in valid_keys and isinstance(v, str) and v.strip():
+                sections[k] = v.strip()
+        filtered.append({
+            "entity_type": entity_type, "name": name,
+            "description": s.get("description", ""),
+            "aliases": aliases, "sections": sections,
+        })
     return filtered
 
 
@@ -1170,7 +1338,8 @@ def _execute_chat_tool(db: Session, novel_id: int, universe_id: int, name: str, 
 
         allowed_sections = SECTIONS_BY_ENTITY_TYPE.get(entity_type)
         if allowed_sections is None:
-            return {"error": f"'{entity_type}' için bölüm sistemi yok (sadece character/place destekleniyor)", "action_summary": None}
+            supported = "/".join(SECTIONS_BY_ENTITY_TYPE.keys())
+            return {"error": f"'{entity_type}' için bölüm sistemi yok (sadece {supported} destekleniyor)", "action_summary": None}
 
         # 'meta' bilerek yazar-özel - AI hiçbir zaman bunu isteyip alamaz,
         # yanlışlıkla ya da kasıtlı çağrılsa bile burada engelleniyor
@@ -1538,3 +1707,294 @@ def _run_full_scan_request(manuscript_text: str) -> dict:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         return {"summary": raw, "issues": []}
+
+
+# ---------------------------------------------------------------------------
+# PLAN MATRİSİ AI DOLDURMA: seçili kolonların BOŞ hücrelerini, dolu
+# hücrelerdeki kalıbı izleyerek taslakla doldurur. "Aynı iskelet, farklı
+# rol" mantığının otomasyonu: aynı SATIRDAKİ dolu hücreler (diğer turların
+# aynı aşaması) en güçlü şablondur, kolonun kendi dolu hücreleri ise rolün
+# sesini verir. HİÇBİR ŞEY otomatik kaydedilmez - öneriler kullanıcı onayına
+# döner (propose_entity_update ile aynı felsefe).
+# ---------------------------------------------------------------------------
+
+MATRIX_FILL_SYSTEM_PROMPT = """Sen bir roman planlama asistanısın. Sana bir
+plan matrisi verilecek: kolonlar kişileri/turları, satırlar aşamaları
+temsil eder; her hücre o kesişimde OLACAKLARIN madde madde planıdır.
+
+Görevin: istenen BOŞ hücreler için plan taslağı yazmak. Kurallar:
+1. Aynı satırdaki DOLU örnek hücreler en güçlü şablondur - onların madde
+   yapısını, uzunluğunu ve tonunu KORU, içeriği bu kolonun kişisine/rolüne
+   uyarla. Kopyalama, uyarla.
+2. Kolonun kendi dolu hücreleri o kişinin/turun sesidir - anahtar
+   kelimelerini ve temalarını tutarlı sürdür.
+3. Kısa, somut, madde madde yaz - düzyazı paragrafı değil, plan.
+4. Emin olamadığın özel isim/detay uydurma yerine köşeli parantezle
+   işaretle: [kanıt belgesi adı].
+
+Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey ekleme:
+{"cells": [{"row_id": <satır id>, "content": "madde madde plan"}]}"""
+
+
+def suggest_matrix_cell_fills(db: Session, matrix, column, empty_rows: list) -> list[dict]:
+    """Bir kolonun boş satırları için öneri üretir. Dönen liste:
+    [{"row_id": int, "content": str}] - SADECE istenen boş satırlar
+    (model fazladan/yanlış row_id dönerse ayıklanır). Kaydetme YOK."""
+    if not empty_rows:
+        return []
+
+    all_rows = {r.id: r for r in matrix.rows}
+    all_cols = {c.id: c for c in matrix.columns}
+    cells_by_row: dict[int, list] = {}
+    own_filled = []
+    for cell in matrix.cells:
+        if not (cell.content or "").strip():
+            continue
+        if cell.column_id == column.id:
+            own_filled.append(cell)
+        cells_by_row.setdefault(cell.row_id, []).append(cell)
+
+    lines = [f"MATRİS: {matrix.name}", f"DOLDURULACAK KOLON: {column.label}"]
+
+    # Kolon bir karaktere bağlıysa kısa profili ekle - rolün sesi için.
+    if column.character_id:
+        char = db.query(models.Character).filter(models.Character.id == column.character_id).first()
+        if char:
+            profile = char.description or ""
+            lines.append(f"KOLONUN KİŞİSİ: {char.name}. {profile}".strip())
+
+    if own_filled:
+        lines.append("\nBU KOLONUN DOLU HÜCRELERİ (turun sesi - tutarlı sürdür):")
+        for cell in own_filled:
+            row = all_rows.get(cell.row_id)
+            lines.append(f"- [{row.label if row else '?'}] {cell.content}")
+
+    lines.append("\nDOLDURULACAK BOŞ SATIRLAR (her biri için aynı satırdaki örnekler verildi):")
+    for row in empty_rows:
+        lines.append(f"\n--- SATIR row_id={row.id}: {row.label} ---")
+        examples = [c for c in cells_by_row.get(row.id, []) if c.column_id != column.id]
+        if examples:
+            for ex in examples:
+                col = all_cols.get(ex.column_id)
+                lines.append(f"ÖRNEK ({col.label if col else '?'}): {ex.content}")
+        else:
+            lines.append("(bu satırda hiç dolu örnek yok - satır etiketinden ve turun sesinden çıkar)")
+
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": MATRIX_FILL_SYSTEM_PROMPT},
+            {"role": "user", "content": "\n".join(lines)},
+        ],
+    )
+    raw = response.choices[0].message.content
+    cleaned = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return []
+    valid_ids = {r.id for r in empty_rows}
+    out = []
+    for item in data.get("cells", []):
+        row_id = item.get("row_id")
+        content = (item.get("content") or "").strip()
+        if row_id in valid_ids and content:
+            out.append({"row_id": row_id, "content": content})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# OKUR TESTİ: bölüm metnini "okuru düşürecek" noktalar için tarar - tempo
+# ölümü, bilgi bocalaması, klişe, anlaşılmaz cümle, gerilim kırılması,
+# inandırıcılık çatlağı. Denetçi katmanının ilk parçası: üretim SONRASI
+# kontrol. Sadece uyarır - hiçbir şeyi değiştirmez/kaydetmez.
+# ---------------------------------------------------------------------------
+
+READER_TEST_SYSTEM_PROMPT = """Sen deneyimli bir kurgu editörüsün. Görevin
+verilen bölüm metnini OKUR GÖZÜYLE taramak ve okuru metinden düşürebilecek
+noktaları işaretlemek. Aradığın sorun türleri:
+- tempo: aksiyonun/gerilimin ortasında gereksiz yavaşlama, uzayan betimleme
+- bilgi_bocasi: hikayeyi durduran yığın halinde açıklama (info-dump)
+- klise: basmakalıp ifade ya da öngörülebilir hamle
+- anlasilirlik: kimin konuştuğu/ne olduğu belirsiz, dolambaçlı cümle
+- gerilim: kurulan gerilimi erkenden söndüren açıklama/rahatlama
+- inandiricilik: karakterin ya da dünyanın kurallarıyla çelişen davranış
+
+Kurallar:
+1. SEÇİCİ ol - her pürüzü değil, okuru GERÇEKTEN düşürecek olanları işaretle.
+   Sorunsuz bir bölümde boş liste dönmek doğru cevaptır.
+2. quote alanına metinden EN FAZLA 12 kelimelik tam alıntı koy (yer tespiti için).
+3. paragraph_number, alıntının geçtiği paragrafın numarasıdır (P etiketi).
+4. Öneri kısa ve uygulanabilir olsun - yeniden yazma, yön göster.
+
+Yanıtını SADECE şu JSON formatında ver:
+{"findings": [{"paragraph_number": <int>, "quote": "...", "type": "tempo|bilgi_bocasi|klise|anlasilirlik|gerilim|inandiricilik", "severity": "yuksek|orta|dusuk", "reason": "...", "suggestion": "..."}]}"""
+
+
+def reader_test_chapter(db: Session, chapter) -> list[dict]:
+    """Bölümün paragraflarını Okur Testi'nden geçirir. Boş bölümde Qwen'e
+    hiç gitmez. Dönen bulgular paragraf numarasıyla eşlidir; model geçersiz
+    paragraf numarası döndürürse bulgu atılmaz, numara None yapılır (uyarı
+    yine değerlidir, sadece konumlanamaz)."""
+    paragraphs = [p for p in chapter.paragraphs if (p.text or "").strip()]
+    if not paragraphs:
+        return []
+    body = "\n\n".join(f"P{p.number}: {p.text}" for p in paragraphs)
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": READER_TEST_SYSTEM_PROMPT},
+            {"role": "user", "content": f"BÖLÜM {chapter.number}{' — ' + chapter.title if chapter.title else ''}\n\n{body}"},
+        ],
+    )
+    raw = response.choices[0].message.content
+    cleaned = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return []
+    valid_numbers = {p.number for p in paragraphs}
+    out = []
+    for f in data.get("findings", []):
+        if not (f.get("reason") or "").strip():
+            continue
+        num = f.get("paragraph_number")
+        out.append({
+            "paragraph_number": num if num in valid_numbers else None,
+            "quote": (f.get("quote") or "")[:200],
+            "type": f.get("type") or "diger",
+            "severity": f.get("severity") if f.get("severity") in ("yuksek", "orta", "dusuk") else "orta",
+            "reason": f.get("reason"),
+            "suggestion": f.get("suggestion") or "",
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# PARAGRAF BALONLARI: tek paragraf kaydedilince çalışan anlık tespit.
+# "ihtiyar teknisyen" gibi bir ifade görülünce K (kişi) / M (mekan) /
+# N (nesne) balonu çıkar; tıklanınca ya yeni kayıt (profiliyle) oluşur ya
+# da MEVCUT kayda yeni bilgi eklenir - ikisi de approve-suggestions'ın
+# zaten bildiği akış. Bölüm-sonu toplu taramanın anlık, hafif kardeşi:
+# tek paragraf, tek istek, sadece kişi/mekan/nesne.
+# ---------------------------------------------------------------------------
+
+PARAGRAPH_ENTITY_PROMPT = """Sen bir roman asistanısın. Sana TEK bir paragraf
+ve romanda zaten kayıtlı kişi/mekan/nesne isimleri (takma adlarıyla)
+verilecek. Görevin bu paragrafta geçen kişi/mekan/nesneleri bulmak:
+
+1. Kayıtlı OLMAYAN bir kişi/mekan/nesne geçiyorsa aday olarak döndür.
+   Özel ismi olmasa bile ("ihtiyar teknisyen", "eski değirmen") - konuşan,
+   eylem yapan ya da tasvir edilen her figür adaydır; name alanına tasvirin
+   kendisini yaz ("İhtiyar Teknisyen").
+2. Kayıtlı BİR varlık hakkında bu paragrafta YENİ bilgi veriliyorsa
+   (görünüşü, konuşma tarzı, işlevi...) onu da döndür - name alanına
+   KAYITLI adını yaz, sections'a SADECE yeni öğrenilen bilgiyi koy.
+3. Sadece adı geçip yeni hiçbir şey öğretmeyen kayıtlı varlıkları DÖNDÜRME.
+
+Zengin çıkarım kuralları:
+- aliases: bu paragrafta kullanılan diğer atıflar (uydurma yok).
+- sections anahtarları: character: fiziksel_yapi, duygusal_yapi, gecmis,
+  iliskiler, konusma_tarzi | place: fiziksel_yapi, atmosfer, gecmis,
+  kurallar, baglantilar | object: fiziksel_yapi, gecmis, islev, sahiplik.
+  Kanıt yoksa anahtarı hiç koyma.
+- entity_type SADECE character, place ya da object olabilir.
+- Cümle başı büyük harfi özel isim sanma. Önemsiz arka plan figürlerini atla.
+
+Yanıt SADECE şu JSON:
+{"candidates": [{"entity_type": "character", "name": "...", "description": "...",
+  "aliases": [], "sections": {}}]}
+Bulunamazsa candidates boş liste."""
+
+
+def suggest_paragraph_entities(db: Session, universe_id: int, text: str) -> list[dict]:
+    """Tek paragrafı tarar. Dönen her öğe AiSuggestion şeklindedir:
+    existing_entity_id doluysa 'mevcut kayda ekleme' (K+ balonu), boşsa
+    'yeni kayıt' (K balonu). Kayıtlı bir varlık için YENİ bilgi yoksa öğe
+    hiç dönmez (mention rozetleri onu zaten gösteriyor). Çok kısa metinde
+    Qwen'e hiç gidilmez."""
+    if not text or len(text.strip()) < 15:
+        return []
+    balloon_types = ("character", "place", "object")
+    # Kayıtlı harita: tr-küçük isim/alias -> (tip, id, asıl ad, alias seti)
+    registry = {}
+    existing_lines = []
+    for entity_type in balloon_types:
+        model = ENTITY_MODELS[entity_type]
+        label = ENTITY_LABELS_TR.get(entity_type, entity_type)
+        for record in db.query(model).filter(model.universe_id == universe_id).all():
+            aliases = [a for a in (getattr(record, "aliases", None) or []) if a and a.strip()]
+            alias_lowers = {_tr_lower(a) for a in aliases}
+            entry = (entity_type, record.id, record.name, alias_lowers)
+            registry[_tr_lower(record.name or "")] = entry
+            for a in aliases:
+                registry[_tr_lower(a)] = entry
+            alias_part = f" (diğer adları: {', '.join(aliases)})" if aliases else ""
+            existing_lines.append(f"{label}: {record.name}{alias_part}")
+
+    user_message = (
+        "KAYITLI OLANLAR:\n" + ("\n".join(existing_lines) if existing_lines else "(hiç kayıt yok)")
+        + "\n\nPARAGRAF:\n" + text.strip()
+    )
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": PARAGRAPH_ENTITY_PROMPT},
+            {"role": "user", "content": user_message},
+        ],
+    )
+    raw = response.choices[0].message.content
+    cleaned = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return []
+
+    out, seen = [], set()
+    for c in data.get("candidates", []):
+        if not isinstance(c, dict):
+            continue
+        entity_type = c.get("entity_type")
+        if entity_type not in balloon_types:
+            continue
+        name = (c.get("name") or "").strip()
+        if not name or _tr_lower(name) in seen:
+            continue
+        seen.add(_tr_lower(name))
+        valid_keys = set(SECTIONS_BY_ENTITY_TYPE.get(entity_type, {})) - {"meta"}
+        sections = {
+            k: v.strip() for k, v in (c.get("sections") or {}).items()
+            if k in valid_keys and isinstance(v, str) and v.strip()
+        }
+        aliases = []
+        for a in (c.get("aliases") or []):
+            a = (a or "").strip() if isinstance(a, str) else ""
+            if a and _tr_lower(a) != _tr_lower(name) and _tr_lower(a) not in {_tr_lower(x) for x in aliases}:
+                aliases.append(a)
+
+        match = registry.get(_tr_lower(name)) or next(
+            (registry[_tr_lower(a)] for a in aliases if _tr_lower(a) in registry), None
+        )
+        if match:
+            m_type, m_id, m_name, m_alias_lowers = match
+            # Zaten kayıtlı alias'ları at; hiç yeni bilgi kalmadıysa balon yok.
+            new_aliases = [a for a in aliases if _tr_lower(a) not in m_alias_lowers and _tr_lower(a) != _tr_lower(m_name)]
+            if not sections and not new_aliases:
+                continue
+            out.append({
+                "entity_type": m_type, "name": m_name,
+                "description": c.get("description", ""),
+                "aliases": new_aliases, "sections": sections,
+                "existing_entity_id": m_id,
+            })
+        else:
+            out.append({
+                "entity_type": entity_type, "name": name,
+                "description": c.get("description", ""),
+                "aliases": aliases, "sections": sections,
+                "existing_entity_id": None,
+            })
+    return out

@@ -37,6 +37,10 @@ def run_startup_migrations(engine):
         _backfill_default_novel(engine)
         _backfill_universes(engine)
         _fix_chapter_unique_constraint(engine)
+        _merge_legacy_sections(engine)
+        _upgrade_matrix_tables(engine)
+        _add_style_refrain_column(engine)
+        _add_rule_scope_columns(engine)
     except Exception:
         logger.exception("Şema göçü sırasında beklenmeyen bir hata oluştu - uygulama yine de başlatılıyor")
 
@@ -71,7 +75,7 @@ def _add_sections_columns(engine):
     existing_tables = set(inspector.get_table_names())
 
     with engine.begin() as conn:
-        for table in ("characters", "places"):
+        for table in ("characters", "places", "objects"):
             if table not in existing_tables:
                 continue  # create_all zaten oluşturmuştur, sütun da yeni gelir
             columns = {c["name"] for c in inspector.get_columns(table)}
@@ -117,7 +121,7 @@ def _add_universe_columns(engine):
                 logger.info(f"Göç: {table}.universe_id ekleniyor")
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN universe_id INTEGER"))
 
-        for table in ("characters", "places"):
+        for table in ("characters", "places", "objects"):
             if table not in existing_tables:
                 continue
             columns = {c["name"] for c in inspector.get_columns(table)}
@@ -314,3 +318,124 @@ def _fix_chapter_unique_constraint(engine):
         ))
         conn.execute(text("DROP TABLE chapters"))
         conn.execute(text("ALTER TABLE chapters_migrated RENAME TO chapters"))
+
+
+def _merge_legacy_sections(engine):
+    """Derin profil 7 başlıktan 6'ya indirildi (bkz. app/sections.py):
+    Kişilerde "kariyer" -> "gecmis" içine, Mekanlarda "zamansal_degisim" ->
+    "atmosfer" içine katlandı. Eski anahtarlarla kaydedilmiş veri varsa
+    (şifreli JSON olduğu için SQL ile değil, ORM üzerinden) içeriği yeni
+    başlığın SONUNA etiketle ekler ve eski anahtarı siler - hiçbir metin
+    kaybolmaz. İdempotent: eski anahtar kalmayınca hiçbir şey yapmaz.
+
+    NOT: Yeni bir dict ATANIR (in-place mutasyon değil) - SQLAlchemy'nin
+    özel EncryptedJSON tipi in-place değişikliği fark etmeyebilir."""
+    from sqlalchemy.orm import sessionmaker
+    from . import models
+
+    MERGES = {
+        models.Character: [("kariyer", "gecmis", "Kariyer")],
+        models.Place: [("zamansal_degisim", "atmosfer", "Zamansal değişim")],
+    }
+    Session = sessionmaker(bind=engine)
+    with Session() as db:
+        moved = 0
+        for model, merges in MERGES.items():
+            for record in db.query(model).all():
+                sections = dict(record.sections or {})
+                changed = False
+                for old_key, new_key, label in merges:
+                    old_val = (sections.get(old_key) or "").strip()
+                    if not old_val and old_key not in sections:
+                        continue
+                    if old_val:
+                        existing = (sections.get(new_key) or "").strip()
+                        sections[new_key] = f"{existing}\n\n[{label}] {old_val}".strip() if existing else old_val
+                    sections.pop(old_key, None)
+                    changed = True
+                if changed:
+                    record.sections = sections
+                    moved += 1
+        if moved:
+            db.commit()
+            logger.info("Göç: %s kayıtta eski derin profil başlıkları yeni yapıya taşındı", moved)
+
+
+def _upgrade_matrix_tables(engine):
+    """Plan Matrisi'ne sonradan eklenen sütunlar: matrix_rows.kind (ana/ara
+    başlık) ve matrix_cells.code (MP1, MP2... sabit referans kodu). Kod
+    olmayan eski hücrelere roman bazında sıralı kod atanır - idempotent."""
+    inspector = inspect(engine)
+    existing = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        if "matrix_rows" in existing:
+            cols = {c["name"] for c in inspector.get_columns("matrix_rows")}
+            if "kind" not in cols:
+                logger.info("Göç: matrix_rows.kind ekleniyor")
+                conn.execute(text("ALTER TABLE matrix_rows ADD COLUMN kind VARCHAR(10) DEFAULT 'main'"))
+                conn.execute(text("UPDATE matrix_rows SET kind = 'main' WHERE kind IS NULL"))
+        if "matrix_cells" in existing:
+            cols = {c["name"] for c in inspector.get_columns("matrix_cells")}
+            if "code" not in cols:
+                logger.info("Göç: matrix_cells.code ekleniyor")
+                conn.execute(text("ALTER TABLE matrix_cells ADD COLUMN code VARCHAR(20)"))
+    # Kod geri doldurma (ORM ile - roman bazında sayaç)
+    from sqlalchemy.orm import sessionmaker
+    from . import models
+    Session = sessionmaker(bind=engine)
+    with Session() as db:
+        codeless = db.query(models.MatrixCell).filter(models.MatrixCell.code == None).all()  # noqa: E711
+        if not codeless:
+            return
+        for cell in codeless:
+            matrix = db.query(models.PlanMatrix).filter(models.PlanMatrix.id == cell.matrix_id).first()
+            if matrix:
+                cell.code = _next_matrix_code(db, matrix.novel_id)
+        db.commit()
+        logger.info("Göç: %s matris hücresine referans kodu atandı", len(codeless))
+
+
+def _next_matrix_code(db, novel_id):
+    """Roman genelinde bir sonraki MP kodu. routers/matrix.py da kullanır -
+    tek kaynak burada dursun."""
+    import re as _re
+    from . import models
+    max_n = 0
+    rows = (
+        db.query(models.MatrixCell.code)
+        .join(models.PlanMatrix, models.MatrixCell.matrix_id == models.PlanMatrix.id)
+        .filter(models.PlanMatrix.novel_id == novel_id, models.MatrixCell.code != None)  # noqa: E711
+        .all()
+    )
+    for (code,) in rows:
+        m = _re.fullmatch(r"MP(\d+)", code or "")
+        if m:
+            max_n = max(max_n, int(m.group(1)))
+    return f"MP{max_n + 1}"
+
+
+def _add_style_refrain_column(engine):
+    """style_patterns.is_refrain (nakarat koruması) - idempotent."""
+    inspector = inspect(engine)
+    if "style_patterns" not in inspector.get_table_names():
+        return
+    cols = {c["name"] for c in inspector.get_columns("style_patterns")}
+    if "is_refrain" not in cols:
+        with engine.begin() as conn:
+            logger.info("Göç: style_patterns.is_refrain ekleniyor")
+            conn.execute(text("ALTER TABLE style_patterns ADD COLUMN is_refrain BOOLEAN DEFAULT 0"))
+
+
+def _add_rule_scope_columns(engine):
+    """rules.entity_type + rules.entity_id (kayda özel kural kapsamı)."""
+    inspector = inspect(engine)
+    if "rules" not in inspector.get_table_names():
+        return
+    cols = {c["name"] for c in inspector.get_columns("rules")}
+    with engine.begin() as conn:
+        if "entity_type" not in cols:
+            logger.info("Göç: rules.entity_type ekleniyor")
+            conn.execute(text("ALTER TABLE rules ADD COLUMN entity_type VARCHAR(20)"))
+        if "entity_id" not in cols:
+            logger.info("Göç: rules.entity_id ekleniyor")
+            conn.execute(text("ALTER TABLE rules ADD COLUMN entity_id INTEGER"))

@@ -15,8 +15,8 @@ places_router = make_crud_router(
 # gerektiği için ayrı bir router'da (routers/events.py), main.py'de eklenir.
 
 objects_router = make_crud_router(
-    models.Object, schemas.SimpleEntityCreate, schemas.SimpleEntityUpdate,
-    schemas.SimpleEntityOut, prefix="/objects", tag="Nesneler", entity_type="object",
+    models.Object, schemas.ObjectCreate, schemas.ObjectUpdate,
+    schemas.ObjectOut, prefix="/objects", tag="Nesneler", entity_type="object",
 )
 
 foreshadowings_router = make_crud_router(

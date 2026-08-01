@@ -38,6 +38,39 @@ class SimpleEntityOut(SimpleEntityBase):
     updated_at: datetime
 
 
+# ---- Nesneler (derin profil ekli - kompakt: 4 başlık + meta) ---------------
+# SimpleEntity* şemasından ayrıldı çünkü sections alanı sadece Nesneler'e
+# eklendi - Terimler gibi diğer basit menüler etkilenmesin.
+
+class ObjectCreate(SimpleEntityBase):
+    aliases: List[str] = []
+    sections: dict[str, str] = {}
+
+    @field_validator("sections")
+    @classmethod
+    def _check_sections(cls, v):
+        return validate_section_keys(v, "object")
+
+
+class ObjectUpdate(SimpleEntityUpdate):
+    aliases: Optional[List[str]] = None
+    # sections merge davranışı Kişiler'le aynı: gönderilen anahtarlar
+    # güncellenir, gönderilmeyenler SİLİNMEZ (bkz. generic_crud.py).
+    sections: Optional[dict[str, str]] = None
+
+    @field_validator("sections")
+    @classmethod
+    def _check_sections(cls, v):
+        if v is None:
+            return v
+        return validate_section_keys(v, "object")
+
+
+class ObjectOut(SimpleEntityOut):
+    aliases: List[str] = []
+    sections: dict[str, str] = {}
+
+
 # ---- İpuçları (durum alanı ekli) -------------------------------------------
 
 class ForeshadowingCreate(SimpleEntityBase):
@@ -204,6 +237,17 @@ class EventConflict(BaseModel):
 class RuleBase(BaseModel):
     title: str
     description: str = ""
+    # Kayda özel kural: ikisi birlikte dolu olmalı ("Vicdan yargıç değil"
+    # -> character + Vicdan'ın id'si). Boşsa genel kural.
+    entity_type: Optional[str] = None  # character | place | object
+    entity_id: Optional[int] = None
+
+    @field_validator("entity_type")
+    @classmethod
+    def _check_scope_type(cls, v):
+        if v is not None and v not in ("character", "place", "object"):
+            raise ValueError("entity_type character/place/object olmalı")
+        return v
     # Boş bırakılırsa (varsayılan) bu kural HER ZAMAN AI'ya gönderilir.
     # Dünya büyüdükçe (bkz. qwen_client.build_fixed_layer) etiketli
     # kurallar sadece talimat metninde o etiket geçtiğinde dahil edilir -
@@ -219,6 +263,8 @@ class RuleUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     tags: Optional[List[str]] = None
+    entity_type: Optional[str] = None
+    entity_id: Optional[int] = None
 
 
 class RuleOut(RuleBase):
@@ -364,14 +410,22 @@ class AiAssistRequest(BaseModel):
     instruction: str  # "şu başlıkla bir bölüm yaz" / "şu paragrafı düzenle" gibi talimat
     selected_entities: List[EntityRef] = []
     existing_text: Optional[str] = None  # düzenleme isteğinde mevcut bölüm metni
+    # Alt-metin modu: seçili varlıkların 'gizli' katmanı, sızdırmama
+    # direktifiyle context'e girer (varsayılan: hiç girmez).
+    include_hidden: bool = False
 
 
 class AiSuggestion(BaseModel):
     entity_type: str
     name: str
     description: str = ""
-    # None -> yeni kayıt oluşturulacak. Dolu -> var olan kaydın notlarına eklenecek
-    # (mevcut açıklama silinmez, yeni bilgi 'notes' alanına eklenir).
+    # Zengin çıkarım: metinden toplanan takma adlar ve derin profil bölümleri
+    # (sadece kanıta dayalı; geçersiz anahtarlar backend'de sessizce atılır).
+    aliases: List[str] = []
+    sections: dict[str, str] = {}
+    # None -> yeni kayıt oluşturulacak. Dolu -> var olan kayda EKLENİR:
+    # description notlara, aliases eksik olanlarıyla birleşir, sections
+    # ilgili bölümün SONUNA eklenir - hiçbir mevcut bilgi silinmez.
     existing_entity_id: Optional[int] = None
 
 
@@ -412,6 +466,7 @@ class AiChatRequest(BaseModel):
     # gönderilir - AI bunu context'te görür, tam güncellenmiş halini
     # set_draft_result ile geri döner (bkz. qwen_client.CHAT_SYSTEM_PROMPT).
     current_result: Optional[str] = None
+    include_hidden: bool = False
 
 
 class EntityUpdateProposal(BaseModel):
@@ -457,6 +512,10 @@ class EntityUpdateApproval(BaseModel):
 class ContextPreviewRequest(BaseModel):
     chapter_number: Optional[int] = None
     selected_entities: List[EntityRef] = []
+    # Talimat verilirse önizleme, /ai/assist'in GERÇEKTE kuracağı context'le
+    # birebir aynı olur (talimata göre seçilen derin profil bölümleri dahil).
+    instruction: str = ""
+    include_hidden: bool = False
 
 
 class ContextPreviewResponse(BaseModel):
@@ -567,3 +626,237 @@ class EntitySnapshotOut(BaseModel):
     field_name: str
     old_value: Any
     saved_at: datetime
+
+# ---- Üslup taraması (yazım tiki dedektörü) ----------------------------------
+
+class StylePatternCreate(BaseModel):
+    name: str
+    pattern: str  # KÜÇÜK HARF regex - bkz. models.StylePattern yorumu
+    threshold_per_1000: float = 2.0
+    min_count: int = 5
+    enabled: bool = True
+    is_refrain: bool = False  # nakarat: sayılır ama asla uyarıya dönüşmez
+    notes: str = ""
+
+
+class StylePatternUpdate(BaseModel):
+    name: Optional[str] = None
+    pattern: Optional[str] = None
+    threshold_per_1000: Optional[float] = None
+    min_count: Optional[int] = None
+    enabled: Optional[bool] = None
+    is_refrain: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+class StylePatternOut(BaseModel):
+    id: int
+    name: str
+    pattern: str
+    threshold_per_1000: float
+    min_count: int
+    enabled: bool
+    is_refrain: bool = False
+    notes: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class StyleWorstChapter(BaseModel):
+    label: str
+    count: int
+
+
+class StylePatternResult(BaseModel):
+    pattern_id: int
+    name: str
+    pattern: str
+    count: int
+    per_1000: float
+    threshold_per_1000: float
+    min_count: int
+    exceeded: bool
+    is_refrain: bool = False
+    worst_chapters: List[StyleWorstChapter] = []
+
+
+class StyleInvalidPattern(BaseModel):
+    pattern_id: int
+    name: str
+    error: str
+
+
+class StyleScanReport(BaseModel):
+    """scanned=False -> bu evrende henüz hiç tarama yapılmamış (rapor boş).
+    GET /style/report bunu 404 yerine bu bayrakla döner - frontend 'önce
+    Tara'ya bas' mesajını buradan anlar."""
+    scanned: bool = True
+    scanned_at: Optional[datetime] = None
+    total_words: int = 0
+    chapter_count: int = 0
+    patterns: List[StylePatternResult] = []
+    invalid_patterns: List[StyleInvalidPattern] = []
+
+
+# ---- Plan Matrisi -----------------------------------------------------------
+
+class MatrixColumnCreate(BaseModel):
+    label: str
+    character_id: Optional[int] = None
+    # Verilirse yeni kolon BU kolonun hemen SAĞINA girer (araya ekleme);
+    # verilmezse en sağa. Yeniden adlandırmada (PUT) yok sayılır.
+    after_column_id: Optional[int] = None
+
+
+class MatrixRowCreate(BaseModel):
+    label: str
+    kind: str = "main"  # main (ana başlık) | sub (ara başlık)
+    # Verilirse yeni satır BU satırın hemen ALTINA girer (araya ekleme);
+    # verilmezse en sona eklenir. Yeniden adlandırmada (PUT) yok sayılır.
+    after_row_id: Optional[int] = None
+
+    @field_validator("kind")
+    @classmethod
+    def _check_kind(cls, v):
+        if v not in ("main", "sub"):
+            raise ValueError("kind 'main' ya da 'sub' olmalı")
+        return v
+
+
+class MatrixCreate(BaseModel):
+    name: str
+    # İlk kurulumda kolon/satır etiketleri topluca verilebilir - "8 sanık ×
+    # 7 aşama"yı tek istekte kurmak için. Boş bırakılıp sonradan tek tek de
+    # eklenebilir.
+    columns: List[MatrixColumnCreate] = []
+    rows: List[MatrixRowCreate] = []
+
+
+class MatrixRename(BaseModel):
+    name: str
+
+
+class MatrixColumnOut(BaseModel):
+    id: int
+    position: int
+    label: str
+    character_id: Optional[int] = None
+
+
+class MatrixRowOut(BaseModel):
+    id: int
+    position: int
+    kind: str = "main"
+    label: str
+
+
+class MatrixCellUpsert(BaseModel):
+    column_id: int
+    row_id: int
+    content: str = ""
+    chapter_id: Optional[int] = None
+
+
+class MatrixCellOut(BaseModel):
+    id: int
+    column_id: int
+    row_id: int
+    content: str
+    chapter_id: Optional[int] = None
+    chapter_number: Optional[int] = None  # bağlıysa, fihristteki sırası
+    code: Optional[str] = None  # sabit referans kodu (MP1, MP2, ...)
+
+
+class MatrixOut(BaseModel):
+    id: int
+    name: str
+    created_at: datetime
+    columns: List[MatrixColumnOut] = []
+    rows: List[MatrixRowOut] = []
+    cells: List[MatrixCellOut] = []
+
+
+class MatrixSummaryOut(BaseModel):
+    id: int
+    name: str
+    created_at: datetime
+    column_count: int
+    row_count: int
+    filled_cell_count: int
+
+
+class GenerateChaptersResponse(BaseModel):
+    created_parts: int
+    created_chapters: int
+    linked_cells: int
+
+
+# ---- Plan Matrisi AI doldurma -----------------------------------------------
+
+class MatrixAiFillRequest(BaseModel):
+    # Üstte çoktan seçmeli işaretlenen kolonlar - SADECE bunların boş
+    # hücreleri doldurulur.
+    column_ids: List[int]
+
+
+class MatrixAiFillProposal(BaseModel):
+    column_id: int
+    row_id: int
+    column_label: str
+    row_label: str
+    content: str
+
+
+class MatrixAiFillResponse(BaseModel):
+    """Öneriler - HİÇBİRİ kaydedilmedi. Kullanıcı gözden geçirip onayladığını
+    normal hücre kaydıyla (PUT /matrix/{id}/cells) yazar."""
+    proposals: List[MatrixAiFillProposal] = []
+    skipped_columns: List[str] = []  # boş hücresi olmayan (zaten dolu) kolonlar
+
+
+class ChapterPlanCell(BaseModel):
+    """Roman menüsünde 'bu bölümün planı' kutusu için: bölüme bağlı matris
+    hücreleri. AI'ya gidenle aynı içerik - yazar da görsün."""
+    code: Optional[str] = None
+    matrix_name: str
+    column_label: str
+    row_label: str
+    content: str
+
+
+# ---- Okur Testi -------------------------------------------------------------
+
+class ReaderTestFinding(BaseModel):
+    paragraph_number: Optional[int] = None  # None: model konumlayamadı
+    quote: str = ""
+    type: str = "diger"      # tempo|bilgi_bocasi|klise|anlasilirlik|gerilim|inandiricilik
+    severity: str = "orta"   # yuksek|orta|dusuk
+    reason: str
+    suggestion: str = ""
+
+
+class ReaderTestResponse(BaseModel):
+    chapter_number: int
+    findings: List[ReaderTestFinding] = []
+
+
+class ParagraphEntitiesRequest(BaseModel):
+    text: str
+
+
+class ParagraphEntitiesResponse(BaseModel):
+    """Paragraf balonları: her öğe AiSuggestion - existing_entity_id doluysa
+    "mevcut kayda ekle" (K+ balonu), boşsa "yeni kayıt" (K balonu). Onay,
+    mevcut /ai/approve-suggestions üzerinden yapılır."""
+    suggestions: List[AiSuggestion] = []
+
+
+class QuickPlanRequest(BaseModel):
+    chapter_id: int
+    content: str
+
+
+class QuickPlanResponse(BaseModel):
+    code: Optional[str] = None
+    matrix_name: str
+    content: str

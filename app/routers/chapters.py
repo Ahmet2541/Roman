@@ -791,3 +791,65 @@ def reindex_mentions(db: Session = Depends(get_db), _user=Depends(get_current_us
     for p in paragraphs:
         detect_and_save_mentions(db, p)
     return {"reindexed_paragraphs": len(paragraphs)}
+
+
+@router.post("/{chapter_id}/promote-paragraph/{number}", response_model=schemas.ChapterOut, status_code=201)
+def promote_paragraph_to_heading(
+    chapter_id: int, number: int, kind: str = "subtitle",
+    db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Başlık kaçağı düzeltici: "# KOLTUKLAR" gibi, içe aktarmadan paragraf
+    olarak kalmış bir başlığı GERÇEK bir fihrist girdisine dönüştürür.
+    Yapılanlar (tek işlemde): (1) bu bölümden itibaren tüm girdi numaraları
+    bir kaydırılır, (2) açılan yere paragraf metninden (baştaki #'ler
+    temizlenerek) başlık girdisi konur - yani başlık, içinde bulunduğu
+    bölümün HEMEN ÖNÜNE geçer, (3) paragraf silinir ve kalan paragraflar
+    yeniden numaralanır. Metin kaybolmaz, sadece doğru türe taşınır."""
+    if kind not in ("subtitle", "part"):
+        raise HTTPException(400, "kind 'subtitle' ya da 'part' olmalı")
+    chapter = db.query(models.Chapter).filter(
+        models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id
+    ).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
+    paragraph = db.query(models.Paragraph).filter(
+        models.Paragraph.chapter_id == chapter_id, models.Paragraph.number == number
+    ).first()
+    if not paragraph:
+        raise HTTPException(404, "Paragraf bulunamadı")
+
+    import re as _re
+    title = _re.sub(r"^#+\s*", "", (paragraph.text or "").strip()).strip()
+    if not title:
+        raise HTTPException(400, "Paragraf boş - başlığa dönüştürülecek metin yok")
+
+    # (1) Bu bölüm ve sonrasını kaydır - unique (novel_id, number) çakışmasın
+    # diye BÜYÜKTEN küçüğe güncellenir.
+    later = (
+        db.query(models.Chapter)
+        .filter(models.Chapter.novel_id == novel_id, models.Chapter.number >= chapter.number)
+        .order_by(models.Chapter.number.desc())
+        .all()
+    )
+    for ch in later:
+        ch.number += 1
+        db.flush()
+    # (2) Açılan yere başlık girdisi
+    heading = models.Chapter(novel_id=novel_id, number=chapter.number - 1, kind=kind, title=title)
+    db.add(heading)
+    # (3) Paragrafı sil, kalanları kaydır (küçükten büyüğe: boşluğa doğru)
+    db.delete(paragraph)
+    db.flush()
+    remaining = (
+        db.query(models.Paragraph)
+        .filter(models.Paragraph.chapter_id == chapter_id, models.Paragraph.number > number)
+        .order_by(models.Paragraph.number.asc())
+        .all()
+    )
+    for p in remaining:
+        p.number -= 1
+        db.flush()
+    db.commit()
+    db.refresh(heading)
+    return heading

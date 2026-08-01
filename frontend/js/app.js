@@ -1,8 +1,41 @@
+// Derin profil bölüm tanımları - backend'deki app/sections.py ile senkron
+// tutulmalı (anahtarlar birebir aynı olmak ZORUNDA, backend bilinmeyen
+// anahtarı 422 ile reddeder). "meta" AI'ya asla gönderilmez - formda da
+// öyle etiketlenir. AI'ya açık 5 başlık + meta = 6.
+const ENTITY_SECTIONS = {
+  character: [
+    { key: 'fiziksel_yapi', label: 'Fiziksel Yapı', hint: 'görünüş, boy/kilo/saç/göz, ayırt edici özellikler, giyim' },
+    { key: 'duygusal_yapi', label: 'Kişilik & İç Dünya', hint: 'kişilik tipi, güçlü/zayıf yanlar, korkular, arzular, iç çatışma, karakter arc\'ı' },
+    { key: 'gecmis', label: 'Geçmiş & Köken', hint: 'nereli, ait olduğu grup, meslek/kariyer, sırlar, travmalar, dönüm noktaları' },
+    { key: 'iliskiler', label: 'İlişkiler', hint: 'aile/dost/düşman/aşk üzerine öznel notlar (harita için İlişkiler menüsü ayrı)' },
+    { key: 'konusma_tarzi', label: 'Konuşma Tarzı', hint: 'üslup, sık kullandığı sözler, ses tonu, beden dili' },
+    { key: 'gizli', label: '🔒 Gizli Katman', hint: 'sonraki kitapların sırrı: gizli bağlantılar, açığa çıkmamış motivasyonlar - AI\'ya normalde GİTMEZ, alt-metin moduyla sızdırmama direktifiyle verilir', isHidden: true },
+    { key: 'meta', label: 'Meta (yazar notu)', hint: 'sembolizm, roman içindeki işlevi - AI\'ya ASLA gönderilmez', isMeta: true },
+  ],
+  place: [
+    { key: 'fiziksel_yapi', label: 'Fiziksel Yapı', hint: 'mimari, boyut, düzen, malzeme, renk paleti, ayırt edici detaylar' },
+    { key: 'atmosfer', label: 'Atmosfer & Zamansal Değişim', hint: 'ışık, ses, koku, his; saate/mevsime/olaylara göre değişim' },
+    { key: 'gecmis', label: 'Geçmiş & Sırlar', hint: 'tarih, efsaneler, sahiplik, gizli alanlar, saklı sırlar' },
+    { key: 'kurallar', label: 'Kurallar & Dinamikler', hint: 'kanunlar, yasaklar, güç yapısı, ritüeller, tehlikeler' },
+    { key: 'baglantilar', label: 'Bağlantılar', hint: 'yakın mekanlar, ulaşım, sınırlar, sakinler' },
+    { key: 'gizli', label: '🔒 Gizli Katman', hint: 'mekanın açığa çıkmamış sırrı - AI\'ya normalde gitmez', isHidden: true },
+    { key: 'meta', label: 'Meta (yazar notu)', hint: 'sembolizm, roman içindeki işlevi - AI\'ya ASLA gönderilmez', isMeta: true },
+  ],
+  object: [
+    { key: 'fiziksel_yapi', label: 'Fiziksel Yapı', hint: 'görünüm, malzeme, boyut/ağırlık, işçilik, yıpranma/hasar' },
+    { key: 'gecmis', label: 'Köken & Geçmiş', hint: 'kim/ne zaman yaptı, önceki sahipler, efsanesi, sırları' },
+    { key: 'islev', label: 'İşlev & Güçler', hint: 'ne işe yarar, güçleri, sınırları/bedeli, kullanım kuralları' },
+    { key: 'sahiplik', label: 'Sahiplik & Konum', hint: 'şu an kimde, nerede duruyor, kimler biliyor' },
+    { key: 'gizli', label: '🔒 Gizli Katman', hint: 'nesnenin açığa çıkmamış gerçek doğası - AI\'ya normalde gitmez', isHidden: true },
+    { key: 'meta', label: 'Meta (yazar notu)', hint: 'sembolizm, olay örgüsündeki rolü - AI\'ya ASLA gönderilmez', isMeta: true },
+  ],
+};
+
 const ENTITY_TYPES = {
   character: { endpoint: '/characters/', label: 'Kişi', plural: 'Kişiler', hasStatus: true, statusOptions: ['aktif', 'pasif', 'öldü'], isRule: false, hasAliases: true },
   place: { endpoint: '/places/', label: 'Mekan', plural: 'Mekanlar', hasStatus: false, isRule: false, hasAliases: true },
   event: { endpoint: '/events/', label: 'Olay', plural: 'Olaylar', hasStatus: false, isRule: false, isCustom: true },
-  object: { endpoint: '/objects/', label: 'Nesne', plural: 'Nesneler', hasStatus: false, isRule: false },
+  object: { endpoint: '/objects/', label: 'Nesne', plural: 'Nesneler', hasStatus: false, isRule: false, hasAliases: true },
   foreshadowing: { endpoint: '/foreshadowings/', label: 'İpucu', plural: 'İpuçları', hasStatus: true, statusOptions: ['açık', 'kapandı'], isRule: false },
   term: { endpoint: '/glossary/', label: 'Terim', plural: 'Terimler', hasStatus: false, isRule: false },
   rule: { endpoint: '/rules/', label: 'Kural', plural: 'Roman Kuralları', hasStatus: false, isRule: true, hasTags: true },
@@ -29,6 +62,9 @@ function stripMarkdownArtifacts(str) {
   let s = String(str).trim();
   // Başındaki "> " / ">> " gibi alıntı (blockquote) işaretlerini temizle
   s = s.replace(/^>+\s*/, '');
+  // Başındaki "#", "##" başlık işaretleri (boşluksuz "#BİRİNCİ" dahil) -
+  // içe aktarılan el yazmalarında başlıklar markdown # ile gelebiliyor
+  s = s.replace(/^#+\s*/, '');
   // **kalın** ve __kalın__
   s = s.replace(/\*\*(.+?)\*\*/g, '$1');
   s = s.replace(/__(.+?)__/g, '$1');
@@ -54,6 +90,8 @@ async function switchView(view) {
   if (view === 'event') return renderEventsView();
   if (view === 'relationships') return renderRelationshipsView();
   if (view === 'fullscan') return renderFullScanView();
+  if (view === 'stylescan') return renderStyleScanView();
+  if (view === 'matrix') return renderMatrixView();
   if (view === 'place') return renderPlacesView();
   return renderEntityView(view);
 }
@@ -63,6 +101,19 @@ async function switchView(view) {
 // ---------------------------------------------------------------------
 
 async function renderEntityView(type) {
+  if (type === 'rule') {
+    // Kapsam rozetleri için isim haritası - üç liste tek seferde çekilir
+    // ve yalnızca kural görünümüne girildiğinde (maliyet önemsiz).
+    try {
+      const [chars, places, objects] = await Promise.all([
+        api.get('/characters/'), api.get('/places/'), api.get('/objects/'),
+      ]);
+      window.__ruleScopeNames = {};
+      chars.forEach(c => { window.__ruleScopeNames[`character:${c.id}`] = c.name; });
+      places.forEach(p => { window.__ruleScopeNames[`place:${p.id}`] = p.name; });
+      objects.forEach(o => { window.__ruleScopeNames[`object:${o.id}`] = o.name; });
+    } catch (e) { window.__ruleScopeNames = {}; }
+  }
   const cfg = ENTITY_TYPES[type];
   main().innerHTML = `
     <h1 class="view-title">${cfg.plural}</h1>
@@ -90,8 +141,17 @@ function renderEntityList(type, items) {
     listEl.innerHTML = `<div class="empty-state">Henüz kayıt yok.</div>`;
     return;
   }
+  // Kapsamlı kurallar için varlık adlarını çöz (id -> isim) - rozette
+  // "Kişi #12" yerine "Kişi: Vicdan" görünsün. Global harita renderEntityView
+  // tarafından doldurulur (aşağıda), yoksa tip etiketiyle yetinilir.
+  const scopeBadge = (item) => {
+    if (!cfg.isRule || !item.entity_id) return '';
+    const typeLabel = (ENTITY_TYPES[item.entity_type] || {}).label || item.entity_type;
+    const nm = (window.__ruleScopeNames || {})[`${item.entity_type}:${item.entity_id}`];
+    return ` <span style="font-size:10.5px;background:var(--paper-dim);border:1px solid var(--border);border-radius:3px;padding:0 5px;" title="Bu kural sadece bu kayıt sahnedeyken AI'ya gider">🔗 ${typeLabel}${nm ? ': ' + escapeHtml(nm) : ''}</span>`;
+  };
   listEl.innerHTML = items.map(item => {
-    const title = cfg.isRule ? item.title : item.name;
+    const title = cfg.isRule ? item.title + scopeBadge(item) : item.name;
     const statusBadge = cfg.hasStatus ? ` · ${item.status}` : '';
     const notesLine = (!cfg.isRule && item.notes) ? `<div class="desc" style="font-style:italic;margin-top:2px;">${escapeHtml(truncate(item.notes, 140))}</div>` : '';
     const progressionBtn = cfg.isRule ? '' : `<button class="btn btn-sm progression-btn" data-id="${item.id}">Gelişim</button>`;
@@ -413,6 +473,47 @@ async function showEntityForm(type, item) {
     </div>`;
   }
 
+  // --- Derin Profil (sadece Kişi/Mekan): 6 başlık, açılır-kapanır. -----
+  // Temel form kısa kalır ("tekdüze" ama hızlı); derinleşmek isteyen bu
+  // bloğu açar. Dolu başlık sayısı düğmede görünür - "bilgi girildikçe"
+  // ilerleme hissi verir. Her başlığın altında ne yazılacağını anlatan
+  // gri bir ipucu var; meta başlığı "AI'ya gönderilmez" diye işaretli.
+  // --- Kayda özel kurallar kutusu (sadece Kişi/Mekan/Nesne + düzenleme
+  // modunda: yeni kayıtta henüz id yok). Kural burada eklenir ama Kurallar
+  // menüsündeki ana listede de kapsam rozetiyle görünür - menü liste
+  // görevini korur, ekleme yerinde yapılır.
+  const supportsRules = ['character', 'place', 'object'].includes(type) && isEdit;
+  const entityRulesHtml = supportsRules ? `
+    <div style="margin:10px 0 4px;">
+      <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">BU KAYDA ÖZEL KURALLAR</strong>
+      <span style="font-size:11px;color:var(--text-muted);"> - sadece bu kayıt sahnedeyken AI'ya gider</span>
+    </div>
+    <div id="entityRulesList" style="border-left:3px solid var(--border);padding-left:10px;"></div>
+    <div style="display:flex;gap:6px;margin-top:6px;">
+      <input type="text" id="entityRuleTitle" placeholder="ör. Vicdan yargıç değil - hüküm vermez" style="flex:1;">
+      <button type="button" class="btn btn-sm" id="entityRuleAddBtn">+ Kural</button>
+    </div>` : '';
+
+  const sectionDefs = ENTITY_SECTIONS[type] || null;
+  let sectionsHtml = '';
+  if (sectionDefs) {
+    const savedSections = (isEdit && item.sections) ? item.sections : {};
+    const filledCount = sectionDefs.filter(d => (savedSections[d.key] || '').trim()).length;
+    const startOpen = filledCount > 0; // dolu profil varsa açık gelsin
+    sectionsHtml = `
+      <div style="margin:14px 0 4px;">
+        <button type="button" class="btn btn-sm" id="toggleSectionsBtn">${startOpen ? '▾' : '▸'} Derin Profil <span style="color:var(--text-muted);font-weight:400;">(${filledCount}/${sectionDefs.length} dolu)</span></button>
+      </div>
+      <div id="sectionsBlock" style="${startOpen ? '' : 'display:none;'}border-left:3px solid var(--border);padding-left:12px;margin-bottom:6px;">
+        <p style="font-size:12px;color:var(--text-muted);margin:6px 0 10px;">Bu bölümlerin TAMAMI her AI isteğinde gönderilmez - talimatla ilgili olan otomatik seçilir, gerisi sadece isim olarak listelenir. Meta hiç gönderilmez.</p>
+        ${sectionDefs.map(d => `
+          <div class="field">
+            <label>${d.label} <span style="font-weight:400;color:var(--text-muted);font-size:11.5px;">(${d.hint})</span></label>
+            <textarea id="f_section_${d.key}" ${d.isMeta || d.isHidden ? 'style="border-style:dashed;"' : ''}>${escapeHtml(savedSections[d.key] || '')}</textarea>
+          </div>`).join('')}
+      </div>`;
+  }
+
   container.innerHTML = `
     <div class="panel">
       <div class="field">
@@ -437,6 +538,8 @@ async function showEntityForm(type, item) {
         <select id="f_status">
           ${cfg.statusOptions.map(opt => `<option value="${opt}" ${statusValue === opt ? 'selected' : ''}>${opt.charAt(0).toUpperCase() + opt.slice(1)}</option>`).join('')}
         </select></div>` : ''}
+      ${sectionsHtml}
+      ${entityRulesHtml}
       <div class="form-actions">
         <button class="btn btn-primary" id="saveBtn">${isEdit ? 'Güncelle' : 'Kaydet'}</button>
         <button class="btn" id="cancelBtn">Vazgeç</button>
@@ -445,6 +548,27 @@ async function showEntityForm(type, item) {
     </div>`;
 
   document.getElementById('cancelBtn').addEventListener('click', () => { container.innerHTML = ''; });
+  if (supportsRules) {
+    loadEntityRules(type, item.id);
+    document.getElementById('entityRuleAddBtn').addEventListener('click', async () => {
+      const title = document.getElementById('entityRuleTitle').value.trim();
+      if (!title) return;
+      try {
+        await api.post('/rules/', { title, entity_type: type, entity_id: item.id });
+        document.getElementById('entityRuleTitle').value = '';
+        loadEntityRules(type, item.id);
+      } catch (err) { alert(err.message); }
+    });
+  }
+  const toggleSectionsBtn = document.getElementById('toggleSectionsBtn');
+  if (toggleSectionsBtn) {
+    toggleSectionsBtn.addEventListener('click', () => {
+      const block = document.getElementById('sectionsBlock');
+      const isHidden = block.style.display === 'none';
+      block.style.display = isHidden ? '' : 'none';
+      toggleSectionsBtn.innerHTML = toggleSectionsBtn.innerHTML.replace(isHidden ? '▸' : '▾', isHidden ? '▾' : '▸');
+    });
+  }
   document.getElementById('saveBtn').addEventListener('click', async () => {
     const titleField = cfg.isRule ? 'title' : 'name';
     const payload = {};
@@ -461,6 +585,15 @@ async function showEntityForm(type, item) {
     if (type === 'place') {
       const parentVal = document.getElementById('f_parent_place').value;
       payload.parent_place_id = parentVal ? parseInt(parentVal, 10) : null;
+    }
+    if (sectionDefs) {
+      // Tüm anahtarlar her zaman gönderilir (boşlar dahil) - "gördüğün ne
+      // ise kaydedilen o" davranışı: bir alanı boşaltmak onu gerçekten
+      // temizler (backend merge'i, gönderilen anahtarı olduğu gibi yazar).
+      payload.sections = {};
+      sectionDefs.forEach(d => {
+        payload.sections[d.key] = document.getElementById(`f_section_${d.key}`).value;
+      });
     }
 
     if (!payload[titleField]) {
@@ -556,6 +689,49 @@ async function loadWordCount() {
 let lastLoadedChapters = [];
 const collapsedGroups = new Set();
 
+// --- Daraltma durumu KALICI: roman başına localStorage'da tutulur -----------
+// Eskiden collapsedGroups salt bellekteydi - her sayfa yenilemede/görünüm
+// değişiminde her şey yeniden AÇIK geliyordu ve uzun bir fihrist her
+// seferinde yeniden yönetilemez hale dönüyordu. Şimdi:
+//   1. Her daralt/genişlet anında durum kaydedilir, yenilemede geri yüklenir.
+//   2. HİÇ kayıt yoksa (ilk açılış) ve liste uzunsa (>15 girdi) tüm
+//      Kısım/Alt Başlıklar DARALTIK başlar - açılışta seçilen bölümün
+//      ataları otomatik açıldığı için (bkz. expandAncestorsOf) kullanıcı
+//      "çalıştığı bölge açık, gerisi kapalı" bir taslak görünümüyle karşılaşır.
+//   3. Silinmiş başlıkların id'leri geri yüklenirken ayıklanır (birikmez).
+function collapsedStorageKey() { return `roman_collapsed_${getNovelId() || 'none'}`; }
+
+function saveCollapsedGroups() {
+  try { localStorage.setItem(collapsedStorageKey(), JSON.stringify([...collapsedGroups])); } catch (e) { /* özel modda dolu olabilir */ }
+}
+
+function loadCollapsedGroups(hierarchy) {
+  collapsedGroups.clear();
+  const validIds = new Set(hierarchy.filter(it => it.hasChildren).map(it => String(it.chapter.id)));
+  let saved = null;
+  try { saved = localStorage.getItem(collapsedStorageKey()); } catch (e) { /* yoksay */ }
+  if (saved !== null) {
+    try {
+      for (const id of JSON.parse(saved)) if (validIds.has(String(id))) collapsedGroups.add(String(id));
+      return;
+    } catch (e) { /* bozuk kayıt - varsayılana düş */ }
+  }
+  if (hierarchy.length > 15) validIds.forEach(id => collapsedGroups.add(id));
+}
+
+// Bir bölüme gidilirken onu içeren Kısım/Alt Başlık kapalıysa otomatik açar
+// - kapalı bir grubun içindeki bölüm seçilince listede "kaybolmuş" gibi
+// görünmesin. Değişiklik olduysa listeyi yeniden çizer ve true döner.
+function expandAncestorsOf(chapterId) {
+  const hierarchy = buildChapterHierarchy(lastLoadedChapters);
+  const item = hierarchy.find(it => String(it.chapter.id) === String(chapterId));
+  if (!item || !item.ancestorIds.length) return false;
+  let changed = false;
+  for (const aid of item.ancestorIds) if (collapsedGroups.delete(String(aid))) changed = true;
+  if (changed) { saveCollapsedGroups(); renderChapterListDOM(); }
+  return changed;
+}
+
 function buildChapterHierarchy(chapters) {
   const items = [];
   let currentPartId = null;
@@ -621,6 +797,10 @@ async function loadChapterList(selectId, skipSelect) {
       if (!skipSelect) renderAiPanel(null);
       return;
     }
+    // Kaydedilmiş daraltma durumunu (ya da ilk açılış varsayılanını) yükle -
+    // her API yenilemesinde çağrılır; durum zaten her mutasyonda kaydedildiği
+    // için bellek ile localStorage hiç ayrışmaz.
+    loadCollapsedGroups(buildChapterHierarchy(chapters));
     renderChapterListDOM();
     if (skipSelect) return;
     const firstRealChapter = chapters.find(c => c.kind === 'chapter');
@@ -661,6 +841,20 @@ function renderChapterListDOM() {
       const toggle = item.hasChildren
         ? `<button class="chapter-toggle" data-id="${c.id}" title="${isCollapsed ? 'Genişlet' : 'Daralt'}">${isCollapsed ? '▸' : '▾'}</button>`
         : `<span class="chapter-toggle" style="visibility:hidden;">▸</span>`;
+      // Daraltılmışken altında kaç girdi gizlendiğini göster - "▸ (12)" -
+      // uzun bir taslakta hangi kısmın ne kadar dolu olduğunu kapalıyken
+      // bile hissettirir.
+      let hiddenCount = 0;
+      if (isCollapsed && item.hasChildren) {
+        const selfIdx = hierarchy.indexOf(item);
+        for (let i = selfIdx + 1; i < hierarchy.length; i++) {
+          if (hierarchy[i].level <= item.level) break;
+          hiddenCount++;
+        }
+      }
+      const countBadge = hiddenCount
+        ? `<span style="font-size:11px;color:var(--text-muted);font-weight:400;">(${hiddenCount})</span>`
+        : '';
       const isPart = c.kind === 'part';
       const bulkScanBtn = isPart
         ? `<button class="btn-icon-sm bulk-scan-btn" data-id="${c.id}" title="Bu Kısımdaki TÜM bölümleri tara - yeni varlık ve gelişim notu önerileri">🔍</button>`
@@ -674,10 +868,10 @@ function renderChapterListDOM() {
       const orphanBadge = hasOrphanText
         ? `<span title="Bu ${isPart ? 'Kısım' : 'Alt Başlık'}'ın kendisinde ${c.paragraph_count} paragraf var - tıklayınca doğrudan bunları açar" style="font-size:11px;color:var(--danger);">⚠</span>`
         : '';
-      return `<div class="chapter-item ${isPart ? 'chapter-part-divider' : 'chapter-subtitle-divider'}" data-id="${c.id}" style="cursor:default;padding-left:${14 + indent}px;${isPart ? 'background:var(--paper-dim);' : ''}">
+      return `<div class="chapter-item ${isPart ? 'chapter-part-divider' : 'chapter-subtitle-divider'}" data-id="${c.id}" style="cursor:${item.hasChildren ? 'pointer' : 'default'};padding-left:${14 + indent}px;${isPart ? 'background:var(--paper-dim);' : ''}" ${item.hasChildren ? `title="${isCollapsed ? 'Genişletmek' : 'Daraltmak'} için tıkla"` : ''}>
         ${toggle}
         <div class="chapter-label-edit" data-id="${c.id}" style="flex:1;cursor:pointer;${isPart ? 'font-weight:700;letter-spacing:0.5px;text-transform:uppercase;font-size:12.5px;' : 'font-style:italic;font-size:12.5px;color:var(--text-muted);'}" title="${hasOrphanText ? 'Bu kısımda paragraf var - tıklayınca aç' : 'Bu kısımdaki ilk bölüme git'}">
-          <span style="opacity:0.6;font-weight:600;">${item.displayNumber}</span> ${escapeHtml(cleanTitle) || '<span style=\"opacity:0.5;\">(başlıksız)</span>'} ${orphanBadge}
+          <span style="opacity:0.6;font-weight:600;">${item.displayNumber}</span> ${escapeHtml(cleanTitle) || '<span style=\"opacity:0.5;\">(başlıksız)</span>'} ${countBadge} ${orphanBadge}
         </div>
         ${bulkScanBtn}
         <button class="btn-icon-sm edit-chapter-btn" data-id="${c.id}" title="Metni düzenle">✎</button>
@@ -734,6 +928,20 @@ function renderChapterListDOM() {
       e.stopPropagation();
       const id = btn.dataset.id;
       if (collapsedGroups.has(id)) collapsedGroups.delete(id); else collapsedGroups.add(id);
+      saveCollapsedGroups();
+      renderChapterListDOM();
+    });
+  });
+  // Kısım/Alt Başlık satırının BOŞ alanına tıklamak da daraltır/genişletir -
+  // minicik ▸ okunu hedeflemek yerine tüm satır tıklama hedefi. Başlık
+  // metni (navigasyon) ve butonlar (🔍/✎/✕) kendi işlerini korur.
+  listEl.querySelectorAll('.chapter-part-divider, .chapter-subtitle-divider').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('button') || e.target.closest('.chapter-label-edit')) return;
+      const id = el.dataset.id;
+      if (!collapsibleIds.includes(id)) return;
+      if (collapsedGroups.has(id)) collapsedGroups.delete(id); else collapsedGroups.add(id);
+      saveCollapsedGroups();
       renderChapterListDOM();
     });
   });
@@ -741,6 +949,7 @@ function renderChapterListDOM() {
   if (collapseAllBtn) {
     collapseAllBtn.addEventListener('click', () => {
       collapsibleIds.forEach(id => collapsedGroups.add(id));
+      saveCollapsedGroups();
       renderChapterListDOM();
     });
   }
@@ -748,6 +957,7 @@ function renderChapterListDOM() {
   if (expandAllBtn) {
     expandAllBtn.addEventListener('click', () => {
       collapsedGroups.clear();
+      saveCollapsedGroups();
       renderChapterListDOM();
     });
   }
@@ -1050,6 +1260,11 @@ async function selectChapter(id) {
     runBackgroundChapterScan(toScan);
   }
 
+  // Seçilen bölüm kapalı bir Kısım/Alt Başlık'ın içindeyse önce onu aç -
+  // yoksa "aktif" bölüm listede görünmez olurdu (özellikle açılışta
+  // varsayılan-daraltık modda ilk bölüm seçilirken).
+  expandAncestorsOf(id);
+
   document.querySelectorAll('.chapter-item').forEach(el => el.classList.toggle('active', el.dataset.id === String(id)));
   const readerPane = document.getElementById('readerPane');
   readerPane.innerHTML = `<div class="empty-state">Yükleniyor…</div>`;
@@ -1106,12 +1321,17 @@ function renderReader(chapter) {
       <div style="flex:1;">
         <div class="paragraph-text" contenteditable="true" data-number="${p.number}">${escapeHtml(p.text)}</div>
         <div>${(p.mentions || []).map(m => `<span class="mention-chip">${escapeHtml(m.entity_name)}</span>`).join('')}${p.is_style_sample ? '<span class="mention-chip" style="background:#1b2230;color:#fff;">★ stil örneği</span>' : ''}</div>
+        <button class="btn btn-sm para-actions-toggle" data-number="${p.number}" title="Paragraf işlemleri">⋯ İşlemler</button>
         <div class="paragraph-actions">
           <button class="btn btn-sm save-para-btn" data-number="${p.number}">Kaydet</button>
           <button class="btn btn-sm style-para-btn" data-number="${p.number}">${p.is_style_sample ? 'Stil örneğini kaldır' : 'Stil örneği yap'}</button>
           <button class="btn btn-sm history-para-btn" data-number="${p.number}">Geçmiş</button>
+          <button class="btn btn-sm suggest-para-btn" data-number="${p.number}" title="Bu paragrafı bağlama sadık kalarak güçlendirilmiş haliyle yeniden yazdırır - beğenirsen tek tıkla değiştirirsin">✨ Öneri</button>
+          <button class="btn btn-sm critique-para-btn" data-number="${p.number}" title="Bu paragrafı editör gözüyle eleştirir - yeniden yazmaz, sadece analiz">🔍 Eleştir</button>
+          ${(p.text || '').trim().startsWith('#') ? `<button class="btn btn-sm promote-para-btn" data-number="${p.number}" title="Bu satır içe aktarmadan kalmış bir başlık - gerçek bir Alt Başlık girdisine dönüştür (bölümün önüne taşınır)">↑ Başlığa Dönüştür</button>` : ''}
           <button class="btn btn-sm btn-danger del-para-btn" data-number="${p.number}">Sil</button>
         </div>
+        <div class="paragraph-ai-panel" data-number="${p.number}" style="display:none;margin-top:8px;"></div>
         <div class="paragraph-history-panel" data-number="${p.number}" style="display:none;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);"></div>
       </div>
     </div>`).join('');
@@ -1127,9 +1347,15 @@ function renderReader(chapter) {
   readerPane.innerHTML = `
     ${kindWarning}
     <div style="display:flex;justify-content:space-between;align-items:center;">
-      <h2 style="margin:0;">Bölüm ${chapter.number}${chapter.title ? ' — ' + escapeHtml(chapter.title) : ''}</h2>
+      <h2 style="margin:0;">Bölüm ${chapter.number}${chapter.title ? ' — ' + escapeHtml(stripMarkdownArtifacts(chapter.title)) : ''}</h2>
       <button class="btn btn-sm" id="editTitleBtn">Başlığı düzenle</button>
     </div>
+    <div id="chapterHealthStrip" style="margin-top:8px;"></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+      <button class="btn btn-sm" id="readerTestBtn" title="Metni okur gözüyle tarar: tempo ölümü, bilgi bocası, klişe, anlaşılmaz cümle, gerilim kırılması. Sadece uyarır, metne dokunmaz.">🎯 Okur Testi</button>
+      <button class="btn btn-sm" id="finishChapterBtn" title="Özet + Roman Haritası taramasını birlikte çalıştırır - bölümü AI'nın hafızasına işler">✅ Bölümü Kapat</button>
+    </div>
+    <div id="readerTestResult"></div>
     <div class="chapter-summary-box" style="margin-top:10px;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">FİHRİST ÖZETİ</strong>
@@ -1258,6 +1484,9 @@ function renderReader(chapter) {
     } catch (err) { alert(err.message); }
   });
 
+  renderChapterHealthStrip(chapter);
+  document.getElementById('readerTestBtn').addEventListener('click', () => runReaderTest(chapter));
+  document.getElementById('finishChapterBtn').addEventListener('click', () => finishChapter(chapter));
   document.getElementById('genSummaryBtn').addEventListener('click', async () => {
     const btn = document.getElementById('genSummaryBtn');
     const summaryText = document.getElementById('chapterSummaryText');
@@ -1283,6 +1512,27 @@ function renderReader(chapter) {
     }
   });
 
+  readerPane.querySelectorAll('.suggest-para-btn').forEach(btn => {
+    btn.addEventListener('click', () => runParagraphAi(chapter, btn.dataset.number, 'suggest'));
+  });
+  readerPane.querySelectorAll('.critique-para-btn').forEach(btn => {
+    btn.addEventListener('click', () => runParagraphAi(chapter, btn.dataset.number, 'critique'));
+  });
+  readerPane.querySelectorAll('.promote-para-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Bu paragraf silinip, metni bir ALT BAŞLIK girdisi olarak bu bölümün önüne konacak. Devam?')) return;
+      try {
+        await api.post(`/chapters/${chapter.id}/promote-paragraph/${btn.dataset.number}?kind=subtitle`, {});
+        await loadChapterList({ selectId: chapter.id });
+      } catch (err) { alert(err.message); }
+    });
+  });
+  readerPane.querySelectorAll('.para-actions-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const actions = btn.nextElementSibling; // .paragraph-actions
+      actions.classList.toggle('open');
+    });
+  });
   readerPane.querySelectorAll('.save-para-btn').forEach(btn => {
     btn.addEventListener('click', () => saveParagraph(chapter.id, btn.dataset.number));
   });
@@ -1386,7 +1636,66 @@ async function saveParagraph(chapterId, number) {
     const chapter = await api.get(`/chapters/${chapterId}`);
     currentChapter = chapter;
     renderReader(chapter);
+    // Anlık K/M/N tespiti: kayıt sonrası arka planda çalışır, balonları
+    // paragrafın altına basar. Hata olursa sessiz - kayıt zaten başarılı.
+    detectParagraphBalloons(chapter, parseInt(number, 10), text).catch(() => {});
   } catch (err) { alert(err.message); }
+}
+
+// ---------------------------------------------------------------------------
+// K/M/N BALONLARI: paragraf kaydedilince tek paragraflık anlık tespit.
+// K=Kişi, M=Mekan, N=Nesne. Düz balon = yeni kayıt önerisi; "+" işaretli
+// balon = MEVCUT kayda yeni bilgi ekleme (derin profil bölümüne). Tıklanınca
+// ne ekleneceği gösterilip onay istenir - onaysız hiçbir şey yazılmaz.
+// ---------------------------------------------------------------------------
+const BALLOON_LETTERS = { character: 'K', place: 'M', object: 'N' };
+const BALLOON_COLORS = { character: '#b08d3f', place: '#3f7a4f', object: '#3f5f8d' };
+
+async function detectParagraphBalloons(chapter, number, text) {
+  const result = await api.post('/ai/paragraph-entities', { text });
+  const sugs = result.suggestions || [];
+  if (!sugs.length) return;
+  const para = document.querySelector(`.paragraph-text[data-number="${number}"]`);
+  if (!para) return; // görünüm değişmiş - sessiz geç
+  const chipRow = para.nextElementSibling; // mention chip satırı
+  const holder = document.createElement('span');
+  chipRow.appendChild(holder);
+  holder.innerHTML = sugs.map((s, i) => {
+    const letter = BALLOON_LETTERS[s.entity_type] || '?';
+    const color = BALLOON_COLORS[s.entity_type] || 'var(--border)';
+    const isUpdate = !!s.existing_entity_id;
+    const secKeys = Object.keys(s.sections || {});
+    const tip = (isUpdate ? 'Mevcut kayda ekle: ' : 'Yeni kayıt öner: ') + s.name
+      + (secKeys.length ? ' · ' + secKeys.join(', ') : '')
+      + ((s.aliases || []).length ? ' · takma ad: ' + s.aliases.join(', ') : '');
+    return `<span class="mention-chip balloon-chip" data-idx="${i}" title="${escapeHtml(tip)}"
+      style="cursor:pointer;border:1.5px solid ${color};background:#fff;">
+      <b style="color:${color};">${letter}${isUpdate ? '+' : ''}</b> ${escapeHtml(s.name)}
+      <span class="balloon-dismiss" data-idx="${i}" title="Yoksay" style="opacity:0.5;margin-left:3px;">✕</span>
+    </span>`;
+  }).join('');
+
+  holder.querySelectorAll('.balloon-dismiss').forEach(x => x.addEventListener('click', (e) => {
+    e.stopPropagation();
+    x.closest('.balloon-chip').remove();
+  }));
+  holder.querySelectorAll('.balloon-chip').forEach(chip => chip.addEventListener('click', async () => {
+    const s = sugs[parseInt(chip.dataset.idx, 10)];
+    const secText = Object.entries(s.sections || {}).map(([k, v]) => `- ${k}: ${v}`).join('\n');
+    const msg = s.existing_entity_id
+      ? `"${s.name}" kaydına şu bilgiler EKLENECEK (mevcutlar silinmez):\n${secText || '- (sadece not)'}${(s.aliases || []).length ? '\n- takma ad: ' + s.aliases.join(', ') : ''}\n\nOnaylıyor musun?`
+      : `"${s.name}" YENİ ${ENTITY_TYPES[s.entity_type].label} olarak eklenecek:\n${s.description || ''}\n${secText}${(s.aliases || []).length ? '\n- takma ad: ' + s.aliases.join(', ') : ''}\n\nOnaylıyor musun?`;
+    if (!confirm(msg)) return;
+    try {
+      await api.post('/ai/approve-suggestions', { suggestions: [s] });
+      // Mention tespitini tazelemek için paragrafı aynı metinle yeniden
+      // kaydet - yeni varlık/alias artık rozet olarak yakalanır.
+      await api.put(`/chapters/${chapter.id}/paragraphs/${number}`, { number, text });
+      const refreshed = await api.get(`/chapters/${chapter.id}`);
+      currentChapter = refreshed;
+      renderReader(refreshed);
+    } catch (err) { alert(err.message); }
+  }));
 }
 
 // ---------------------------------------------------------------------
@@ -1400,6 +1709,11 @@ async function renderAiPanel(chapter) {
   panel.innerHTML = `<h3>AI Yazım Desteği</h3><div class="empty-state">Yükleniyor…</div>`;
   try {
     const lists = await Promise.all(PICKER_TYPES.map(t => api.get(ENTITY_TYPES[t].endpoint)));
+    // Bölüme bağlı Plan Matrisi hücresi varsa yazara da göster - AI'ya
+    // zaten otomatik gidiyor ama yazarın matris ekranına dönmeden planını
+    // görebilmesi gerek. Hata olursa sessiz geç (plan kutusu olmadan devam).
+    let planCells = [];
+    try { planCells = await api.get(`/matrix/plan-for-chapter/${chapter.id}`); } catch (e) { /* yoksay */ }
     // Bu bölümde zaten geçen (mentions'tan) varlıkları otomatik işaretle -
     // her seferinde elle tek tek tıklamana gerek kalmasın.
     const mentionedKeys = new Set();
@@ -1419,15 +1733,38 @@ async function renderAiPanel(chapter) {
       </div>`;
     }).join('');
 
+    const planHtml = planCells.length ? `
+      <div class="panel" style="border-left:3px solid var(--gold);margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;cursor:pointer;" id="chapterPlanToggle">
+          <strong style="font-size:11px;letter-spacing:0.4px;">📋 BÖLÜM PLANI ${planCells.map(p => p.code ? `<span style="color:var(--text-muted);font-weight:400;">${escapeHtml(p.code)}</span>` : '').join(' ')}</strong>
+          <span style="font-size:11px;color:var(--text-muted);">▾</span>
+        </div>
+        <div id="chapterPlanBody" style="margin-top:6px;">
+          ${planCells.map(p => `
+            <div style="font-size:12px;color:var(--text-muted);">${escapeHtml(p.column_label)} × ${escapeHtml(p.row_label)}</div>
+            <div style="white-space:pre-wrap;font-size:12.5px;margin:4px 0 8px;">${escapeHtml(p.content)}</div>`).join('')}
+          <div style="font-size:11px;color:var(--text-muted);">Bu plan, bu bölümdeki her AI isteğine otomatik gider.</div>
+          <div style="display:flex;gap:6px;margin-top:8px;">
+            <button class="btn btn-sm btn-primary" id="draftFromPlanBtn" style="flex:1;">📝 Plandan Bölüm Taslağı Oluştur</button>
+            <button class="btn btn-sm" id="editPlanBtn" title="Planı buradan düzenle - matrise gitmeye gerek yok">✎</button>
+          </div>
+          <div id="planDraftResult"></div>
+        </div>
+      </div>` : '';
+
     panel.innerHTML = `
       <h3>AI Yazım Desteği</h3>
+      ${planHtml}
       <input type="text" id="entityPickerSearch" placeholder="Kişi/mekan/olay ara…" style="width:100%;margin-bottom:8px;">
       <div class="entity-picker">${pickerHtml || '<div class="empty-state">Henüz kayıt yok</div>'}</div>
 
-      <div class="ai-mode-tabs" style="display:flex;gap:6px;margin:10px 0 8px;">
+      <div class="ai-mode-tabs" style="display:flex;gap:6px;margin:10px 0 4px;">
         <button class="btn btn-sm ai-mode-btn active" data-mode="chat">Sohbet</button>
         <button class="btn btn-sm ai-mode-btn" data-mode="instruct">Talimat</button>
       </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin:0 0 8px;cursor:pointer;" title="Seçili varlıkların 🔒 Gizli Katmanı AI'ya 'BİL ama ASLA açıkça yazma' direktifiyle verilir - diyaloglar/davranışlar sırra göre incelikle şekillenir (dramatik ironi). Kapalıyken gizli katman AI'ya hiç gitmez.">
+        <input type="checkbox" id="includeHiddenChk"> 🔒 Gizli katmanı alt-metin olarak ver
+      </label>
 
       <div id="aiResultBox" style="display:none;margin-bottom:10px;">
         <div class="panel" style="border-color:var(--gold);background:var(--gold-dim);">
@@ -1460,6 +1797,24 @@ async function renderAiPanel(chapter) {
       <button class="btn btn-sm" id="previewContextBtn" style="width:100%;margin-top:10px;">Bağlamı Önizle (AI'ya ne gidiyor?)</button>
       <div id="contextPreviewContainer"></div>`;
 
+    const draftBtn = document.getElementById('draftFromPlanBtn');
+    if (draftBtn) draftBtn.addEventListener('click', () => runPlanDraft(chapter));
+    const editPlanBtn = document.getElementById('editPlanBtn');
+    if (editPlanBtn) {
+      editPlanBtn.addEventListener('click', () => {
+        if (planCells.length > 1) { alert('Bu bölüme birden fazla plan hücresi bağlı - Plan Matrisi ekranından düzenle.'); return; }
+        openQuickPlanEditor(chapter, planCells[0] ? planCells[0].content : '');
+      });
+    }
+    const planToggle = document.getElementById('chapterPlanToggle');
+    if (planToggle) {
+      planToggle.addEventListener('click', () => {
+        const body = document.getElementById('chapterPlanBody');
+        const hidden = body.style.display === 'none';
+        body.style.display = hidden ? '' : 'none';
+        planToggle.querySelector('span:last-child').textContent = hidden ? '▾' : '▸';
+      });
+    }
     document.getElementById('entityPickerSearch').addEventListener('input', (e) => {
       const q = e.target.value.trim().toLowerCase();
       panel.querySelectorAll('.entity-picker-label').forEach(label => {
@@ -1550,12 +1905,17 @@ function renderChatMessages() {
     <div class="ai-chat-bubble ${m.role}">
       ${m.actions && m.actions.length ? `<div style="font-size:11px;color:#2f6b3a;background:#eef7ef;border-radius:6px;padding:4px 6px;margin-bottom:6px;">✓ ${m.actions.map(escapeHtml).join(' · ')}</div>` : ''}
       <div style="white-space:pre-wrap;">${escapeHtml(m.content)}</div>
-      ${m.role === 'assistant' ? `<button class="btn btn-sm move-to-result-btn" data-idx="${i}" style="margin-top:6px;" title="Bu mesajın metnini yukarıdaki SONUÇ kutusuna taşı">⬆ Sonuca Taşı</button>` : ''}
+      ${m.role === 'assistant' ? `<button class="btn btn-sm move-to-result-btn" data-idx="${i}" style="margin-top:6px;" title="Bu mesajın metnini yukarıdaki SONUÇ kutusuna taşı">⬆ Sonuca Taşı</button>${chatReplaceButtons(i)}` : ''}
       ${(m.pendingUpdates || []).map((p, pIdx) => renderEntityUpdateProposalCard(i, pIdx, p)).join('')}
     </div>`).join('');
   el.querySelectorAll('.move-to-result-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       showResult(aiChatMessages[parseInt(btn.dataset.idx, 10)].content);
+    });
+  });
+  el.querySelectorAll('.chat-replace-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      chatReplaceParagraph(parseInt(btn.dataset.idx, 10), parseInt(btn.dataset.pid, 10));
     });
   });
   wireEntityUpdateProposalButtons();
@@ -1672,6 +2032,7 @@ async function sendChatMessage(chapter) {
       selected_entities: selected,
       messages: aiChatMessages,
       current_result: currentResult,
+      include_hidden: !!document.getElementById('includeHiddenChk')?.checked,
     };
     const result = await api.post('/ai/chat', payload);
     aiChatMessages.push({
@@ -1705,7 +2066,16 @@ async function runContextPreview(chapter) {
   const container = document.getElementById('contextPreviewContainer');
   container.innerHTML = '<div class="empty-state">Bağlam oluşturuluyor…</div>';
   try {
-    const payload = { chapter_number: chapter ? chapter.number : 0, selected_entities: selected };
+    // Talimat kutusu doluysa önizlemeye de gönder - böylece önizleme,
+    // /ai/assist'in GERÇEKTE kuracağı context'le birebir aynı olur (talimata
+    // göre otomatik seçilen derin profil bölümleri dahil).
+    const instructionEl = document.getElementById('aiInstruction');
+    const payload = {
+      chapter_number: chapter ? chapter.number : 0,
+      selected_entities: selected,
+      instruction: instructionEl ? instructionEl.value.trim() : '',
+      include_hidden: !!document.getElementById('includeHiddenChk')?.checked,
+    };
     const result = await api.post('/ai/context-preview', payload);
     container.innerHTML = `
       <div class="ai-result" style="white-space:pre-wrap;font-size:12px;max-height:260px;overflow:auto;">${escapeHtml(result.context) || '<em>Bu seçimle context boş olacak.</em>'}</div>
@@ -1729,6 +2099,7 @@ async function runAiAssist(chapter) {
       instruction,
       selected_entities: selected,
       existing_text: null,
+      include_hidden: !!document.getElementById('includeHiddenChk')?.checked,
     };
     const result = await api.post('/ai/assist', payload);
     let extraHtml = '';
@@ -2496,10 +2867,24 @@ async function initApp() {
   }
 
   document.getElementById('activeNovelName').textContent = activeNovel.name;
-  document.getElementById('switchNovelBtn').addEventListener('click', () => {
-    clearNovelId();
-    window.location.reload();
-  });
+  // Kalıcı üst çubuk: "Seri · Kitap N: Ad" - her görünümde, mobilde de
+  // görünür. Tıklayınca seçim ekranı YERİNDE açılır (sayfa yenilenmez,
+  // aktif kitap kaybolmaz - ✕ ile vazgeçilebilir).
+  const bar = document.getElementById('activeNovelBar');
+  const barText = document.getElementById('activeNovelBarText');
+  const seriesPart = activeNovel.universe_name ? `${activeNovel.universe_name} · ` : '';
+  const bookPart = activeNovel.book_number ? `Kitap ${activeNovel.book_number}: ` : '';
+  barText.textContent = `${seriesPart}${bookPart}${activeNovel.name}`;
+  bar.style.display = '';
+  const openSwitcher = async () => {
+    await loadAndRenderNovelList();
+    const closeBtn = document.getElementById('closeNovelSelectBtn');
+    closeBtn.style.display = '';  // aktif kitap varken vazgeçilebilir
+    closeBtn.onclick = () => { document.getElementById('novelSelectOverlay').style.display = 'none'; };
+    document.getElementById('novelSelectOverlay').style.display = 'flex';
+  };
+  bar.addEventListener('click', openSwitcher);
+  document.getElementById('switchNovelBtn').addEventListener('click', openSwitcher);
 
   document.querySelectorAll('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -2551,3 +2936,877 @@ async function jumpToParagraphById(paragraphId) {
 }
 
 initApp();
+
+// ---------------------------------------------------------------------------
+// ÜSLUP TARAMASI: yazım tiki dedektörü. Backend'deki /style uçlarını kullanır.
+// "Tara" tüm seriyi regex'lerle sayar (AI çağrısı yok, ücretsiz), sonuç
+// önbelleklenir; eşiği aşan kalıplar her AI isteğinin context'ine otomatik
+// "bundan kaçın" uyarısı olarak girer. Kalıplar buradan eklenip düzenlenir.
+// ---------------------------------------------------------------------------
+function renderStyleScanView() {
+  main().innerHTML = `
+    <h1 class="view-title">Üslup Taraması</h1>
+    <p style="color:var(--text-muted);font-size:13.5px;max-width:640px;">
+      Serinin tüm metnini tarayıp "gibi / sanki / X yerine Y" tarzı aşırı kullanılan
+      yazım tiklerini sayar. Eşiği aşan kalıplar, bir sonraki taramaya kadar her AI
+      isteğine otomatik olarak <b>"bu kalıptan kaçın"</b> uyarısı olarak eklenir.
+      Tarama AI kullanmaz, ücretsizdir.</p>
+    <button class="btn btn-primary" id="styleScanBtn">Taramayı Başlat</button>
+    <div id="styleReport" style="margin-top:18px;"></div>
+    <h2 style="margin-top:28px;font-size:16px;">Kalıplar</h2>
+    <p style="color:var(--text-muted);font-size:12.5px;max-width:640px;">
+      Regex'leri <b>küçük harfle</b> yaz (tarama Türkçe'ye uygun küçültme yapar).
+      Bir kalıp "aşırı" sayılmak için <b>iki eşiği birden</b> aşmalı: 1000 kelimedeki
+      yoğunluk VE toplam tekrar sayısı - böylece kısa metinlerde tek kelime yanlış alarm vermez.</p>
+    <div id="stylePatterns"></div>
+    <div class="panel" style="margin-top:12px;max-width:640px;">
+      <div class="field"><label>Yeni kalıp adı</label><input type="text" id="sp_name" placeholder="ör. 'bir an için'"></div>
+      <div class="field"><label>Regex (küçük harf)</label><input type="text" id="sp_pattern" placeholder="\\bbir an için\\b"></div>
+      <div style="display:flex;gap:12px;">
+        <div class="field" style="flex:1;"><label>Yoğunluk eşiği (binde)</label><input type="number" id="sp_threshold" value="2.0" step="0.5" min="0"></div>
+        <div class="field" style="flex:1;"><label>Min. tekrar</label><input type="number" id="sp_mincount" value="5" step="1" min="0"></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin:4px 0;">
+        <input type="checkbox" id="sp_refrain"> Nakarat (bilinçli leitmotif - sayılır ama asla "aşırı" uyarısı vermez)
+      </label>
+      <div class="form-actions"><button class="btn btn-primary" id="sp_addBtn">Kalıp Ekle</button></div>
+      <div id="sp_error" class="error-text"></div>
+    </div>`;
+
+  document.getElementById('styleScanBtn').addEventListener('click', async () => {
+    const el = document.getElementById('styleReport');
+    el.innerHTML = `<div class="empty-state">Tüm seri taranıyor…</div>`;
+    try {
+      renderStyleReport(await api.post('/style/scan', {}));
+    } catch (err) {
+      el.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+    }
+  });
+
+  document.getElementById('sp_addBtn').addEventListener('click', async () => {
+    const errEl = document.getElementById('sp_error');
+    errEl.textContent = '';
+    try {
+      await api.post('/style/patterns', {
+        name: document.getElementById('sp_name').value.trim(),
+        pattern: document.getElementById('sp_pattern').value.trim(),
+        threshold_per_1000: parseFloat(document.getElementById('sp_threshold').value) || 0,
+        min_count: parseInt(document.getElementById('sp_mincount').value, 10) || 0,
+        is_refrain: document.getElementById('sp_refrain').checked,
+      });
+      document.getElementById('sp_name').value = '';
+      document.getElementById('sp_pattern').value = '';
+      await loadStylePatterns();
+    } catch (err) { errEl.textContent = err.message; }
+  });
+
+  // Açılışta: önbellekteki son rapor + kalıp listesi (ikisi de ucuz GET)
+  (async () => {
+    try {
+      const report = await api.get('/style/report');
+      if (report.scanned) renderStyleReport(report);
+      else document.getElementById('styleReport').innerHTML =
+        `<div class="empty-state">Henüz tarama yapılmadı - "Taramayı Başlat"a bas.</div>`;
+    } catch (e) { /* rapor yüklenemezse sessiz geç, buton hâlâ çalışır */ }
+    await loadStylePatterns();
+  })();
+}
+
+function renderStyleReport(report) {
+  const el = document.getElementById('styleReport');
+  if (!el) return;
+  const when = report.scanned_at ? new Date(report.scanned_at).toLocaleString('tr-TR') : '';
+  let html = `<div style="color:var(--text-muted);font-size:12.5px;margin-bottom:10px;">
+    ${report.total_words.toLocaleString('tr-TR')} kelime, ${report.chapter_count} bölüm tarandı${when ? ' · ' + escapeHtml(when) : ''}</div>`;
+
+  if (report.invalid_patterns && report.invalid_patterns.length) {
+    html += report.invalid_patterns.map(p => `
+      <div class="panel" style="border-left:4px solid var(--danger);margin-bottom:8px;">
+        <b>${escapeHtml(p.name)}</b> taranamadı - regex hatalı: ${escapeHtml(p.error)}
+      </div>`).join('');
+  }
+
+  const rows = report.patterns.map(p => {
+    const worst = (p.worst_chapters || []).map(w => `${escapeHtml(w.label)} (${w.count}×)`).join(', ');
+    const border = p.exceeded ? 'var(--danger)' : 'var(--border)';
+    const badge = p.exceeded
+      ? `<span style="color:var(--danger);font-weight:600;font-size:11px;text-transform:uppercase;">Aşırı - AI'ya uyarı gidiyor</span>`
+      : (p.is_refrain
+        ? `<span style="color:var(--text-muted);font-size:11px;">♪ nakarat - uyarı vermez</span>`
+        : `<span style="color:var(--text-muted);font-size:11px;">eşik altında</span>`);
+    return `
+      <div class="panel" style="margin-top:8px;border-left:4px solid ${border};">
+        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <b>${escapeHtml(p.name)}</b>${badge}
+        </div>
+        <div style="font-size:13px;margin-top:4px;">
+          ${p.count} tekrar · binde ${p.per_1000} <span style="color:var(--text-muted);">(eşik: binde ${p.threshold_per_1000} ve en az ${p.min_count} tekrar)</span>
+        </div>
+        ${worst ? `<div style="font-size:12.5px;color:var(--text-muted);margin-top:3px;">En yoğun: ${worst}</div>` : ''}
+      </div>`;
+  }).join('');
+  el.innerHTML = html + (rows || `<div class="empty-state">Etkin kalıp yok.</div>`);
+}
+
+async function loadStylePatterns() {
+  const el = document.getElementById('stylePatterns');
+  if (!el) return;
+  try {
+    const patterns = await api.get('/style/patterns');
+    el.innerHTML = patterns.map(p => `
+      <div class="panel" style="margin-top:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+          <input type="checkbox" class="sp-enabled" data-id="${p.id}" ${p.enabled ? 'checked' : ''}> etkin
+        </label>
+        <div style="flex:1;min-width:180px;">
+          <b style="font-size:13.5px;">${escapeHtml(p.name)}</b>${p.is_refrain ? ' <span style="font-size:10px;background:var(--paper-dim);border:1px solid var(--border);border-radius:3px;padding:0 4px;" title="Nakarat: sayılır ama uyarıya dönüşmez">♪ nakarat</span>' : ''}
+          <code style="display:block;font-size:12px;color:var(--text-muted);">${escapeHtml(p.pattern)}</code>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);">binde ${p.threshold_per_1000} · min ${p.min_count}</div>
+        <button class="btn btn-sm sp-del" data-id="${p.id}">Sil</button>
+      </div>`).join('');
+
+    el.querySelectorAll('.sp-enabled').forEach(cb => cb.addEventListener('change', async () => {
+      try { await api.put(`/style/patterns/${cb.dataset.id}`, { enabled: cb.checked }); }
+      catch (err) { alert(err.message); cb.checked = !cb.checked; }
+    }));
+    el.querySelectorAll('.sp-del').forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('Bu kalıbı silmek istediğine emin misin?')) return;
+      try { await api.del(`/style/patterns/${btn.dataset.id}`); await loadStylePatterns(); }
+      catch (err) { alert(err.message); }
+    }));
+  } catch (err) {
+    el.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PLAN MATRİSİ: Excel benzeri eşleştirme tablosu. Üstte kolonlar (kişiler/
+// turlar), yanda satırlar (aşamalar), hücrelerde madde madde plan. Bir hücre
+// bir bölüme bağlıysa, o bölüm yazılırken plan AI context'ine otomatik girer.
+// "Fihristi Oluştur": her kolon bir KISIM, her hücre bir BÖLÜM olur.
+// ---------------------------------------------------------------------------
+let currentMatrixId = null;
+
+async function renderMatrixView() {
+  main().innerHTML = `
+    <h1 class="view-title">Plan Matrisi</h1>
+    <p style="color:var(--text-muted);font-size:13.5px;max-width:680px;">
+      Kolonlar = kişiler/turlar (üstte), satırlar = aşamalar. Her hücre o kesişimin
+      madde madde planı. Bir hücre bir bölüme bağlıysa (<b>B5</b> gibi rozet), o bölüm
+      yazılırken plan AI'ya <b>otomatik</b> gider - başka hiçbir bölümde gitmez.</p>
+    <div id="matrixListArea"></div>
+    <div id="matrixGridArea" style="margin-top:16px;"></div>
+    <div id="matrixCellEditor" style="margin-top:16px;"></div>`;
+  await loadMatrixList();
+}
+
+async function loadMatrixList() {
+  const area = document.getElementById('matrixListArea');
+  try {
+    const list = await api.get('/matrix/');
+    area.innerHTML = `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        ${list.map(m => `<button class="btn btn-sm matrix-open ${currentMatrixId === m.id ? 'btn-primary' : ''}" data-id="${m.id}">${escapeHtml(m.name)} <span style="opacity:0.7;">(${m.column_count}×${m.row_count}, ${m.filled_cell_count} dolu)</span></button>`).join('')}
+        <button class="btn btn-sm" id="newMatrixBtn">+ Yeni Matris</button>
+      </div>`;
+    area.querySelectorAll('.matrix-open').forEach(btn => btn.addEventListener('click', () => {
+      currentMatrixId = parseInt(btn.dataset.id, 10);
+      loadMatrixList();
+      loadMatrixGrid();
+    }));
+    document.getElementById('newMatrixBtn').addEventListener('click', async () => {
+      const name = prompt('Matris adı (ör. "Tur Yapısı"):');
+      if (!name || !name.trim()) return;
+      try {
+        const m = await api.post('/matrix/', { name: name.trim(), columns: [], rows: [] });
+        currentMatrixId = m.id;
+        await loadMatrixList();
+        await loadMatrixGrid();
+      } catch (err) { alert(err.message); }
+    });
+    if (currentMatrixId && list.some(m => m.id === currentMatrixId)) await loadMatrixGrid();
+    else if (list.length === 1) { currentMatrixId = list[0].id; await loadMatrixList(); }
+    else if (!list.length) document.getElementById('matrixGridArea').innerHTML = `<div class="empty-state">Henüz matris yok - "+ Yeni Matris" ile başla, sonra kolon ve satırları ekle.</div>`;
+  } catch (err) {
+    area.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function loadMatrixGrid() {
+  const area = document.getElementById('matrixGridArea');
+  document.getElementById('matrixCellEditor').innerHTML = '';
+  try {
+    const m = await api.get(`/matrix/${currentMatrixId}`);
+    const cellMap = {};
+    m.cells.forEach(c => { cellMap[`${c.column_id}:${c.row_id}`] = c; });
+
+    const th = 'padding:6px 8px;border:1px solid var(--border);font-size:12px;background:var(--paper-dim);text-align:left;vertical-align:top;';
+    const td = 'padding:6px 8px;border:1px solid var(--border);font-size:12px;cursor:pointer;min-width:120px;max-width:200px;vertical-align:top;';
+
+    area.innerHTML = `
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+        <button class="btn btn-sm" id="mAddCol">+ Kolon (kişi/tur)</button>
+        <button class="btn btn-sm" id="mAddRow">+ Satır (aşama)</button>
+        <button class="btn btn-sm btn-primary" id="mGenChapters" title="Her kolon bir Kısım, her hücre bir Bölüm olur - fihristin sonuna eklenir, hücreler otomatik bağlanır">⚡ Fihristi Oluştur</button>
+        <button class="btn btn-sm" id="mAiFill" title="Üstte işaretlediğin kolonların BOŞ hücrelerini, dolu hücrelerdeki kalıbı izleyerek AI taslaklar - hiçbiri onaysız kaydedilmez">🤖 Seçili Kolonların Eksiklerini AI Doldursun</button>
+        <button class="btn btn-sm" id="mImport" title="Satır satır 'Aşama adı: içerik' formatında yapıştırılan metni, seçtiğin kolonun hücrelerine dağıtır">📥 Metinden Doldur</button>
+        <button class="btn btn-sm" id="mDelMatrix" style="margin-left:auto;">Matrisi Sil</button>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="border-collapse:collapse;width:max-content;">
+          <tr>
+            <th style="${th}"></th>
+            ${m.columns.map(c => `<th style="${th}">
+              <input type="checkbox" class="m-col-check" data-id="${c.id}" title="AI doldurma için bu kolonu seç" style="margin-right:4px;">
+              <span class="m-col-edit" data-id="${c.id}" style="cursor:pointer;" title="Adı değiştir">${escapeHtml(c.label)}</span>
+              <button class="btn-icon-sm m-col-ins" data-id="${c.id}" title="Bu kolonun SAĞINA yeni kolon ekle">⊕</button>
+              <button class="btn-icon-sm m-col-del" data-id="${c.id}" title="Kolonu sil (hücreleriyle)">✕</button>
+            </th>`).join('')}
+          </tr>
+          ${m.rows.map(r => `<tr>
+            <th style="${th}${r.kind === 'sub' ? 'font-style:italic;font-weight:400;padding-left:22px;' : ''}">
+              <span class="m-row-edit" data-id="${r.id}" style="cursor:pointer;" title="Adı değiştir">${r.kind === 'sub' ? '↳ ' : ''}${escapeHtml(r.label)}</span>
+              <button class="btn-icon-sm m-row-ins" data-id="${r.id}" title="Bu satırın ALTINA yeni satır ekle">⊕</button>
+              <button class="btn-icon-sm m-row-del" data-id="${r.id}" title="Satırı sil (hücreleriyle)">✕</button>
+            </th>
+            ${m.columns.map(c => {
+              const cell = cellMap[`${c.id}:${r.id}`];
+              const filled = cell && (cell.content || '').trim();
+              const preview = filled ? escapeHtml(cell.content.trim().slice(0, 60)) + (cell.content.length > 60 ? '…' : '') : '<span style="opacity:0.35;">—</span>';
+              const chBadge = cell && cell.chapter_number ? `<span style="font-size:10px;background:var(--paper-dim);border:1px solid var(--border);border-radius:3px;padding:0 4px;" title="Bölüm ${cell.chapter_number}'e bağlı - plan o bölümde AI'ya gider">B${cell.chapter_number}</span>` : '';
+              const codeBadge = cell && cell.code ? `<span style="font-size:10px;color:var(--text-muted);" title="Sabit referans kodu - başka bir bölümün talimatında '${cell.code}' yazarsan bu plan kıyas için AI'ya gider">${cell.code}</span>` : '';
+              const badge = codeBadge + (codeBadge && chBadge ? ' ' : '') + chBadge;
+              return `<td style="${td}${filled ? '' : 'background:transparent;'}" class="m-cell" data-col="${c.id}" data-row="${r.id}">
+                <div style="display:flex;justify-content:space-between;gap:4px;">${badge}<span style="opacity:0.5;font-size:10px;">${filled ? '●' : ''}</span></div>
+                <div style="white-space:pre-wrap;">${preview}</div>
+              </td>`;
+            }).join('')}
+          </tr>`).join('')}
+        </table>
+      </div>`;
+
+    document.getElementById('mAddCol').addEventListener('click', () => addMatrixColumn(m, null));
+    area.querySelectorAll('.m-col-ins').forEach(btn => btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      addMatrixColumn(m, parseInt(btn.dataset.id, 10));
+    }));
+    document.getElementById('mAddRow').addEventListener('click', () => addMatrixRow(m, null));
+    document.getElementById('mGenChapters').addEventListener('click', async () => {
+      if (!confirm(`${m.columns.length} Kısım + ${m.columns.length * m.rows.length} Bölüm fihristin SONUNA eklenecek ve hücreler bağlanacak. Devam?`)) return;
+      try {
+        const r = await api.post(`/matrix/${m.id}/generate-chapters`, {});
+        alert(`Oluşturuldu: ${r.created_parts} kısım, ${r.created_chapters} bölüm. ${r.linked_cells} hücre bağlandı.`);
+        await loadMatrixGrid();
+      } catch (err) { alert(err.message); }
+    });
+    document.getElementById('mAiFill').addEventListener('click', async () => {
+      const selected = Array.from(area.querySelectorAll('.m-col-check:checked')).map(cb => parseInt(cb.dataset.id, 10));
+      if (!selected.length) { alert('Önce kolon başlıklarındaki kutulardan en az bir tur seç.'); return; }
+      if (!confirm(`${selected.length} kolonun boş hücreleri için AI taslak üretecek (kolon başına 1 AI isteği). Hiçbiri onaysız kaydedilmez. Devam?`)) return;
+      const editor = document.getElementById('matrixCellEditor');
+      editor.innerHTML = '<div class="empty-state">AI, dolu hücrelerdeki kalıbı izleyerek taslak üretiyor…</div>';
+      try {
+        const result = await api.post(`/matrix/${m.id}/ai-fill`, { column_ids: selected });
+        renderAiFillReview(m, result);
+      } catch (err) { editor.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; }
+    });
+    document.getElementById('mImport').addEventListener('click', () => openMatrixImporter(m));
+    document.getElementById('mDelMatrix').addEventListener('click', async () => {
+      if (!confirm('Matris ve TÜM hücre planları silinecek (bölümlere dokunulmaz). Emin misin?')) return;
+      try { await api.del(`/matrix/${m.id}`); currentMatrixId = null; await loadMatrixList(); document.getElementById('matrixGridArea').innerHTML = ''; }
+      catch (err) { alert(err.message); }
+    });
+    area.querySelectorAll('.m-col-edit').forEach(el => el.addEventListener('click', () => {
+      openMatrixColumnEditor(m, parseInt(el.dataset.id, 10));
+    }));
+    area.querySelectorAll('.m-row-ins').forEach(btn => btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      addMatrixRow(m, parseInt(btn.dataset.id, 10));
+    }));
+    area.querySelectorAll('.m-row-edit').forEach(el => el.addEventListener('click', async () => {
+      const row = m.rows.find(r => r.id === parseInt(el.dataset.id, 10));
+      const label = prompt('Yeni satır adı:', row.label);
+      if (!label || !label.trim()) return;
+      try { await api.put(`/matrix/${m.id}/rows/${row.id}`, { label: label.trim(), kind: row.kind || 'main' }); await loadMatrixGrid(); }
+      catch (err) { alert(err.message); }
+    }));
+    area.querySelectorAll('.m-col-del').forEach(btn => btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('Kolon ve hücreleri silinecek. Emin misin?')) return;
+      try { await api.del(`/matrix/${m.id}/columns/${btn.dataset.id}`); await loadMatrixGrid(); } catch (err) { alert(err.message); }
+    }));
+    area.querySelectorAll('.m-row-del').forEach(btn => btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('Satır ve hücreleri silinecek. Emin misin?')) return;
+      try { await api.del(`/matrix/${m.id}/rows/${btn.dataset.id}`); await loadMatrixGrid(); } catch (err) { alert(err.message); }
+    }));
+    area.querySelectorAll('.m-cell').forEach(el => el.addEventListener('click', () => {
+      openMatrixCellEditor(m, parseInt(el.dataset.col, 10), parseInt(el.dataset.row, 10), cellMap);
+    }));
+  } catch (err) {
+    area.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function addMatrixColumn(m, afterColumnId) {
+  // afterColumnId null -> en sağa; doluysa o kolonun hemen SAĞINA girer.
+  const label = prompt(afterColumnId ? 'Araya eklenecek kolonun adı:' : 'Kolon adı (ör. "TUR 3: MÜHENDİS"):');
+  if (!label || !label.trim()) return;
+  try {
+    await api.post(`/matrix/${m.id}/columns`, { label: label.trim(), after_column_id: afterColumnId });
+    await loadMatrixGrid();
+  } catch (err) { alert(err.message); }
+}
+
+async function addMatrixRow(m, afterRowId) {
+  // afterRowId null -> sona ekler; doluysa o satırın hemen ALTINA girer.
+  const label = prompt(afterRowId ? 'Araya eklenecek satırın adı:' : 'Satır adı (ör. "5. Sorgu (20 dk)"):');
+  if (!label || !label.trim()) return;
+  const isSub = confirm('ARA başlık olarak mı eklensin? (girintili/italik görünür)\n\nTamam = Ara başlık, İptal = Ana başlık');
+  try {
+    await api.post(`/matrix/${m.id}/rows`, {
+      label: label.trim(), kind: isSub ? 'sub' : 'main', after_row_id: afterRowId,
+    });
+    await loadMatrixGrid();
+  } catch (err) { alert(err.message); }
+}
+
+async function openMatrixCellEditor(m, colId, rowId, cellMap) {
+  const editor = document.getElementById('matrixCellEditor');
+  const col = m.columns.find(c => c.id === colId);
+  const row = m.rows.find(r => r.id === rowId);
+  const cell = cellMap[`${colId}:${rowId}`] || null;
+  let chapters = [];
+  try { chapters = (await api.get('/chapters/')).filter(c => c.kind === 'chapter'); } catch (e) { /* seçici olmadan devam */ }
+
+  editor.innerHTML = `
+    <div class="panel">
+      <b>${escapeHtml(col.label)} × ${escapeHtml(row.label)}</b>
+      ${cell && cell.code ? `<span style="margin-left:8px;font-size:12px;color:var(--text-muted);">Kod: <b>${cell.code}</b> - başka bir bölümün talimatında bu kodu yazarsan plan kıyas için AI'ya gider</span>` : ''}
+      <div class="field" style="margin-top:8px;">
+        <label>Plan (madde madde - bu bölümde ne OLACAK)</label>
+        <textarea id="mCellContent" style="min-height:140px;">${escapeHtml(cell ? cell.content : '')}</textarea>
+      </div>
+      <div class="field">
+        <label>Bağlı bölüm <span style="font-weight:400;color:var(--text-muted);">(plan SADECE bu bölüm yazılırken AI'ya gider)</span></label>
+        <select id="mCellChapter">
+          <option value="">(bağlı değil)</option>
+          ${chapters.map(c => `<option value="${c.id}" ${cell && cell.chapter_id === c.id ? 'selected' : ''}>${c.number} — ${escapeHtml(stripMarkdownArtifacts(c.title) || '(başlıksız)')}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="mCellSave">Kaydet</button>
+        <button class="btn" id="mCellCancel">Kapat</button>
+      </div>
+      <div id="mCellError" class="error-text"></div>
+    </div>`;
+  editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  document.getElementById('mCellCancel').addEventListener('click', () => { editor.innerHTML = ''; });
+  document.getElementById('mCellSave').addEventListener('click', async () => {
+    const chapterVal = document.getElementById('mCellChapter').value;
+    try {
+      await api.put(`/matrix/${m.id}/cells`, {
+        column_id: colId, row_id: rowId,
+        content: document.getElementById('mCellContent').value,
+        chapter_id: chapterVal ? parseInt(chapterVal, 10) : null,
+      });
+      editor.innerHTML = '';
+      await loadMatrixGrid();
+    } catch (err) { document.getElementById('mCellError').textContent = err.message; }
+  });
+}
+
+// AI doldurma önerilerinin gözden geçirme paneli: her öneri düzenlenebilir,
+// tek tek ya da toplu kaydedilir. Kaydetme normal hücre PUT'undan geçer -
+// mevcut bölüm bağı korunur, yeni hücre MP kodunu orada alır.
+function renderAiFillReview(m, result) {
+  const editor = document.getElementById('matrixCellEditor');
+  if (!result.proposals.length) {
+    editor.innerHTML = `<div class="empty-state">Öneri üretilemedi${result.skipped_columns.length ? ' - seçili kolonlarda boş hücre yoktu: ' + result.skipped_columns.map(escapeHtml).join(', ') : ''}.</div>`;
+    return;
+  }
+  editor.innerHTML = `
+    <div class="panel">
+      <b>AI Taslakları (${result.proposals.length})</b>
+      <span style="font-size:12px;color:var(--text-muted);"> - düzenleyip onayla; onaylanmayan hiçbir şey kaydedilmez</span>
+      ${result.skipped_columns.length ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Atlanan (zaten dolu): ${result.skipped_columns.map(escapeHtml).join(', ')}</div>` : ''}
+      <div id="aiFillItems">
+        ${result.proposals.map((p, i) => `
+          <div class="panel" style="margin-top:10px;" data-idx="${i}">
+            <b style="font-size:13px;">${escapeHtml(p.column_label)} × ${escapeHtml(p.row_label)}</b>
+            <textarea class="ai-fill-content" style="min-height:110px;margin-top:6px;">${escapeHtml(p.content)}</textarea>
+            <div class="form-actions">
+              <button class="btn btn-sm btn-primary ai-fill-save" data-idx="${i}">Onayla ve Kaydet</button>
+              <button class="btn btn-sm ai-fill-skip" data-idx="${i}">Atla</button>
+            </div>
+          </div>`).join('')}
+      </div>
+      <div class="form-actions" style="margin-top:12px;">
+        <button class="btn btn-primary" id="aiFillSaveAll">Kalanların Tümünü Onayla ve Kaydet</button>
+        <button class="btn" id="aiFillClose">Kapat</button>
+      </div>
+      <div id="aiFillError" class="error-text"></div>
+    </div>`;
+
+  async function saveOne(idx) {
+    const p = result.proposals[idx];
+    const item = editor.querySelector(`[data-idx="${idx}"]`);
+    if (!item) return;
+    const content = item.querySelector('.ai-fill-content').value;
+    // Mevcut hücreyi (bölüm bağı!) koruyarak kaydet
+    const full = await api.get(`/matrix/${m.id}`);
+    const existing = full.cells.find(c => c.column_id === p.column_id && c.row_id === p.row_id);
+    await api.put(`/matrix/${m.id}/cells`, {
+      column_id: p.column_id, row_id: p.row_id, content,
+      chapter_id: existing ? existing.chapter_id : null,
+    });
+    item.remove();
+  }
+
+  editor.querySelectorAll('.ai-fill-save').forEach(btn => btn.addEventListener('click', async () => {
+    try { await saveOne(parseInt(btn.dataset.idx, 10)); await loadMatrixGrid(); }
+    catch (err) { document.getElementById('aiFillError').textContent = err.message; }
+  }));
+  editor.querySelectorAll('.ai-fill-skip').forEach(btn => btn.addEventListener('click', () => {
+    editor.querySelector(`[data-idx="${btn.dataset.idx}"]`)?.remove();
+  }));
+  document.getElementById('aiFillSaveAll').addEventListener('click', async () => {
+    try {
+      const remaining = Array.from(editor.querySelectorAll('#aiFillItems [data-idx]')).map(el => parseInt(el.dataset.idx, 10));
+      for (const idx of remaining) await saveOne(idx);
+      editor.innerHTML = '';
+      await loadMatrixGrid();
+    } catch (err) { document.getElementById('aiFillError').textContent = err.message; }
+  });
+  document.getElementById('aiFillClose').addEventListener('click', () => { editor.innerHTML = ''; });
+}
+
+// ---------------------------------------------------------------------------
+// PLANDAN TAM TASLAK: "özet(plan) yaz -> sistem bölümün tamamını yazsın ->
+// paragraf paragraf düzelt" akışının eksik halkası. /ai/assist'e hazır bir
+// talimatla gider - plan zaten build_plan_layer ile otomatik context'te.
+// Üretilen taslak ONAYSIZ kaydedilmez: önce gösterilir, "Böl ve Ekle"
+// dersen boş satırlardan paragraflara bölünüp bölüme eklenir - sonrasında
+// her paragraf normal araçlarla (Kaydet/Geçmiş/AI) tek tek işlenir.
+// ---------------------------------------------------------------------------
+async function runPlanDraft(chapter) {
+  const box = document.getElementById('planDraftResult');
+  const hasParagraphs = (chapter.paragraphs || []).length > 0;
+  if (hasParagraphs && !confirm('Bu bölümde zaten paragraf var - taslak, mevcut metnin SONUNA eklenecek. Devam?')) return;
+  const selected = Array.from(document.querySelectorAll('.entity-check:checked')).map(cb => ({
+    entity_type: cb.dataset.type, entity_id: parseInt(cb.dataset.id, 10),
+  }));
+  box.innerHTML = '<div class="empty-state">Plan işleniyor, taslak yazılıyor…</div>';
+  try {
+    const result = await api.post('/ai/assist', {
+      chapter_number: chapter.number,
+      instruction: 'BÖLÜM PLANI\'ndaki maddelerin TAMAMINI sırasıyla işleyerek bu bölümün tam taslağını yaz. '
+        + 'Metni boş satırlarla paragraflara ayır. Plandaki hiçbir maddeyi atlama; planda olmayan büyük olay ya da karakter ekleme. '
+        + 'Emin olmadığın özel detayı köşeli parantezle işaretle.',
+      selected_entities: selected,
+      existing_text: null,
+    });
+    const paras = (result.generated_text || '').split(/\n\s*\n/).map(t => t.trim()).filter(Boolean);
+    if (!paras.length) { box.innerHTML = '<div class="error-text">Taslak boş döndü.</div>'; return; }
+    box.innerHTML = `
+      <div class="panel" style="margin-top:8px;border-color:var(--gold);">
+        <strong style="font-size:11px;color:var(--text-muted);">TASLAK (${paras.length} paragraf) - onaylamadan kaydedilmez</strong>
+        <div style="white-space:pre-wrap;font-size:12.5px;max-height:260px;overflow-y:auto;margin:6px 0;">${escapeHtml(result.generated_text)}</div>
+        ${result.consistency_notes && result.consistency_notes.length
+          ? `<div style="font-size:12px;color:var(--danger);">⚠ ${result.consistency_notes.map(escapeHtml).join(' · ')}</div>` : ''}
+        <div class="form-actions">
+          <button class="btn btn-primary btn-sm" id="planDraftAcceptBtn">Paragraflara Böl ve Ekle</button>
+          <button class="btn btn-sm" id="planDraftDiscardBtn">Vazgeç</button>
+        </div>
+      </div>`;
+    document.getElementById('planDraftDiscardBtn').addEventListener('click', () => { box.innerHTML = ''; });
+    document.getElementById('planDraftAcceptBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('planDraftAcceptBtn');
+      btn.disabled = true; btn.textContent = 'Ekleniyor…';
+      try {
+        let nextNumber = Math.max(0, ...(chapter.paragraphs || []).map(p => p.number)) + 1;
+        for (const text of paras) {
+          await api.put(`/chapters/${chapter.id}/paragraphs/${nextNumber}`, { number: nextNumber, text });
+          nextNumber++;
+        }
+        await selectChapter(chapter.id); // bölümü tazele - paragraf araçları hazır
+      } catch (err) { alert('Ekleme sırasında hata: ' + err.message); btn.disabled = false; btn.textContent = 'Paragraflara Böl ve Ekle'; }
+    });
+  } catch (err) {
+    box.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BAĞLAM SAĞLIK ŞERİDİ: "kör yazma" riskini görünür kılar - bu bölüm için
+// AI'nın elinde ne var, ne eksik? Özet yoksa bölüm fihristte görünmez;
+// plan yoksa AI plansız yazar. Sadece bilgilendirir, hiçbir şeyi zorlamaz.
+// ---------------------------------------------------------------------------
+async function renderChapterHealthStrip(chapter) {
+  const strip = document.getElementById('chapterHealthStrip');
+  if (!strip) return;
+  let planCells = [];
+  try { planCells = await api.get(`/matrix/plan-for-chapter/${chapter.id}`); } catch (e) { /* yoksay */ }
+  const chip = (ok, labelOk, labelBad, tip, id) =>
+    `<span ${id ? `id="${id}"` : ''} title="${tip}" style="display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;margin-right:6px;border:1px solid ${ok ? 'var(--border)' : 'var(--danger)'};color:${ok ? 'var(--text-muted)' : 'var(--danger)'};${!ok && id ? 'cursor:pointer;' : ''}">${ok ? '✓ ' + labelOk : '✗ ' + labelBad}</span>`;
+  const paraCount = (chapter.paragraphs || []).length;
+  strip.innerHTML =
+    chip(!!(chapter.summary || '').trim(), 'Özet', 'Özet yok', 'Özeti olmayan bölüm fihristte ve diğer bölümlerin AI bağlamında GÖRÜNMEZ. Bölümü yazınca "AI ile özet oluştur"a bas.') +
+    chip(planCells.length > 0, 'Plan', 'Plan Matrisi\'nde bulunamadı - tıkla, hemen yaz',
+      planCells.length ? 'Bu bölüme bağlı plan var - AI ona sadık yazar'
+        : 'Bu bölüme bağlı plan hücresi yok: AI plansız yazar. TIKLA - matrise girmeden buradan plan yazabilirsin.', 'healthPlanChip') +
+    chip(paraCount > 0, `${paraCount} paragraf`, 'Metin yok', 'Bölümde henüz paragraf yok - planı yazıp "Plandan Bölüm Taslağı Oluştur" kullanabilirsin');
+  const planChip = document.getElementById('healthPlanChip');
+  if (planChip && !planCells.length) {
+    planChip.addEventListener('click', () => openQuickPlanEditor(chapter, ''));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// HIZLI PLAN: matrise hiç girmeden, bölümün içinden plan yazma. Arka planda
+// "Hızlı Planlar" matrisine tek hücre olarak kaydedilir - MP kodu, plan
+// kutusu, "Plandan Taslak", context enjeksiyonu aynen çalışır; bölüm zaten
+// bir matristen bağlıysa O hücre güncellenir (kopya açılmaz).
+// ---------------------------------------------------------------------------
+function openQuickPlanEditor(chapter, currentText) {
+  let box = document.getElementById('quickPlanEditorBox');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'quickPlanEditorBox';
+    document.getElementById('chapterHealthStrip').after(box);
+  }
+  box.innerHTML = `
+    <div class="panel" style="margin-top:8px;border-left:3px solid var(--gold);">
+      <strong style="font-size:11px;letter-spacing:0.4px;">📋 BÖLÜM PLANI${currentText ? ' - DÜZENLE' : ' - YENİ'}</strong>
+      <div class="field" style="margin-top:6px;">
+        <label>Bu bölümde ne OLACAK? (madde madde - AI buna sadık yazar)</label>
+        <textarea id="quickPlanText" style="min-height:120px;" placeholder="- Vicdan salonu tanıtır, kuralları okur
+- İlk hologram: yaşlı çift, yanmış gecelik
+- Anahtar kelime: ÇÖZÜN. BEKLEYEMEM.">${escapeHtml(currentText)}</textarea>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary btn-sm" id="quickPlanSave">Kaydet</button>
+        <button class="btn btn-sm" id="quickPlanCancel">Vazgeç</button>
+      </div>
+      <div id="quickPlanError" class="error-text"></div>
+    </div>`;
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  document.getElementById('quickPlanCancel').addEventListener('click', () => { box.innerHTML = ''; });
+  document.getElementById('quickPlanSave').addEventListener('click', async () => {
+    const content = document.getElementById('quickPlanText').value.trim();
+    if (!content) { document.getElementById('quickPlanError').textContent = 'Plan boş olamaz.'; return; }
+    try {
+      await api.post('/matrix/quick-plan', { chapter_id: chapter.id, content });
+      box.innerHTML = '';
+      // Plan kutusu + taslak düğmesi + şerit tazelensin
+      renderChapterHealthStrip(chapter);
+      renderAiPanel(chapter);
+    } catch (err) { document.getElementById('quickPlanError').textContent = err.message; }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// OKUR TESTİ: metni okur gözüyle tarayıp okuru düşürecek noktaları listeler.
+// ---------------------------------------------------------------------------
+const READER_TEST_TYPE_LABELS = {
+  tempo: 'Tempo', bilgi_bocasi: 'Bilgi bocası', klise: 'Klişe',
+  anlasilirlik: 'Anlaşılırlık', gerilim: 'Gerilim kırılması', inandiricilik: 'İnandırıcılık', diger: 'Diğer',
+};
+
+async function runReaderTest(chapter) {
+  const box = document.getElementById('readerTestResult');
+  if (!(chapter.paragraphs || []).length) { box.innerHTML = '<div class="empty-state">Önce metin gerek.</div>'; return; }
+  box.innerHTML = '<div class="empty-state">Metin okur gözüyle taranıyor…</div>';
+  try {
+    const result = await api.post(`/ai/reader-test/${chapter.id}`, {});
+    if (!result.findings.length) {
+      box.innerHTML = '<div class="panel" style="margin-top:8px;border-color:var(--border);"><span style="font-size:13px;">✓ Okuru düşürecek belirgin bir nokta bulunamadı.</span></div>';
+      return;
+    }
+    const sevColor = { yuksek: 'var(--danger)', orta: '#b08d3f', dusuk: 'var(--text-muted)' };
+    box.innerHTML = `
+      <div class="panel" style="margin-top:8px;">
+        <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">OKUR TESTİ - ${result.findings.length} UYARI (metne dokunulmadı)</strong>
+        ${result.findings.map(f => `
+          <div style="border-left:3px solid ${sevColor[f.severity] || 'var(--border)'};padding-left:10px;margin-top:10px;">
+            <div style="font-size:12px;">
+              <b>${READER_TEST_TYPE_LABELS[f.type] || f.type}</b>
+              ${f.paragraph_number ? `· <a href="#" class="rt-goto" data-num="${f.paragraph_number}" style="color:inherit;">Paragraf ${f.paragraph_number}</a>` : ''}
+              · <span style="color:${sevColor[f.severity]};">${f.severity}</span>
+            </div>
+            ${f.quote ? `<div style="font-size:12px;font-style:italic;color:var(--text-muted);margin-top:2px;">"${escapeHtml(f.quote)}"</div>` : ''}
+            <div style="font-size:12.5px;margin-top:3px;">${escapeHtml(f.reason)}</div>
+            ${f.suggestion ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">→ ${escapeHtml(f.suggestion)}</div>` : ''}
+          </div>`).join('')}
+      </div>`;
+    box.querySelectorAll('.rt-goto').forEach(a => a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const target = document.querySelector(`.paragraph-text[data-number="${a.dataset.num}"]`);
+      if (target) { target.scrollIntoView({ behavior: 'smooth', block: 'center' }); target.focus(); }
+    }));
+  } catch (err) {
+    box.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BÖLÜMÜ KAPAT: özet + harita taramasını arka arkaya çalıştırır - bölümü
+// AI'nın hafızasına tek dokunuşla işler. Harita önerileri her zamanki onay
+// akışına düşer (otomatik yazılmaz).
+// ---------------------------------------------------------------------------
+async function finishChapter(chapter) {
+  const btn = document.getElementById('finishChapterBtn');
+  btn.disabled = true; btn.textContent = '1/2 Özet…';
+  try {
+    const result = await api.post(`/chapters/${chapter.id}/generate-summary`, {});
+    const accept = confirm(`Taslak özet:\n\n${result.generated_summary}\n\nKaydedilsin mi? (İptal: özetsiz devam - bölüm fihristte görünmez)`);
+    if (accept) {
+      await api.put(`/chapters/${chapter.id}`, { summary: result.generated_summary });
+      const sumEl = document.getElementById('chapterSummaryText');
+      if (sumEl) sumEl.textContent = result.generated_summary;
+      chapter.summary = result.generated_summary;
+    }
+    btn.textContent = '2/2 Harita…';
+    await runSuggestProgressions(chapter);
+    btn.textContent = '✅ Bölüm kapatıldı';
+    renderChapterHealthStrip(chapter);
+  } catch (err) {
+    alert('Bölüm kapatma sırasında hata: ' + err.message);
+    btn.textContent = '✅ Bölümü Kapat';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// KOLON DÜZENLEME PANELİ: ad + Kişi bağı. Kolon bir karaktere bağlanınca
+// AI doldurma o karakterin profilini de görür - taslaklar rolün sesine
+// oturur (backend zaten hazırdı, eksik olan bu arayüzdü).
+// ---------------------------------------------------------------------------
+async function openMatrixColumnEditor(m, colId) {
+  const editor = document.getElementById('matrixCellEditor');
+  const col = m.columns.find(c => c.id === colId);
+  let characters = [];
+  try { characters = await api.get('/characters/'); } catch (e) { /* seçici olmadan devam */ }
+  editor.innerHTML = `
+    <div class="panel">
+      <b>Kolonu Düzenle</b>
+      <div class="field" style="margin-top:8px;"><label>Kolon adı</label>
+        <input type="text" id="mColLabel" value="${escapeHtml(col.label)}"></div>
+      <div class="field"><label>Bağlı Kişi <span style="font-weight:400;color:var(--text-muted);">(AI doldurma bu kişinin profilini görür)</span></label>
+        <select id="mColChar">
+          <option value="">(bağlı değil)</option>
+          ${characters.map(c => `<option value="${c.id}" ${col.character_id === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
+        </select></div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="mColSave">Kaydet</button>
+        <button class="btn" id="mColCancel">Kapat</button>
+      </div>
+      <div id="mColError" class="error-text"></div>
+    </div>`;
+  editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  document.getElementById('mColCancel').addEventListener('click', () => { editor.innerHTML = ''; });
+  document.getElementById('mColSave').addEventListener('click', async () => {
+    const label = document.getElementById('mColLabel').value.trim();
+    if (!label) { document.getElementById('mColError').textContent = 'Ad boş olamaz.'; return; }
+    const charVal = document.getElementById('mColChar').value;
+    try {
+      await api.put(`/matrix/${m.id}/columns/${colId}`, {
+        label, character_id: charVal ? parseInt(charVal, 10) : null,
+      });
+      editor.innerHTML = '';
+      await loadMatrixGrid();
+    } catch (err) { document.getElementById('mColError').textContent = err.message; }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// METİNDEN DOLDUR: "Aşama adı: içerik" satırlarını, satır etiketleriyle
+// eşleştirip SEÇİLEN kolonun hücrelerine dağıtır. Belgelerdeki tur
+// tablolarını elle hücre hücre taşımamak için. Eşleşme önce ÖNİZLENİR -
+// hangi satırın nereye gideceğini görmeden hiçbir şey yazılmaz. Dolu
+// hücrenin üzerine yazmadan önce ayrıca sorar.
+// ---------------------------------------------------------------------------
+function _trLowerJs(s) { return s.replace(/İ/g, 'i').replace(/I/g, 'ı').toLowerCase(); }
+
+async function openMatrixImporter(m) {
+  const editor = document.getElementById('matrixCellEditor');
+  if (!m.columns.length || !m.rows.length) { alert('Önce kolon ve satırları kur.'); return; }
+  editor.innerHTML = `
+    <div class="panel">
+      <b>📥 Metinden Doldur</b>
+      <div class="field" style="margin-top:8px;"><label>Hedef kolon</label>
+        <select id="mImpCol">${m.columns.map(c => `<option value="${c.id}">${escapeHtml(c.label)}</option>`).join('')}</select></div>
+      <div class="field"><label>Metin - her satır: <code>Aşama adı: içerik</code></label>
+        <textarea id="mImpText" style="min-height:160px;" placeholder="1. Hologram: 5 görüntü: Mahalle → Makam → Gece. Anahtar: ÇÖZÜN.\n2. Kamera+Soru: 2 soru: ambulans süresi, duman bilinci."></textarea></div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="mImpPreview">Eşleşmeleri Önizle</button>
+        <button class="btn" id="mImpCancel">Kapat</button>
+      </div>
+      <div id="mImpResult"></div>
+    </div>`;
+  editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  document.getElementById('mImpCancel').addEventListener('click', () => { editor.innerHTML = ''; });
+
+  document.getElementById('mImpPreview').addEventListener('click', async () => {
+    const colId = parseInt(document.getElementById('mImpCol').value, 10);
+    const lines = document.getElementById('mImpText').value.split('\n').map(l => l.trim()).filter(Boolean);
+    const matches = [], unmatched = [];
+    for (const line of lines) {
+      const sep = line.indexOf(':');
+      if (sep < 1) { unmatched.push(line); continue; }
+      const key = _trLowerJs(line.slice(0, sep).trim());
+      const content = line.slice(sep + 1).trim();
+      // Satır etiketiyle esnek eşleşme: etiket anahtarı içerir ya da tersi
+      const row = m.rows.find(r => {
+        const label = _trLowerJs(r.label);
+        return label.includes(key) || key.includes(label);
+      });
+      if (row && content) matches.push({ row, content });
+      else unmatched.push(line);
+    }
+    const box = document.getElementById('mImpResult');
+    if (!matches.length) { box.innerHTML = '<div class="error-text">Hiçbir satır eşleşmedi - satır adlarıyla başlamalı.</div>'; return; }
+    const full = await api.get(`/matrix/${m.id}`);
+    const filled = new Set(full.cells.filter(c => (c.content || '').trim()).map(c => `${c.column_id}:${c.row_id}`));
+    box.innerHTML = `
+      <div style="margin-top:10px;">
+        ${matches.map((x, i) => `<div style="font-size:12.5px;padding:4px 0;border-top:1px solid var(--border);">
+          <b>${escapeHtml(x.row.label)}</b> ${filled.has(colId + ':' + x.row.id) ? '<span style="color:var(--danger);font-size:11px;">(dolu - üzerine yazılacak)</span>' : ''}<br>
+          <span style="color:var(--text-muted);">${escapeHtml(x.content.slice(0, 100))}${x.content.length > 100 ? '…' : ''}</span>
+        </div>`).join('')}
+        ${unmatched.length ? `<div style="font-size:12px;color:var(--danger);margin-top:6px;">Eşleşmeyen ${unmatched.length} satır atlanacak.</div>` : ''}
+        <button class="btn btn-primary btn-sm" id="mImpApply" style="margin-top:8px;">${matches.length} Hücreyi Yaz</button>
+      </div>`;
+    document.getElementById('mImpApply').addEventListener('click', async () => {
+      const overwrites = matches.filter(x => filled.has(colId + ':' + x.row.id));
+      if (overwrites.length && !confirm(`${overwrites.length} dolu hücrenin üzerine yazılacak. Devam?`)) return;
+      try {
+        const cellMap = {};
+        full.cells.forEach(c => { cellMap[`${c.column_id}:${c.row_id}`] = c; });
+        for (const x of matches) {
+          const existing = cellMap[`${colId}:${x.row.id}`];
+          await api.put(`/matrix/${m.id}/cells`, {
+            column_id: colId, row_id: x.row.id, content: x.content,
+            chapter_id: existing ? existing.chapter_id : null,
+          });
+        }
+        editor.innerHTML = '';
+        await loadMatrixGrid();
+      } catch (err) { box.innerHTML += `<div class="error-text">${escapeHtml(err.message)}</div>`; }
+    });
+  });
+}
+
+async function loadEntityRules(type, entityId) {
+  const listEl = document.getElementById('entityRulesList');
+  if (!listEl) return;
+  try {
+    const rules = (await api.get('/rules/')).filter(r => r.entity_type === type && r.entity_id === entityId);
+    listEl.innerHTML = rules.length ? rules.map(r => `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12.5px;padding:3px 0;">
+        <span>${escapeHtml(r.title)}${r.description ? ` <span style="color:var(--text-muted);">- ${escapeHtml(r.description)}</span>` : ''}</span>
+        <button class="btn-icon-sm entity-rule-del" data-id="${r.id}" title="Kuralı sil">✕</button>
+      </div>`).join('') : '<div style="font-size:12px;color:var(--text-muted);padding:3px 0;">Henüz özel kural yok.</div>';
+    listEl.querySelectorAll('.entity-rule-del').forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('Bu kural silinsin mi?')) return;
+      try { await api.del(`/rules/${btn.dataset.id}`); loadEntityRules(type, entityId); }
+      catch (err) { alert(err.message); }
+    }));
+  } catch (err) {
+    listEl.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PARAGRAF BAZLI AI: ✨ Öneri (güçlendirilmiş yeniden yazım - beğenirsen tek
+// tıkla değiştir) ve 🔍 Eleştir (editör analizi - metne dokunmaz). İkisi de
+// /ai/assist üzerinden gider: bölüm planı, kurallar, seçili varlıklar, üslup
+// uyarıları - tam bağlam paragraf düzeyinde de geçerli. Bölüm genelindeki
+// karşılığı zaten var: 🎯 Okur Testi.
+// ---------------------------------------------------------------------------
+async function runParagraphAi(chapter, number, mode) {
+  const panel = document.querySelector(`.paragraph-ai-panel[data-number="${number}"]`);
+  const paraEl = document.querySelector(`.paragraph-text[data-number="${number}"]`);
+  if (!panel || !paraEl) return;
+  const text = paraEl.innerText.trim();
+  if (!text) { alert('Paragraf boş.'); return; }
+  panel.style.display = '';
+  panel.innerHTML = `<div class="empty-state">${mode === 'suggest' ? 'Güçlendirilmiş versiyon yazılıyor…' : 'Editör gözüyle inceleniyor…'}</div>`;
+  const selected = Array.from(document.querySelectorAll('.entity-check:checked')).map(cb => ({
+    entity_type: cb.dataset.type, entity_id: parseInt(cb.dataset.id, 10),
+  }));
+  const instruction = mode === 'suggest'
+    ? 'MEVCUT METİN olarak verilen paragrafı, anlamını ve olay akışını KORUYARAK güçlendirilmiş haliyle yeniden yaz: '
+      + 'daha canlı fiiller, gereksiz kelimelerin atılması, üslup uyarılarına uyum. '
+      + 'SADECE yeni paragraf metnini döndür - açıklama, başlık, tırnak ekleme.'
+    : 'MEVCUT METİN olarak verilen paragrafı deneyimli bir editör gözüyle eleştir: '
+      + 'güçlü yönler (1-2 madde), zayıf yönler ve her zayıf yön için SOMUT bir öneri. '
+      + 'Paragrafı YENİDEN YAZMA - sadece analiz.';
+  try {
+    const result = await api.post('/ai/assist', {
+      chapter_number: chapter.number, instruction,
+      selected_entities: selected, existing_text: text,
+    });
+    const notes = (result.consistency_notes && result.consistency_notes.length)
+      ? `<div style="font-size:12px;color:var(--danger);margin-top:6px;">⚠ ${result.consistency_notes.map(escapeHtml).join(' · ')}</div>` : '';
+    panel.innerHTML = `
+      <div class="panel" style="border-left:3px solid ${mode === 'suggest' ? 'var(--gold)' : 'var(--border)'};">
+        <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">${mode === 'suggest' ? '✨ ÖNERİLEN VERSİYON - onaysız değişmez' : '🔍 EDİTÖR ELEŞTİRİSİ - metne dokunulmadı'}</strong>
+        <div style="white-space:pre-wrap;font-size:13px;margin-top:6px;">${escapeHtml(result.generated_text || '')}</div>
+        ${notes}
+        <div class="form-actions">
+          ${mode === 'suggest' ? `<button class="btn btn-primary btn-sm para-ai-replace" data-number="${number}">Paragrafı Değiştir</button>` : ''}
+          <button class="btn btn-sm para-ai-close">Kapat</button>
+        </div>
+      </div>`;
+    panel.querySelector('.para-ai-close').addEventListener('click', () => { panel.style.display = 'none'; panel.innerHTML = ''; });
+    const replaceBtn = panel.querySelector('.para-ai-replace');
+    if (replaceBtn) replaceBtn.addEventListener('click', async () => {
+      if (!confirm('Paragraf önerilen metinle DEĞİŞTİRİLECEK. Eski hali "Geçmiş"ten geri alınabilir. Devam?')) return;
+      await replaceParagraphText(chapter.id, parseInt(number, 10), result.generated_text);
+    });
+  } catch (err) {
+    panel.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function replaceParagraphText(chapterId, number, text) {
+  try {
+    await api.put(`/chapters/${chapterId}/paragraphs/${number}`, { number, text });
+    dirtyChapterId = chapterId;
+    const refreshed = await api.get(`/chapters/${chapterId}`);
+    currentChapter = refreshed;
+    renderReader(refreshed); // yalnız okuyucu tazelenir - sohbet paneli DURUR
+  } catch (err) { alert(err.message); }
+}
+
+// ---------------------------------------------------------------------------
+// SOHBETTE PARAGRAF DEĞİŞTİRME: "P55'i daha öfkeli yaz" -> yanıt gelir ->
+// yanıt balonunun altında "P55'i Değiştir" düğmesi. Kullanıcının mesajında
+// hangi P-kodları geçiyorsa ve bunlar AÇIK bölümün paragraflarıysa düğme
+// çıkar; tıklanınca yanıt metni o paragrafın yerine yazılır (eski hal
+// Geçmiş'te). Sohbet geçmişi korunur - konuşmaya kaldığın yerden devam.
+// ---------------------------------------------------------------------------
+function chatReplaceButtons(assistantIdx) {
+  const prev = aiChatMessages[assistantIdx - 1];
+  if (!prev || prev.role !== 'user' || !currentChapter) return '';
+  const refs = [...new Set((prev.content.match(/\bP(\d+)\b/gi) || []).map(x => parseInt(x.slice(1), 10)))];
+  const valid = refs.filter(pid => (currentChapter.paragraphs || []).some(p => p.id === pid));
+  return valid.map(pid =>
+    `<button class="btn btn-sm btn-primary chat-replace-btn" data-idx="${assistantIdx}" data-pid="${pid}" style="margin:6px 0 0 6px;" title="Bu yanıtın metnini P${pid} paragrafının YERİNE yazar - eski hali Geçmiş'te saklanır">↺ P${pid}'i Değiştir</button>`
+  ).join('');
+}
+
+async function chatReplaceParagraph(assistantIdx, pid) {
+  const msg = aiChatMessages[assistantIdx];
+  const para = (currentChapter.paragraphs || []).find(p => p.id === pid);
+  if (!msg || !para) { alert('Paragraf bu bölümde bulunamadı.'); return; }
+  const preview = msg.content.length > 400 ? msg.content.slice(0, 400) + '…' : msg.content;
+  if (!confirm(`P${pid} (${para.number}. paragraf) şu metinle DEĞİŞTİRİLECEK:\n\n${preview}\n\nEski hali "Geçmiş"ten geri alınabilir. Devam?`)) return;
+  await replaceParagraphText(currentChapter.id, para.number, msg.content);
+  msg.actions = (msg.actions || []).concat([`P${pid} paragrafı değiştirildi`]);
+  renderChatMessages();
+}

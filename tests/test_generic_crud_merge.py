@@ -5,7 +5,7 @@ yerine BİRLEŞTİRMESİ (merge) - kullanıcı isteğiydi, kritik davranış."""
 def test_put_sections_merges_does_not_overwrite_other_keys(client, headers):
     r = client.post("/characters/", json={
         "name": "Ahmet",
-        "sections": {"duygusal_yapi": "soğukkanlı", "kariyer": "eski asker"},
+        "sections": {"duygusal_yapi": "soğukkanlı", "konusma_tarzi": "eski asker"},
     }, headers=headers)
     char_id = r.json()["id"]
 
@@ -13,7 +13,7 @@ def test_put_sections_merges_does_not_overwrite_other_keys(client, headers):
     assert r.status_code == 200
     assert r.json()["sections"] == {
         "duygusal_yapi": "soğukkanlı",
-        "kariyer": "eski asker",
+        "konusma_tarzi": "eski asker",
         "gecmis": "eski bir savaşta yaralandı",
     }
 
@@ -21,13 +21,13 @@ def test_put_sections_merges_does_not_overwrite_other_keys(client, headers):
 def test_put_sections_can_overwrite_an_existing_key_without_touching_others(client, headers):
     r = client.post("/characters/", json={
         "name": "Zeynep",
-        "sections": {"duygusal_yapi": "eski hali", "kariyer": "eski asker"},
+        "sections": {"duygusal_yapi": "eski hali", "konusma_tarzi": "eski asker"},
     }, headers=headers)
     char_id = r.json()["id"]
 
     r = client.put(f"/characters/{char_id}", json={"sections": {"duygusal_yapi": "yeni hali"}}, headers=headers)
     assert r.json()["sections"]["duygusal_yapi"] == "yeni hali"
-    assert r.json()["sections"]["kariyer"] == "eski asker"
+    assert r.json()["sections"]["konusma_tarzi"] == "eski asker"
 
 
 def test_unknown_section_key_is_rejected_with_422(client, headers):

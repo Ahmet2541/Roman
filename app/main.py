@@ -25,6 +25,8 @@ from .routers.entity_history import router as entity_history_router
 from .routers.novels import router as novels_router
 from .routers.universes import router as universes_router
 from .routers.admin import router as admin_router
+from .routers.style import router as style_router
+from .routers.matrix import router as matrix_router
 
 # Sunucu her başladığında (yani her deploy'da) DEĞİŞEN bir sürüm damgası -
 # index.html/login.html'deki <script>/<link> etiketlerine "?v=..." olarak
@@ -105,6 +107,8 @@ app.include_router(entity_history_router)
 app.include_router(chapters_router)
 app.include_router(ai_router)
 app.include_router(admin_router)
+app.include_router(style_router)
+app.include_router(matrix_router)
 
 # Frontend (sol menü + sağ okuma/yazma ekranı) /app altında sunulur.
 # API endpoint'leriyle çakışmaması için kök dizin ("/") yerine ayrı bir

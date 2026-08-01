@@ -10,12 +10,22 @@ roman yazım destek uygulaması - backend + frontend.
   (frontend bunu otomatik ekler) - romanlar arasında hiçbir kayıt sızmaz.
 - 7 menü: Kişiler (durum: aktif/pasif/öldü), Mekanlar, Olaylar/Zaman Çizelgesi,
   Nesneler, İpuçları, Terimler, Roman Kuralları
-- **Karakter/Mekan derin profili**: isim/açıklama/not dışında, konuya göre
-  bölünmüş bir `sections` alanı var (Kişi: duygusal_yapi, fiziksel_yapi,
-  gecmis, kariyer, iliskiler, konusma_tarzi, meta; Mekan: fiziksel_yapi,
-  atmosfer, gecmis, kurallar, baglantilar, zamansal_degisim, meta). AI'ya
-  context oluştururken bu bölümlerin TAMAMI değil, sadece talimatla ilgili
-  olanı gönderilir (bkz. aşağıdaki "Karakter/Mekan Derin Profili" bölümü).
+- **Karakter/Mekan derin profili (6 başlık)**: isim/açıklama/not dışında,
+  konuya göre bölünmüş bir `sections` alanı var. Kişi: fiziksel_yapi,
+  duygusal_yapi (kişilik + karakter arc'ı), gecmis (köken + kariyer +
+  sırlar), iliskiler, konusma_tarzi, meta. Mekan: fiziksel_yapi, atmosfer
+  (+ zamansal değişim), gecmis (+ sırlar/gizli alanlar), kurallar,
+  baglantilar, meta. 'meta' (sembolizm, roman içindeki işlev, yazar notu)
+  AI'ya ASLA gönderilmez. AI'ya context oluştururken bu bölümlerin TAMAMI
+  değil, sadece talimatla İLGİLİ olanın içeriği gönderilir: talimattaki
+  anahtar kelimeler ("görünüşünü betimle" -> fiziksel_yapi) otomatik
+  eşleştirilir; sohbet modunda AI ayrıca get_entity_section aracıyla
+  ihtiyacı olan bölümü kendisi çekebilir. Eski 7 başlıklı veriler açılışta
+  otomatik ve kayıpsız yeni yapıya taşınır (kariyer -> gecmis,
+  zamansal_degisim -> atmosfer). Formdaki "Derin Profil" akordeonundan
+  düzenlenir - temel form kısa kalır, derinleşmek isteyen açar. Nesneler de
+  aynı sistemi daha kompakt taşır (4 başlık + meta): fiziksel_yapi, gecmis
+  (köken/efsane), islev (güçler/sınırlar/bedel), sahiplik (kimde/nerede).
 - Bölüm/Paragraf yazma + otomatik karakter/mekan/olay tespiti (mentions indeksi)
 - Arama: bir isim yazınca geçtiği tüm (bölüm, paragraf) konumlarını bulur
 - Var olan bir metni içe aktarma + geriye dönük yeniden tarama
@@ -37,6 +47,126 @@ roman yazım destek uygulaması - backend + frontend.
 - **Tüm roman tutarlılık taraması**: yazılmış tüm bölümleri tek seferde
   tarayıp roman geneli çelişkileri (karakter bilgisi, zaman çizelgesi, kural
   ihlali) raporlar
+- **Üslup taraması (yazım tiki dedektörü)**: "gibi/sanki/X yerine Y" tarzı
+  aşırı kullanılan kalıpları TÜM seri metninde sayar (saf regex, AI maliyeti
+  sıfır). Kalıplar sabit kod değil, menüden eklenip düzenlenebilen DB
+  kayıtları (`StylePattern`: regex + çift eşik). Tarama elle tetiklenir ve
+  sonucu önbelleklenir (`StyleScanResult`) - her AI isteği bu ucuz
+  önbellekten okur, eşiği aşan kalıplar context'e otomatik "bu kalıptan
+  KAÇIN" uyarısı olarak girer. Eşik ÇİFT koşulludur (1000 kelimede yoğunluk
+  VE mutlak minimum tekrar) - kısa metinlerde tek kelimenin yanlış alarm
+  vermesini önler. Türkçe İ/ı ayrımına uygun küçültmeyle tarar; en yoğun
+  bölümleri de raporlar ("en çok Bölüm 45-52'de" gibi).
+- **Plan Matrisi**: Excel benzeri eşleştirme tablosu - kolonlar kişiler/
+  turlar, satırlar aşamalar, hücreler o kesişimin madde madde planı (ör.
+  8 sanık × 7 aşama = 56 hücre). Bir hücre bir bölüme bağlanınca planı,
+  SADECE o bölüm yazılırken AI context'ine "BÖLÜM PLANI" katmanı olarak
+  otomatik girer (summary'nin tersi: "ne OLDU" değil "ne OLACAK").
+  "Fihristi Oluştur" tek tıkla her kolonu bir Kısım'a, her hücreyi bir
+  Bölüm'e çevirir ve bağları kurar - mevcut fihristin sonuna ekler.
+  Satırlar iki türde: ana başlık ve ara başlık ('sub' - girintili/italik;
+  bir aşamanın altına alt adım eklemek için) - hem satırlar hem KOLONLAR
+  ⊕ düğmesiyle ARAYA eklenebilir, sıra otomatik kayar. Roman menüsünde,
+  plana bağlı bir bölüm seçilince AI panelinin üstünde açılır-kapanır
+  "📋 Bölüm Planı" kutusu belirir - AI'ya giden planın aynısını yazar da
+  görür (/matrix/plan-for-chapter/{id}). Kutudaki "📝 Plandan Bölüm
+  Taslağı Oluştur" düğmesi, planın TAMAMINI işleyen tam bir bölüm taslağı
+  üretir; taslak önce gösterilir, onaylanırsa boş satırlardan paragraflara
+  bölünüp bölüme eklenir - akış: plan yaz -> taslağı ürettir -> paragraf
+  paragraf düzelt. Her hücre ilk
+  kaydında SABİT bir referans kodu alır (MP1, MP2, ... - araya ekleme/
+  sıralama değişse bile asla değişmez). Başka bir bölümün talimatında bu
+  kod anıldığında ("MP13'teki ritimle kıyasla") o hücrenin planı context'e
+  "REFERANS PLANLAR" olarak girer - turlar arası paralellik/kıyas için.
+  **AI ile eksik doldurma**: kolon başlıklarındaki kutularla turları
+  çoktan seçmeli işaretleyip "🤖 Eksikleri AI Doldursun" dersen, seçili
+  kolonların BOŞ hücreleri için AI - dolu hücrelerdeki kalıbı şablon
+  alarak ("aynı iskelet, farklı rol") - taslak üretir. Hiçbiri onaysız
+  kaydedilmez: her taslak düzenlenebilir, tek tek ya da toplu onaylanır;
+  kaydetme normal hücre kaydından geçtiği için bölüm bağı korunur ve MP
+  kodu orada atanır. Tamamen dolu kolonlar Qwen'e hiç gitmez (maliyet 0).
+- **Görünür seri/kitap yönetimi**: ana içeriğin üstünde kalıcı bir çubuk -
+  "📚 Seri Adı · Kitap 2: Kitap Adı ▾ değiştir / kitap ekle". Tıklayınca
+  "Kitaplar & Seriler" ekranı yerinde açılır (✕ ile vazgeçilebilir):
+  başka kitaba geçiş, "+ Bu seriye yeni kitap ekle" (aynı evren - tüm
+  karakter/mekan/kural verisi paylaşılır), yepyeni seri başlatma,
+  yeniden adlandırma ve silme. Mobilde de her görünümde görünür.
+- **🔒 Gizli Katman (alt-metin modu)**: Kişi/Mekan/Nesne derin profiline
+  eklenen "gizli" bölümü - sonraki kitapların sırları, gizli bağlantılar
+  ("Baş Tabip Lümen'in suçlarını biliyor ama para için susuyor").
+  Varsayılanda AI'ya HİÇBİR yoldan gitmez: içerik girmez, bölüm listesinde
+  anılmaz, anahtar kelimeyle seçilemez (meta ile aynı koruma düzeyi). Farkı:
+  AI panelindeki "🔒 Gizli katmanı alt-metin olarak ver" anahtarı açılırsa,
+  seçili varlıkların gizli katmanı "SIR - romanda ASLA açıkça yazma, sadece
+  davranış tutarlılığı ve alt-metin için bil" direktifiyle gider - dramatik
+  ironi: karakterin diyalogları sırra göre incelikle şekillenir ama sır
+  yazılmaz. Meta = yazarın notu (asla gitmez); Gizli = dünyanın henüz
+  açığa çıkmamış gerçeği (istenirse alt-metin olarak gider).
+- **Kayda özel kurallar**: bir kural bir Kişi/Mekan/Nesne'ye bağlanabilir
+  ("Vicdan yargıç değil" -> Vicdan). Bağlı kural SABİT katmandan çıkar ve
+  SADECE o kayıt seçili varlıklardayken "Bu kayda ÖZEL kurallar (İHLAL
+  ETME)" bloğuyla gider - 100+ kurallı dünyada context şişmesinin asıl
+  ilacı. Ekleme yerinde yapılır: Kişi/Mekan/Nesne formunda "BU KAYDA ÖZEL
+  KURALLAR" kutusu (+ Kural ile tek satırda). Kurallar menüsü ana liste
+  görevini korur; kapsamlı kurallar orada "🔗 Kişi: Vicdan" rozetiyle
+  görünür. Genel (bağsız) kurallar eskisi gibi her isteğe gider.
+- **Paragraf balonları (anlık K/M/N tespiti)**: bir paragraf kaydedilince
+  o paragraf tek başına taranır; "ihtiyar teknisyen" gibi henüz kayıtsız
+  bir figür görülünce paragrafın altında K (Kişi) / M (Mekan) / N (Nesne)
+  balonu belirir. Düz balon = yeni kayıt önerisi (profili ve takma
+  adlarıyla); "K+" balonu = MEVCUT kayda yeni bilgi ekleme (ör. Vicdan
+  hakkında konusma_tarzi'na yeni cümle). Tıklanınca ne ekleneceği
+  gösterilip onay istenir; onay sonrası paragraf yeniden taranır ve yeni
+  varlık mention rozeti olarak görünür. Nesnelere de takma ad desteği
+  geldi ("Kül Şişesi"ne metinde "şişe" denmesi artık yakalanır).
+- **Zengin varlık çıkarımı**: bölüm taraması artık sadece isim + kısa
+  açıklama değil; metindeki kanıta dayanarak TAKMA ADLARI ("Vicdan"a
+  "sistem" da deniyorsa) ve DERİN PROFİL bölümlerini (fiziksel_yapi,
+  konusma_tarzi, islev...) de çıkarır. Tekilleştirme kayıtlı isimlere ek
+  kayıtlı ALIAS'lara da bakar - "Şahin Göz" bir karakterin takma adıysa
+  yeni varlık diye önerilmez. Onayda: yeni kayıt alias+profille doğar;
+  mevcut kayıtta alias'lar birleşir (Türkçe İ/ı-bilinçli, çift oluşmaz),
+  profil eklemeleri "[Bölümden]" etiketiyle bölüm SONUNA eklenir - hiçbir
+  mevcut bilgi silinmez. Geçersiz/uydurma bölüm anahtarları sessizce
+  temizlenir, meta'ya asla yazılmaz.
+- **Paragraf bazlı AI (⋯ menüsünde)**: her paragrafın işlemlerinde
+  "✨ Öneri" (paragrafı tam bağlamla - plan, kurallar, üslup uyarıları -
+  güçlendirilmiş haliyle yeniden yazar; beğenirsen "Paragrafı Değiştir"
+  tek tıkla yerine koyar, eski hal Geçmiş'te) ve "🔍 Eleştir" (editör
+  analizi: güçlü/zayıf yönler + somut öneriler - metne dokunmaz). Bölüm
+  genelindeki karşılığı: 🎯 Okur Testi.
+- **Sohbette paragraf değiştirme**: mesajında P-kodu geçirirsen ("P55'i
+  daha öfkeli yaz"), gelen yanıtın altında "↺ P55'i Değiştir" düğmesi
+  belirir - tıklayınca yanıt metni o paragrafın yerine yazılır, eski hal
+  Geçmiş'ten geri alınabilir, sohbet geçmişi korunur (konuşmaya kaldığın
+  yerden devam edersin), balonda "✓ P55 paragrafı değiştirildi" izi kalır.
+- **Okur Testi (denetçi katmanı)**: bölüm metnini okur gözüyle tarar -
+  tempo ölümü, bilgi bocası, klişe, anlaşılmaz cümle, gerilim kırılması,
+  inandırıcılık çatlağı. Bulguları paragraf numarası + kısa alıntı +
+  gerekçe + öneriyle listeler, tıklayınca paragrafa gider. SADECE uyarır,
+  metne asla dokunmaz; sorunsuz metinde boş liste dönmesi istenir.
+- **Bağlam sağlık şeridi + hızlı plan**: bölüm açılınca "✓ Özet ·
+  ✗ Plan Matrisi'nde bulunamadı - tıkla, hemen yaz · ✗ Metin yok"
+  rozetleri - eksikler açık dille söylenir ve TIKLANARAK giderilir:
+  plan rozetine tıklayınca matrise hiç girmeden bölümün içinden plan
+  yazılır (arka planda "Hızlı Planlar" matrisine tek hücre olarak, MP
+  koduyla kaydedilir; bölüm zaten bir matristen bağlıysa o hücre
+  güncellenir, kopya açılmaz). Plan kutusundaki ✎ ile plan yerinde
+  düzenlenir. Kaydedince "Plandan Bölüm Taslağı Oluştur" anında belirir -
+  yeni bölüm aç -> planı yaz -> taslağı ürettir akışı matris ekranına
+  uğramadan tamamlanır.
+- **✅ Bölümü Kapat**: özet üretimi + Roman Haritası taramasını tek
+  dokunuşla arka arkaya çalıştırır.
+- **Başlık kaçağı dönüştürücü**: "# BAŞLIK" olarak paragrafta kalmış içe
+  aktarma kalıntılarını tek tıkla gerçek Alt Başlık girdisine çevirir
+  (bölümün önüne taşır, numaraları kaydırır, kalan paragrafları toparlar).
+- **Nakarat koruması**: üslup kalıbı "♪ nakarat" işaretlenirse sayılır ve
+  raporda görünür ama asla "aşırı kullanım" uyarısına dönüşmez - bilinçli
+  leitmotif ile yazım tiki ayrımı.
+- **Matris içe aktarıcı**: "Aşama adı: içerik" satırlarını yapıştır,
+  eşleşmeleri önizle, seçili kolonun hücrelerine tek seferde yaz.
+- Kolon <-> Kişi bağlama paneli: kolon adına tıklayınca ad + bağlı Kişi
+  düzenlenir; bağlı kolonun AI doldurması karakterin profilini görür.
 - Kelime sayısı takibi (toplam + bölüm başına)
 - **Dışa/içe aktarma**: aktif romanı tek tıkla JSON olarak indirip
   (`/admin/export`) başka bir yere yükleyebilirsin (`/admin/import`)
@@ -118,6 +248,8 @@ app/
     generic_crud.py   - basit menüler için ortak CRUD fabrikası (dict alanlarda merge yapar)
     menus.py          - Kişiler/Mekanlar/Nesneler/İpuçları/Terimler/Kurallar router'ları
     events.py         - Olaylar + zaman çizelgesi çakışma kontrolü
+    style.py          - üslup kalıbı CRUD + /style/scan + /style/report
+    matrix.py         - Plan Matrisi: kolon/satır/hücre CRUD + fihrist üretimi
     relationships.py  - Karakter ilişki haritası
     progressions.py   - Gelişim çizelgesi (varlıkların bölüm bazlı kronolojik notları)
     chapters.py       - Bölüm/Paragraf CRUD + arama + içe aktarma
