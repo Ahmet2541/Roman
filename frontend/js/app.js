@@ -2102,7 +2102,16 @@ async function renderAiPanel(chapter) {
     // @isim yazımı: hem sohbet hem talimat kutusunda çalışır
     ['aiChatInput', 'aiInstruction'].forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.addEventListener('input', () => handleMentionTyping(el));
+      if (!el) return;
+      el.addEventListener('input', () => handleMentionTyping(el));
+      // capture=true: öneri kutusu açıkken Enter'ı ÖNCE burası yakalasın,
+      // mesaj gönderilmesin (kutu kapalıysa hiçbir şeye karışmaz).
+      el.addEventListener('keydown', (e) => {
+        if (handleMentionKeydown(e)) e.stopPropagation();
+      }, true);
+      el.addEventListener('blur', () => {
+        setTimeout(() => document.getElementById('mentionSuggestBox')?.remove(), 150);
+      });
     });
     document.getElementById('aiChatInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(chapter); }
@@ -4338,20 +4347,55 @@ function handleMentionTyping(el) {
     return;
   }
   box.innerHTML = options.map((o, i) => `
-    <div class="mention-opt" data-idx="${i}" style="padding:5px 8px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);">
+    <div class="mention-opt" data-idx="${i}" style="padding:5px 8px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);${i === 0 ? 'background:var(--paper-dim);' : ''}">
       ${escapeHtml(o.name)} ${o.cb.checked ? '<span style="color:var(--gold);font-size:11px;">✓ seçili</span>' : ''}
     </div>`).join('');
-  box.querySelectorAll('.mention-opt').forEach(opt => opt.addEventListener('mousedown', (e) => {
-    e.preventDefault(); // blur olmadan seçilsin
-    const o = options[parseInt(opt.dataset.idx, 10)];
+  box.dataset.active = '0';
+
+  // Seçimi uygulayan ortak fonksiyon (fare ve klavye aynı yolu kullanır)
+  const applyOption = (idx) => {
+    const o = options[idx];
+    if (!o) return;
     o.cb.checked = true;
     renderSelectedEntityChips();
-    // Metindeki "@parça"yı tam adla değiştir
     const start = caret - match[0].length;
     el.value = value.slice(0, start) + o.name + value.slice(caret);
     const pos = start + o.name.length;
     el.focus();
     el.setSelectionRange(pos, pos);
     box.remove();
-  }));
+  };
+  box._applyOption = applyOption;
+  box._optionCount = options.length;
+
+  box.querySelectorAll('.mention-opt').forEach(opt => {
+    opt.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // blur olmadan seçilsin
+      applyOption(parseInt(opt.dataset.idx, 10));
+    });
+    opt.addEventListener('mouseenter', () => setMentionActive(box, parseInt(opt.dataset.idx, 10)));
+  });
+}
+
+// Aktif satırı vurgular ve görünür alana kaydırır
+function setMentionActive(box, idx) {
+  const opts = box.querySelectorAll('.mention-opt');
+  if (!opts.length) return;
+  const next = Math.max(0, Math.min(idx, opts.length - 1));
+  opts.forEach((o, i) => { o.style.background = i === next ? 'var(--paper-dim)' : ''; });
+  box.dataset.active = String(next);
+  opts[next].scrollIntoView({ block: 'nearest' });
+}
+
+// @ öneri kutusu açıkken klavye: ↓/↑ gez, Enter/Tab seç, Esc kapat.
+// Kutu kapalıyken hiçbir tuşa karışmaz - Enter normal davranışını korur.
+function handleMentionKeydown(e) {
+  const box = document.getElementById('mentionSuggestBox');
+  if (!box || !box._optionCount) return false;
+  const active = parseInt(box.dataset.active || '0', 10);
+  if (e.key === 'ArrowDown') { e.preventDefault(); setMentionActive(box, active + 1); return true; }
+  if (e.key === 'ArrowUp') { e.preventDefault(); setMentionActive(box, active - 1); return true; }
+  if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); box._applyOption(active); return true; }
+  if (e.key === 'Escape') { e.preventDefault(); box.remove(); return true; }
+  return false;
 }
