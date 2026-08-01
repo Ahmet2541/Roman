@@ -1448,6 +1448,7 @@ function renderReader(chapter) {
       <div style="flex:1;">
         <div class="paragraph-text" contenteditable="false" data-number="${p.number}" data-editing="0">${escapeHtml(p.text)}</div>
         <div>${(p.mentions || []).map(m => `<span class="mention-chip">${escapeHtml(m.entity_name)}</span>`).join('')}${p.is_style_sample ? '<span class="mention-chip" style="background:#1b2230;color:#fff;">★ stil örneği</span>' : ''}</div>
+        <div class="paragraph-toolbar">
         <button class="btn btn-sm edit-para-btn" data-number="${p.number}" title="Bu paragrafı düzenlemeye aç">✎ Düzenle</button>
         <button class="btn btn-sm para-actions-toggle" data-number="${p.number}" title="Paragraf işlemleri">⋯ İşlemler</button>
         <div class="paragraph-actions">
@@ -1458,6 +1459,7 @@ function renderReader(chapter) {
           <button class="btn btn-sm critique-para-btn" data-number="${p.number}" title="Bu paragrafı editör gözüyle eleştirir - yeniden yazmaz, sadece analiz">🔍 Eleştir</button>
           ${(p.text || '').trim().startsWith('#') ? `<button class="btn btn-sm promote-para-btn" data-number="${p.number}" title="Bu satır içe aktarmadan kalmış bir başlık - gerçek bir Alt Başlık girdisine dönüştür (bölümün önüne taşınır)">↑ Başlığa Dönüştür</button>` : ''}
           <button class="btn btn-sm btn-danger del-para-btn" data-number="${p.number}">Sil</button>
+        </div>
         </div>
         <div class="paragraph-ai-panel" data-number="${p.number}" style="display:none;margin-top:8px;"></div>
         <div class="paragraph-history-panel" data-number="${p.number}" style="display:none;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);"></div>

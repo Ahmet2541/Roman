@@ -267,7 +267,12 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   display: inline-block; font-family: var(--font-ui); font-size: 10.5px; font-weight: 600;
   padding: 1px 7px; border-radius: 999px; background: var(--gold-dim); color: #5a4a10; margin-right: 4px;
 }
-.paragraph-actions { display: flex; gap: 6px; padding-top: 6px; }
+/* Paragraf araç çubuğu: Düzenle + diğer işlemler TEK SATIRDA (dar ekranda
+   sarar). Eskiden Düzenle ayrı satırdaydı ve her paragraf iki satır yer
+   kaplıyordu - uzun bölümlerde metin arasında boğuluyordu. */
+.paragraph-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 6px; }
+.paragraph-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.paragraph-toolbar .btn { padding: 4px 10px; font-size: 12px; }
 /* Masaüstünde "⋯ İşlemler" düğmesi gereksiz - aksiyonlar zaten görünür */
 .para-actions-toggle { display: none; }
 
@@ -326,7 +331,7 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
      olup dokunuşun boşa gitmesi (iOS blur-önce-click tuzağı) yaşanmaz. */
   .para-actions-toggle { display: inline-block; padding: 3px 10px; font-size: 12px; }
   .paragraph-actions { display: none; }
-  .paragraph-actions.open { display: flex; flex-wrap: wrap; gap: 4px; }
+  .paragraph-actions.open { display: flex; flex-wrap: wrap; gap: 4px; width: 100%; }
   .paragraph-actions .btn { padding: 4px 10px; font-size: 12px; }
 
   .app-shell { display: block; height: auto; min-height: 100vh; }
