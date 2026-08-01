@@ -483,6 +483,13 @@ async function showEntityForm(type, item) {
   // menüsündeki ana listede de kapsam rozetiyle görünür - menü liste
   // görevini korur, ekleme yerinde yapılır.
   const supportsRules = ['character', 'place', 'object'].includes(type) && isEdit;
+  // Yeni kayıtta kural kutusu YOK (kural bir kayda bağlanır, henüz id yok) -
+  // ama kullanıcı "kutular değişmemiş" sanmasın diye nedeni yazılır.
+  const rulesHintHtml = (!isEdit && ['character', 'place', 'object'].includes(type)) ? `
+    <div style="font-size:11.5px;color:var(--text-muted);margin:8px 0 0;">
+      Kayda özel kurallar ("Vicdan yargıç değil" gibi) kaydettikten sonra,
+      bu kaydı ✎ ile açtığında eklenir.
+    </div>` : '';
   const entityRulesHtml = supportsRules ? `
     <div style="margin:10px 0 4px;">
       <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">BU KAYDA ÖZEL KURALLAR</strong>
@@ -497,6 +504,8 @@ async function showEntityForm(type, item) {
   const sectionDefs = ENTITY_SECTIONS[type] || null;
   let sectionsHtml = '';
   if (sectionDefs) {
+    // Yeni kayıtta da profil kutuları görünür (create sections'ı destekliyor) -
+    // kişiyi eklerken görünüşünü/konuşma tarzını aynı anda yazabilmek için.
     const savedSections = (isEdit && item.sections) ? item.sections : {};
     const filledCount = sectionDefs.filter(d => (savedSections[d.key] || '').trim()).length;
     const startOpen = filledCount > 0; // dolu profil varsa açık gelsin
@@ -539,7 +548,7 @@ async function showEntityForm(type, item) {
           ${cfg.statusOptions.map(opt => `<option value="${opt}" ${statusValue === opt ? 'selected' : ''}>${opt.charAt(0).toUpperCase() + opt.slice(1)}</option>`).join('')}
         </select></div>` : ''}
       ${sectionsHtml}
-      ${entityRulesHtml}
+      ${entityRulesHtml}${rulesHintHtml}
       <div class="form-actions">
         <button class="btn btn-primary" id="saveBtn">${isEdit ? 'Güncelle' : 'Kaydet'}</button>
         <button class="btn" id="cancelBtn">Vazgeç</button>
@@ -823,13 +832,22 @@ function renderChapterListDOM() {
   // tekrar açar. Sadece GERÇEKTEN alt öğesi olan (hasChildren) girdiler
   // daraltılabilir olduğu için sadece onlar collapsedGroups'a eklenir.
   const collapsibleIds = hierarchy.filter(it => it.hasChildren).map(it => String(it.chapter.id));
+  // Hiç daraltılabilir başlık yoksa (tüm girdiler düz 'chapter' ise) neden
+  // ok görünmediğini AÇIKLA - kullanıcı "buton nerede?" diye aramasın.
+  const noGroupsHint = !collapsibleIds.length && hierarchy.length > 3 ? `
+    <div style="font-size:11px;color:var(--text-muted);padding:4px 10px;line-height:1.4;">
+      Daraltma okları yalnızca <b>Kısım</b>/<b>Alt Başlık</b> girdilerinde çıkar.
+      Düz bölümlerin altına girinti olmadığı için gizlenecek bir şey yok -
+      bir girdiyi ✎ ile açıp türünü Kısım/Alt Başlık yaparsan altındakiler
+      ona bağlanır ve daraltılabilir olur.
+    </div>` : '';
   const controlsHtml = collapsibleIds.length ? `
     <div style="display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border);background:var(--paper-dim);">
       <button class="btn-icon-sm" id="collapseAllBtn" style="font-size:11px;">▸ Tümünü Daralt</button>
       <button class="btn-icon-sm" id="expandAllBtn" style="font-size:11px;">▾ Tümünü Genişlet</button>
     </div>` : '';
 
-  listEl.innerHTML = controlsHtml + hierarchy.map(item => {
+  listEl.innerHTML = controlsHtml + noGroupsHint + hierarchy.map(item => {
     const c = item.chapter;
     const hidden = item.ancestorIds.some(id => collapsedGroups.has(id));
     if (hidden) return '';
@@ -1630,16 +1648,31 @@ async function saveParagraph(chapterId, number) {
   const el = document.querySelector(`.paragraph-text[data-number="${number}"]`);
   const text = el.innerText.trim();
   if (!text) { alert('Paragraf boş olamaz.'); return; }
+  // Buton geri bildirimi: kaydederken kilitle, bitince "✓ Kaydedildi" göster.
+  // Eskiden buton hep "Kaydet" kalıyordu ve kayıt olup olmadığı belli
+  // olmuyordu (renderReader butonu yeniden çizdiği için etiket de sıfırlanıyordu).
+  const btn = document.querySelector(`.save-para-btn[data-number="${number}"]`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Kaydediliyor…'; }
   try {
     await api.put(`/chapters/${chapterId}/paragraphs/${number}`, { number: parseInt(number, 10), text });
     dirtyChapterId = chapterId;
     const chapter = await api.get(`/chapters/${chapterId}`);
     currentChapter = chapter;
     renderReader(chapter);
+    // renderReader butonu yeniden çizdi - onayı YENİ butona bas
+    const freshBtn = document.querySelector(`.save-para-btn[data-number="${number}"]`);
+    if (freshBtn) {
+      freshBtn.textContent = '✓ Kaydedildi';
+      freshBtn.disabled = true;
+      setTimeout(() => { freshBtn.textContent = 'Kaydet'; freshBtn.disabled = false; }, 2000);
+    }
     // Anlık K/M/N tespiti: kayıt sonrası arka planda çalışır, balonları
     // paragrafın altına basar. Hata olursa sessiz - kayıt zaten başarılı.
     detectParagraphBalloons(chapter, parseInt(number, 10), text).catch(() => {});
-  } catch (err) { alert(err.message); }
+  } catch (err) {
+    alert(err.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Kaydet'; }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1781,7 +1814,7 @@ async function renderAiPanel(chapter) {
 
       <div id="aiChatMode">
         <div id="aiChatMessages" class="ai-chat-messages"></div>
-        <div style="display:flex;gap:6px;">
+        <div class="chat-input-row" style="display:flex;gap:6px;">
           <textarea id="aiChatInput" placeholder="Ör: Ahmet için bir sahne fikrin var mı?" style="flex:1;min-height:44px;"></textarea>
           <button class="btn btn-primary" id="aiChatSendBtn">Gönder</button>
         </div>

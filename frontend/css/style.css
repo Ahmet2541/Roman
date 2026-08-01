@@ -302,6 +302,19 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
 
 @media (max-width: 860px) {
   .roman-layout { grid-template-columns: 1fr; }
+  /* Tek sütunda AI paneli boydan boya - sohbet kutusu dar kalmasın.
+     order ile okuyucunun hemen ardına alınır (liste -> okuyucu -> sohbet). */
+  .roman-layout .chapter-list { order: 1; }
+  .roman-layout .reader { order: 2; }
+  .roman-layout .side-panel { order: 3; width: 100%; padding: 14px; }
+  .roman-layout .side-panel textarea { min-height: 72px; }
+  /* Sohbet giriş satırı: kutu boydan boya, Gönder altta tam genişlik */
+  .roman-layout .side-panel .chat-input-row { display: block; }
+  .roman-layout .side-panel .chat-input-row textarea { width: 100%; }
+  .roman-layout .side-panel .chat-input-row .btn { width: 100%; margin-top: 6px; }
+  /* "+ Yeni" araç çubuğunda sağa yaslı kalsın (dar ekranda ortalanmasın) */
+  .toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+  .toolbar > div:first-child { display: none; }
 }
 
 @media (max-width: 768px) {
