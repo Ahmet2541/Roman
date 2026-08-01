@@ -749,7 +749,7 @@ function buildChapterHierarchy(chapters) {
   // Başlık/Bölüm -> "1-1", onun altındaki Bölüm -> "1-1-1". Her seviyenin
   // kendi sayacı var; bir üst seviye ilerleyince alt seviyelerin sayaçları
   // sıfırlanır (yeni bir Kısım başlayınca alt numaralama 1'den başlar).
-  const counters = [0, 0, 0, 0];
+  const counters = [0, 0, 0, 0, 0];
   // BÖLÜM DE KAPSAYICI OLABİLİR: gerçek romanlarda "BİRİNCİ BÖLÜM"ün
   // altında turlar/sahneler (Alt Başlık) yer alabiliyor. Bir Bölüm'ün
   // hemen ardından bir Alt Başlık geliyorsa, o Bölüm kapsayıcı sayılır -
@@ -757,38 +757,57 @@ function buildChapterHierarchy(chapters) {
   // onların bölümleri birlikte gizlenir (Word taslak görünümü gibi).
   // Böylece kullanıcı yapısını Kısım'a çevirmeye ZORLANMAZ.
   let currentChapterContainerId = null;
+  // Kapsayıcı bölüm: hemen ardından bir Alt Başlık YA DA Kısım geliyorsa.
+  // Kısım'ın da kapsanabilmesi, dört seviyeli ağaca izin verir:
+  //   BÖLÜM (kapsayıcı) > KISIM > ALT BAŞLIK > bölümler
+  // Word'ün Başlık1>Başlık2>Başlık3 yapısının karşılığı budur.
+  // İki koşuldan biri sağlanmalı:
+  //  a) ardından bir KISIM geliyorsa (Kısım yaprak bölümün altına giremez,
+  //     demek ki bu bölüm bir üst başlıktır), ya da
+  //  b) ardından Alt Başlık geliyor VE o an açık bir Kısım yok (Kısım
+  //     varsa bölüm zaten onun yaprağıdır - alt başlık da Kısım'a bağlanır).
+  // Ayırt edici sinyal: BAŞLIKLARIN METNİ YOKTUR. "BİRİNCİ BÖLÜM" gibi
+  // üst başlık olarak kullanılan girdiler boştur; gerçek bölümlerin
+  // paragrafı vardır. Bu yüzden bir Bölüm ancak (a) paragrafı yoksa ve
+  // (b) ardından bir Kısım/Alt Başlık geliyorsa kapsayıcı sayılır.
+  // Böylece bir turun SON bölümü (metni var), ardından yeni bir Kısım
+  // gelse bile yaprak kalır - Kısım kardeş olarak üst başlığa bağlanır.
   const isContainerChapter = (idx) => {
     const c = chapters[idx];
     if (!c || c.kind !== 'chapter') return false;
+    if ((c.paragraphs || []).length > 0) return false;
     const next = chapters[idx + 1];
-    return !!next && next.kind === 'subtitle';
+    return !!next && (next.kind === 'part' || next.kind === 'subtitle');
   };
   for (let idx = 0; idx < chapters.length; idx++) {
     const c = chapters[idx];
     const id = String(c.id);
     let level, ancestorIds;
     if (c.kind === 'part') {
-      ancestorIds = [];
-      level = 0;
+      // Kısım artık MUTLAK üst seviye değil: bir kapsayıcı Bölüm'ün altına
+      // girebilir (varsa). Yoksa eskisi gibi en üstte kalır.
+      ancestorIds = currentChapterContainerId ? [currentChapterContainerId] : [];
+      level = ancestorIds.length;
       currentPartId = id;
       currentSubtitleId = null;
-      currentChapterContainerId = null;
     } else if (c.kind === 'subtitle') {
       ancestorIds = [];
-      if (currentPartId) ancestorIds.push(currentPartId);
       if (currentChapterContainerId) ancestorIds.push(currentChapterContainerId);
+      if (currentPartId) ancestorIds.push(currentPartId);
       level = ancestorIds.length;
       currentSubtitleId = id;
     } else if (isContainerChapter(idx)) {
-      // Kapsayıcı Bölüm: Kısım'ın altında ama Alt Başlıkların üstünde
-      ancestorIds = currentPartId ? [currentPartId] : [];
-      level = ancestorIds.length;
+      // Kapsayıcı Bölüm en üst seviyede yeni bir ağaç başlatır - altındaki
+      // Kısım/Alt Başlık zinciri sıfırdan kurulur.
+      ancestorIds = [];
+      level = 0;
       currentChapterContainerId = id;
+      currentPartId = null;
       currentSubtitleId = null;
     } else {
       ancestorIds = [];
-      if (currentPartId) ancestorIds.push(currentPartId);
       if (currentChapterContainerId) ancestorIds.push(currentChapterContainerId);
+      if (currentPartId) ancestorIds.push(currentPartId);
       if (currentSubtitleId) ancestorIds.push(currentSubtitleId);
       level = ancestorIds.length;
     }
@@ -924,7 +943,7 @@ function renderChapterListDOM() {
       return `<div class="chapter-item ${isPart ? 'chapter-part-divider' : 'chapter-subtitle-divider'}" data-id="${c.id}" style="cursor:${item.hasChildren ? 'pointer' : 'default'};padding-left:${14 + indent}px;${isPart ? 'background:var(--paper-dim);' : ''}" ${item.hasChildren ? `title="${isCollapsed ? 'Genişletmek' : 'Daraltmak'} için tıkla"` : ''}>
         ${toggle}
         <div class="chapter-label-edit" data-id="${c.id}" style="flex:1;cursor:pointer;${isPart ? 'font-weight:700;letter-spacing:0.5px;text-transform:uppercase;font-size:12.5px;' : 'font-style:italic;font-size:12.5px;color:var(--text-muted);'}" title="${hasOrphanText ? 'Bu kısımda paragraf var - tıklayınca aç' : 'Bu kısımdaki ilk bölüme git'}">
-          <span style="opacity:0.6;font-weight:600;">${item.displayNumber}</span> ${escapeHtml(cleanTitle) || '<span style=\"opacity:0.5;\">(başlıksız)</span>'} ${countBadge} ${orphanBadge}
+          <span style="opacity:0.6;font-weight:600;">${item.displayNumber}</span> ${escapeHtml(cleanTitle) || '<span style=\"opacity:0.5;\">(başlıksız)</span>'} <span style="font-size:9.5px;letter-spacing:0.3px;opacity:0.55;border:1px solid var(--border);border-radius:3px;padding:0 3px;font-style:normal;text-transform:none;" title="Girdi türü - ✎ ile değiştirilebilir. Kısım en üst seviyedir; Alt Başlık bir Kısım'ın altına girer.">${isPart ? 'KISIM' : 'ALT BAŞLIK'}</span> ${countBadge} ${orphanBadge}
         </div>
         ${bulkScanBtn}
         <button class="btn-icon-sm edit-chapter-btn" data-id="${c.id}" title="Başlığı ve TÜRÜ düzenle (Bölüm / Kısım / Alt Başlık)">✎</button>
