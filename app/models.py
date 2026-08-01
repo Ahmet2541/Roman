@@ -493,6 +493,12 @@ class MatrixRow(Base):
     position = Column(Integer, nullable=False, default=0)
     kind = Column(String(10), nullable=False, default="main")  # main | sub
     label = Column(EncryptedString, nullable=False)
+    # TALİMAT KASASI: bu satırdaki (aşamadaki) TÜM hücreler için geçerli
+    # kalıcı yazım kısıtları. Örn. "Karar aşaması: duyguyu adlandırma;
+    # sanık tek cümle konuşur; şişeyi betimlemeye yedir". Bir bölüm bu
+    # satırın hücresine bağlıysa, kısıtlar plan katmanıyla birlikte AI'ya
+    # gider - iyi talimatı her seferinde yeniden hatırlamak gerekmez.
+    instructions = Column(EncryptedString, default="")
 
     matrix = relationship("PlanMatrix", back_populates="rows")
 

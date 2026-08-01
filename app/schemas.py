@@ -710,6 +710,7 @@ class MatrixColumnCreate(BaseModel):
 
 class MatrixRowCreate(BaseModel):
     label: str
+    instructions: str = ""  # Talimat Kasası: bu aşamanın kalıcı yazım kısıtları
     kind: str = "main"  # main (ana başlık) | sub (ara başlık)
     # Verilirse yeni satır BU satırın hemen ALTINA girer (araya ekleme);
     # verilmezse en sona eklenir. Yeniden adlandırmada (PUT) yok sayılır.
@@ -748,6 +749,7 @@ class MatrixRowOut(BaseModel):
     position: int
     kind: str = "main"
     label: str
+    instructions: str = ""
 
 
 class MatrixCellUpsert(BaseModel):
@@ -860,3 +862,16 @@ class QuickPlanResponse(BaseModel):
     code: Optional[str] = None
     matrix_name: str
     content: str
+
+
+class StylePatternCandidate(BaseModel):
+    """AI'nın önerdiği kalıp adayı - KAYDEDİLMEZ, onaya sunulur."""
+    name: str
+    pattern: str
+    example: str = ""
+    why: str = ""
+    sample_hits: int = 0
+
+
+class StylePatternCandidateList(BaseModel):
+    candidates: List[StylePatternCandidate] = []

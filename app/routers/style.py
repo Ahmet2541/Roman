@@ -20,6 +20,7 @@ from .. import models, schemas
 from ..novel_context import get_universe_id
 from ..ratelimit import rate_limit
 from .. import style_scan
+from ..qwen_client import suggest_style_patterns
 
 router = APIRouter(prefix="/style", tags=["Üslup Taraması"])
 
@@ -143,3 +144,22 @@ def get_report(
     if report is None:
         return schemas.StyleScanReport(scanned=False)
     return _report_to_schema(report)
+
+
+@router.post("/suggest-patterns", response_model=schemas.StylePatternCandidateList)
+def suggest_patterns(
+    db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=3, window_seconds=300, label="kalıp adayı önerisi")),
+    universe_id: int = Depends(get_universe_id),
+):
+    """Romandan örnek pasajlar alıp AI'ya "hangi YAPI tekrar ediyor" diye
+    sorar; yeni kalıp adayları döner. Hiçbiri kaydedilmez - kullanıcı
+    beğendiğini normal kalıp ekleme ucuyla (POST /style/patterns) kaydeder.
+    Adaylar örneklemde en az 2 kez doğrulanmadan listeye girmez."""
+    try:
+        candidates = suggest_style_patterns(db, universe_id)
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+    return schemas.StylePatternCandidateList(
+        candidates=[schemas.StylePatternCandidate(**c) for c in candidates]
+    )

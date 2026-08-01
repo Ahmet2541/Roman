@@ -80,6 +80,35 @@ DEFAULT_PATTERNS = [
         "notes": "Retorik olumsuzlamayla karşıtlık kurma tiki.",
     },
     {
+        "name": "üçleme: 'aynı X, aynı Y, aynı Z'",
+        "pattern": r"\baynı\s+\S+,\s*aynı\s+\S+,\s*aynı\b",
+        "threshold_per_1000": 0.4,
+        "min_count": 2,
+        "notes": "Paralel üçleme tiki. Bilinçli kullanımı güçlüdür; sorun tekrarıdır.",
+    },
+    {
+        "name": "üçleme: aynı fiille biten ardışık kısa cümleler",
+        # "Cihaza baktı. Meydana baktı. Ekrana baktı." gibi merdivenler
+        "pattern": r"\b(\w+)(dı|di|du|dü|tı|ti|tu|tü)\.\s+\S+\s+\1\2\.\s+\S+\s+\1\2\.",
+        "threshold_per_1000": 0.4,
+        "min_count": 2,
+        "notes": "Aynı fiilin üç kez arka arkaya cümle sonunda tekrarı.",
+    },
+    {
+        "name": "'bir kez gezindi/dolandı' jesti",
+        "pattern": r"\bbir kez (gezin|dolan|dokun)\w*",
+        "threshold_per_1000": 0.3,
+        "min_count": 2,
+        "notes": "El/parmak jesti klişesi - sahneler ARASINDA tekrar ediyor.",
+    },
+    {
+        "name": "'Bir an. Sadece bir an.' fragman kalıbı",
+        "pattern": r"\bbir an\.\s*sadece bir an\b",
+        "threshold_per_1000": 0.3,
+        "min_count": 2,
+        "notes": "Fragman vurgusu - ilk kullanımda etkili, tekrarında tik.",
+    },
+    {
         "name": "'-mekten/-maktan çok' kalıbı",
         "pattern": r"\w+(?:mekten|maktan)\s+çok\b",
         "threshold_per_1000": 1.0,
@@ -282,10 +311,11 @@ def build_style_warning_layer(db: Session, universe_id: int) -> str:
         return ""
     lines = [
         "=== ÜSLUP UYARILARI (aşırı kullanılan kalıplar) ===",
-        "Bu seride aşağıdaki ifade kalıpları saplantı düzeyinde tekrarlanmış. "
-        "Yazacağın yeni metinde bu kalıpları KULLANMA - aynı etkiyi her "
-        "seferinde FARKLI bir cümle yapısıyla/teknikle ver (duyusal detay, "
-        "güçlü fiil seçimi, ölçek karşıtlığı vb.):",
+        "Aşağıdaki ifade kalıpları bu seride zaten çok kullanılmış. Bunlar "
+        "kötü araçlar DEĞİL - sorun bütçesiz tekrarlanmaları. Bu yüzden: "
+        "yazacağın metinde her kalıbı EN FAZLA BİR KEZ kullan, mümkünse hiç "
+        "kullanma; aynı etkiyi farklı bir teknikle ver (duyusal detay, güçlü "
+        "fiil, ölçek karşıtlığı, sessizlik, nesne üzerinden gösterme):",
     ]
     for p in exceeded:
         worst = ", ".join(f"{w['label']} ({w['count']}×)" for w in p.get("worst_chapters", [])[:3])

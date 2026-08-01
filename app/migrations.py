@@ -41,6 +41,7 @@ def run_startup_migrations(engine):
         _upgrade_matrix_tables(engine)
         _add_style_refrain_column(engine)
         _add_rule_scope_columns(engine)
+        _add_matrix_row_instructions(engine)
     except Exception:
         logger.exception("Şema göçü sırasında beklenmeyen bir hata oluştu - uygulama yine de başlatılıyor")
 
@@ -439,3 +440,15 @@ def _add_rule_scope_columns(engine):
         if "entity_id" not in cols:
             logger.info("Göç: rules.entity_id ekleniyor")
             conn.execute(text("ALTER TABLE rules ADD COLUMN entity_id INTEGER"))
+
+
+def _add_matrix_row_instructions(engine):
+    """matrix_rows.instructions (Talimat Kasası) - idempotent."""
+    inspector = inspect(engine)
+    if "matrix_rows" not in inspector.get_table_names():
+        return
+    cols = {c["name"] for c in inspector.get_columns("matrix_rows")}
+    if "instructions" not in cols:
+        with engine.begin() as conn:
+            logger.info("Göç: matrix_rows.instructions ekleniyor")
+            conn.execute(text("ALTER TABLE matrix_rows ADD COLUMN instructions TEXT"))

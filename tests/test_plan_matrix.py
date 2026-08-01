@@ -389,3 +389,49 @@ def test_quick_plan_edits_existing_matrix_cell(client, headers):
     }, headers=headers)
     assert r.json()["matrix_name"] == "Tur Yapısı"  # kendi matrisinde güncellendi
     assert len(client.get("/matrix/", headers=headers).json()) == 1
+
+
+# ---- Talimat Kasası (satır bazlı kalıcı yazım kısıtları) -------------------
+
+def test_row_instructions_reach_context(client, headers):
+    """Bir aşamaya kaydedilen yazım kısıtları, o satıra bağlı HER bölümün
+    context'ine plan katmanıyla birlikte gitmeli - iyi talimat bir kez
+    yazılıp kalıcı olsun diye."""
+    m = _make_matrix(client, headers, cols=("TUR 1", "TUR 2"), rows=("Karar",))
+    row = m["rows"][0]
+    r = client.put(f"/matrix/{m['id']}/rows/{row['id']}", json={
+        "label": "Karar", "kind": "main",
+        "instructions": "- Duyguyu ADLANDIRMA\n- Sanık tek cümle konuşur",
+    }, headers=headers)
+    assert r.status_code == 200 and "ADLANDIRMA" in r.json()["instructions"]
+
+    client.post(f"/matrix/{m['id']}/generate-chapters", headers=headers)
+    full = client.get(f"/matrix/{m['id']}", headers=headers).json()
+    for cell in full["cells"]:
+        client.put(f"/matrix/{m['id']}/cells", json={
+            "column_id": cell["column_id"], "row_id": cell["row_id"],
+            "content": "Kurban veda eder.", "chapter_id": cell["chapter_id"],
+        }, headers=headers)
+
+    # HER İKİ turun bölümünde de kısıtlar görünmeli (satır bazlı olduğu için)
+    for cell in client.get(f"/matrix/{m['id']}", headers=headers).json()["cells"]:
+        ctx = client.post("/ai/context-preview", json={
+            "selected_entities": [], "chapter_number": cell["chapter_number"],
+        }, headers=headers).json()["context"]
+        assert "BU AŞAMANIN YAZIM KISITLARI" in ctx
+        assert "Duyguyu ADLANDIRMA" in ctx
+        assert "Kurban veda eder." in ctx
+
+
+def test_row_without_instructions_adds_nothing(client, headers):
+    m = _make_matrix(client, headers, cols=("TUR 1",), rows=("Hologram",))
+    client.post(f"/matrix/{m['id']}/generate-chapters", headers=headers)
+    cell = client.get(f"/matrix/{m['id']}", headers=headers).json()["cells"][0]
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": cell["column_id"], "row_id": cell["row_id"],
+        "content": "5 görüntü.", "chapter_id": cell["chapter_id"],
+    }, headers=headers)
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": cell["chapter_number"],
+    }, headers=headers).json()["context"]
+    assert "BU AŞAMANIN YAZIM KISITLARI" not in ctx  # boşsa maliyet ödenmez

@@ -47,12 +47,13 @@ def test_defaults_seeded_on_first_list(client, headers):
     r = client.get("/style/patterns", headers=headers)
     assert r.status_code == 200, r.text
     names = [p["name"] for p in r.json()]
-    assert len(names) == 7
+    assert len(names) == 11
     assert any("gibi" in n for n in names)
     assert any("sanki" in n for n in names)
+    assert any("üçleme" in n for n in names)  # yapısal kalıplar da tohumlanır
     # İkinci çağrı tekrar tohumlamamalı (idempotent)
     r = client.get("/style/patterns", headers=headers)
-    assert len(r.json()) == 7
+    assert len(r.json()) == 11
 
 
 def test_invalid_regex_rejected(client, headers):
@@ -192,3 +193,39 @@ def test_turkish_case_insensitivity(client, headers):
     report = client.post("/style/scan", headers=headers).json()
     sanki = next(p for p in report["patterns"] if "sanki" in p["name"])
     assert sanki["count"] == 5
+
+
+def test_structural_patterns_catch_real_tics(client, headers):
+    """Gerçek yazımda yakalanan yapısal tikler (üçleme, jest tekrarı) -
+    kelime değil SÖZDİZİMİ kalıpları. Bunlar sahneler ARASINDA oluştuğu
+    için tek bölümde göze çarpmaz; seri geneli tarama bu yüzden şart."""
+    metin = (
+        "Ses aynı tonda, aynı hızda, aynı sakinlikle devam etti. "
+        "Cihaza baktı. Meydana baktı. Ekrana baktı. "
+        "Eli, kumaşın üzerinde bir kez gezindi. "
+        "Parmağı, halkanın altında bir kez gezindi. "
+        "Bir an. Sadece bir an. "
+        "Ses yine aynı tonda, aynı hızda, aynı soğuklukla sürdü. "
+        "Bir an. Sadece bir an. "
+    ) + _FILLER
+    _make_chapter(client, headers, 1, metin)
+    report = client.post("/style/scan", headers=headers).json()
+    by_name = {p["name"]: p for p in report["patterns"]}
+
+    ucleme = next(p for n, p in by_name.items() if "aynı X" in n)
+    assert ucleme["count"] == 2 and ucleme["exceeded"] is True
+    jest = next(p for n, p in by_name.items() if "gezindi" in n)
+    assert jest["count"] == 2 and jest["exceeded"] is True
+    fragman = next(p for n, p in by_name.items() if "Bir an" in n)
+    assert fragman["count"] == 2 and fragman["exceeded"] is True
+    # Uyarı metni "asla kullanma" değil BÜTÇE dili kullanmalı
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+    from app.style_scan import build_style_warning_layer
+    novel_id = int(headers["X-Novel-Id"])
+    from app import models
+    db = sessionmaker(bind=engine)()
+    uid = db.query(models.Novel).filter(models.Novel.id == novel_id).first().universe_id
+    warning = build_style_warning_layer(db, uid)
+    assert "EN FAZLA BİR KEZ" in warning
+    assert "kötü araçlar DEĞİL" in warning

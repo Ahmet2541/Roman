@@ -53,7 +53,7 @@ def _matrix_out(db: Session, m: models.PlanMatrix) -> schemas.MatrixOut:
     return schemas.MatrixOut(
         id=m.id, name=m.name, created_at=m.created_at,
         columns=[schemas.MatrixColumnOut(id=c.id, position=c.position, label=c.label, character_id=c.character_id) for c in m.columns],
-        rows=[schemas.MatrixRowOut(id=r.id, position=r.position, kind=r.kind or "main", label=r.label) for r in m.rows],
+        rows=[schemas.MatrixRowOut(id=r.id, position=r.position, kind=r.kind or "main", label=r.label, instructions=r.instructions or "") for r in m.rows],
         cells=[_cell_out(db, c) for c in m.cells],
     )
 
@@ -214,7 +214,7 @@ def add_row(
         position = anchor.position + 1
     else:
         position = max((r.position for r in m.rows), default=0) + 1
-    row = models.MatrixRow(matrix_id=m.id, position=position, kind=payload.kind, label=payload.label)
+    row = models.MatrixRow(matrix_id=m.id, position=position, kind=payload.kind, label=payload.label, instructions=payload.instructions)
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -235,8 +235,9 @@ def rename_row(
         raise HTTPException(404, "Satır bulunamadı")
     row.label = payload.label
     row.kind = payload.kind
+    row.instructions = payload.instructions
     db.commit()
-    return schemas.MatrixRowOut(id=row.id, position=row.position, kind=row.kind, label=row.label)
+    return schemas.MatrixRowOut(id=row.id, position=row.position, kind=row.kind, label=row.label, instructions=row.instructions or "")
 
 
 @router.delete("/{matrix_id}/rows/{row_id}", status_code=204)

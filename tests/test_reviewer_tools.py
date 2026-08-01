@@ -327,3 +327,61 @@ def test_move_paragraphs_out_rejects_chapter_and_empty(client, headers):
     part = client.post("/chapters/", json={"number": 2, "kind": "part", "title": "Boş kısım"}, headers=headers).json()
     r = client.post(f"/chapters/{part['id']}/move-paragraphs-out", headers=headers)
     assert r.status_code == 400  # taşınacak paragraf yok
+
+
+# ---- Yapılandırılmış özet + devamlılık ------------------------------------
+
+def test_summary_includes_previous_chapter_and_structure(client, headers):
+    """Özet promptu: (a) bir önceki bölümün özetini bağlam olarak almalı,
+    (b) OLAY/MEKAN/ATMOSFER/DUYGU/DEVAMLILIK/KAPANIŞ TONU başlıklarını
+    istemeli. Kısım/Alt Başlık girdileri zincire girmemeli."""
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+    from app import models
+    from app.qwen_client import summarize_chapter
+
+    ch1 = _chapter_with_text(client, headers, ["İlk bölüm metni."], number=1)
+    client.put(f"/chapters/{ch1['id']}", json={"summary": "OLAY: Vicdan salonu açtı. KAPANIŞ TONU: tedirginlik."}, headers=headers)
+    client.post("/chapters/", json={"number": 2, "kind": "part", "title": "ARADAKİ KISIM"}, headers=headers)
+    ch2 = _chapter_with_text(client, headers, ["İkinci bölüm metni."], number=3)
+
+    db = sessionmaker(bind=engine)()
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == ch2["id"]).first()
+    captured = {}
+    def fake_create(**kwargs):
+        captured["system"] = kwargs["messages"][0]["content"]
+        captured["user"] = kwargs["messages"][1]["content"]
+        resp = MagicMock()
+        resp.choices = [MagicMock(message=MagicMock(content="OLAY: ...\nKAPANIŞ TONU: ..."))]
+        return resp
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.side_effect = fake_create
+        summarize_chapter(db, chapter)
+
+    for baslik in ("OLAY:", "MEKAN:", "ATMOSFER:", "DUYGU:", "DEVAMLILIK:", "KAPANIŞ TONU:"):
+        assert baslik in captured["system"], baslik
+    assert "ÖNCEKİ BÖLÜMÜN ÖZETİ" in captured["user"]
+    assert "Vicdan salonu açtı" in captured["user"]      # gerçek önceki özet geldi
+    assert "ARADAKİ KISIM" not in captured["user"]        # Kısım zincire girmedi
+    assert "İkinci bölüm metni." in captured["user"]
+
+
+def test_summary_first_chapter_has_no_previous_block(client, headers):
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+    from app import models
+    from app.qwen_client import summarize_chapter
+
+    ch = _chapter_with_text(client, headers, ["Açılış."], number=1)
+    db = sessionmaker(bind=engine)()
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == ch["id"]).first()
+    captured = {}
+    def fake_create(**kwargs):
+        captured["user"] = kwargs["messages"][1]["content"]
+        resp = MagicMock()
+        resp.choices = [MagicMock(message=MagicMock(content="OLAY: ..."))]
+        return resp
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.side_effect = fake_create
+        summarize_chapter(db, chapter)
+    assert "ÖNCEKİ BÖLÜMÜN ÖZETİ" not in captured["user"]

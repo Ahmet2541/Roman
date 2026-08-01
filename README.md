@@ -140,6 +140,21 @@ roman yazım destek uygulaması - backend + frontend.
   belirir - tıklayınca yanıt metni o paragrafın yerine yazılır, eski hal
   Geçmiş'ten geri alınabilir, sohbet geçmişi korunur (konuşmaya kaldığın
   yerden devam edersin), balonda "✓ P55 paragrafı değiştirildi" izi kalır.
+- **📌 Talimat Kasası**: Plan Matrisi'nde her SATIRA (aşamaya) kalıcı yazım
+  kısıtları yazılır ("Duyguyu ADLANDIRMA - beden/ses/nesneyle göster",
+  "Sanık tek cümle konuşur"). O satıra bağlı HER bölümün AI isteğine plan
+  katmanıyla birlikte gider - iyi talimat bir kez yazılır, 8 turda da
+  otomatik uygulanır. Kısıtı olan satırlar ızgarada 📌 ile işaretlenir.
+- **Yapısal üslup kalıpları + AI kalıp önerisi**: varsayılan kalıplara
+  kelime değil SÖZDİZİMİ tikleri eklendi (paralel üçleme "aynı X, aynı Y,
+  aynı Z"; aynı fiille biten ardışık cümle merdiveni; tekrarlayan el/parmak
+  jesti; "Bir an. Sadece bir an." fragmanı) - bunlar sahneler ARASINDA
+  oluştuğu için tek bölümde göze çarpmaz. Ayrıca "🔎 AI Yeni Kalıp Önersin"
+  romandan örnek pasajlar alıp tekrar eden YAPILARI bulur ve regex adayı
+  önerir; aday örneklemde en az 2 kez doğrulanmadan listelenmez, onaysız
+  kaydedilmez. Uyarı dili "asla kullanma" değil BÜTÇE mantığında: kalıplar
+  kötü araç değildir, sorun bütçesiz tekrarlanmalarıdır - "her kalıbı en
+  fazla bir kez kullan".
 - **Okur Testi (denetçi katmanı)**: bölüm metnini okur gözüyle tarar -
   tempo ölümü, bilgi bocası, klişe, anlaşılmaz cümle, gerilim kırılması,
   inandırıcılık çatlağı. Bulguları paragraf numarası + kısa alıntı +

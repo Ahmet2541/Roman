@@ -3277,6 +3277,8 @@ function renderStyleScanView() {
       isteğine otomatik olarak <b>"bu kalıptan kaçın"</b> uyarısı olarak eklenir.
       Tarama AI kullanmaz, ücretsizdir.</p>
     <button class="btn btn-primary" id="styleScanBtn">Taramayı Başlat</button>
+    <button class="btn" id="suggestPatternsBtn" title="Romandan örnek pasajlar alıp AI'ya 'hangi YAPI tekrar ediyor' diye sorar - yeni kalıp adayları önerir, onaysız kaydetmez">🔎 AI Yeni Kalıp Önersin</button>
+    <div id="patternCandidates"></div>
     <div id="styleReport" style="margin-top:18px;"></div>
     <h2 style="margin-top:28px;font-size:16px;">Kalıplar</h2>
     <p style="color:var(--text-muted);font-size:12.5px;max-width:640px;">
@@ -3305,6 +3307,44 @@ function renderStyleScanView() {
       renderStyleReport(await api.post('/style/scan', {}));
     } catch (err) {
       el.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+    }
+  });
+
+  document.getElementById('suggestPatternsBtn').addEventListener('click', async () => {
+    const box = document.getElementById('patternCandidates');
+    box.innerHTML = '<div class="empty-state">Roman taranıyor, tekrar eden yapılar aranıyor…</div>';
+    try {
+      const result = await api.post('/style/suggest-patterns', {});
+      if (!result.candidates.length) {
+        box.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0;">Yeni kalıp adayı bulunamadı (ya da bulunanlar zaten kayıtlı).</div>';
+        return;
+      }
+      box.innerHTML = `
+        <div class="panel" style="margin-top:10px;">
+          <strong style="font-size:11px;letter-spacing:0.4px;">AI KALIP ADAYLARI - onaysız kaydedilmez</strong>
+          ${result.candidates.map((c, i) => `
+            <div style="border-top:1px solid var(--border);padding:8px 0;">
+              <b style="font-size:13px;">${escapeHtml(c.name)}</b>
+              <span style="font-size:11px;color:var(--text-muted);">örneklemde ${c.sample_hits}×</span>
+              <code style="display:block;font-size:11.5px;color:var(--text-muted);">${escapeHtml(c.pattern)}</code>
+              ${c.example ? `<div style="font-size:12px;font-style:italic;color:var(--text-muted);">"${escapeHtml(c.example)}"</div>` : ''}
+              ${c.why ? `<div style="font-size:12px;">${escapeHtml(c.why)}</div>` : ''}
+              <button class="btn btn-sm btn-primary cand-add" data-idx="${i}" style="margin-top:5px;">Kalıp olarak ekle</button>
+            </div>`).join('')}
+        </div>`;
+      box.querySelectorAll('.cand-add').forEach(btn => btn.addEventListener('click', async () => {
+        const c = result.candidates[parseInt(btn.dataset.idx, 10)];
+        try {
+          await api.post('/style/patterns', {
+            name: c.name, pattern: c.pattern,
+            threshold_per_1000: 0.5, min_count: 3, notes: c.why || '',
+          });
+          btn.textContent = '✓ eklendi'; btn.disabled = true;
+          await loadStylePatterns();
+        } catch (err) { alert(err.message); }
+      }));
+    } catch (err) {
+      box.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
     }
   });
 
@@ -3491,7 +3531,7 @@ async function loadMatrixGrid() {
           </tr>
           ${m.rows.map(r => `<tr>
             <th style="${th}${r.kind === 'sub' ? 'font-style:italic;font-weight:400;padding-left:22px;' : ''}">
-              <span class="m-row-edit" data-id="${r.id}" style="cursor:pointer;" title="Adı değiştir">${r.kind === 'sub' ? '↳ ' : ''}${escapeHtml(r.label)}</span>
+              <span class="m-row-edit" data-id="${r.id}" style="cursor:pointer;" title="Adı, türü ve TALİMAT KASASI'nı düzenle">${r.kind === 'sub' ? '↳ ' : ''}${escapeHtml(r.label)}</span>${(r.instructions || '').trim() ? ` <span style="font-size:10px;color:var(--gold);" title="Bu aşamanın yazım kısıtları kayıtlı - bölümlere otomatik gider">📌</span>` : ''}
               <button class="btn-icon-sm m-row-ins" data-id="${r.id}" title="Bu satırın ALTINA yeni satır ekle">⊕</button>
               <button class="btn-icon-sm m-row-del" data-id="${r.id}" title="Satırı sil (hücreleriyle)">✕</button>
             </th>
@@ -3549,12 +3589,8 @@ async function loadMatrixGrid() {
       e.stopPropagation();
       addMatrixRow(m, parseInt(btn.dataset.id, 10));
     }));
-    area.querySelectorAll('.m-row-edit').forEach(el => el.addEventListener('click', async () => {
-      const row = m.rows.find(r => r.id === parseInt(el.dataset.id, 10));
-      const label = prompt('Yeni satır adı:', row.label);
-      if (!label || !label.trim()) return;
-      try { await api.put(`/matrix/${m.id}/rows/${row.id}`, { label: label.trim(), kind: row.kind || 'main' }); await loadMatrixGrid(); }
-      catch (err) { alert(err.message); }
+    area.querySelectorAll('.m-row-edit').forEach(el => el.addEventListener('click', () => {
+      openMatrixRowEditor(m, parseInt(el.dataset.id, 10));
     }));
     area.querySelectorAll('.m-col-del').forEach(btn => btn.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -4068,12 +4104,32 @@ async function runParagraphAi(chapter, number, mode) {
   const selected = Array.from(document.querySelectorAll('.entity-check:checked')).map(cb => ({
     entity_type: cb.dataset.type, entity_id: parseInt(cb.dataset.id, 10),
   }));
+  // Öneri artık KISALTMIYOR, GÜÇLENDİRİYOR - ve türe göre yön alıyor.
+  // Bölümün fihrist özeti + planı zaten context'e gidiyor; model önce
+  // sahnenin niteliğini (polisiye/gerilim/dramatik/betimleyici) oradan
+  // çıkarıp ona uygun teknikle derinleştirsin diye açıkça isteniyor.
+  // Ayrıca somut detaylar (rakam, ölçü, isim) korunmak ZORUNDA - sohbetin
+  // başında yaşanan "10 santimetre sessizce kayboldu" hatasının önlemi.
   const instruction = mode === 'suggest'
-    ? 'MEVCUT METİN olarak verilen paragrafı, anlamını ve olay akışını KORUYARAK güçlendirilmiş haliyle yeniden yaz: '
-      + 'daha canlı fiiller, gereksiz kelimelerin atılması, üslup uyarılarına uyum. '
+    ? 'MEVCUT METİN olarak verilen paragrafı GÜÇLENDİRİLMİŞ haliyle yeniden yaz.\n'
+      + 'ÖNCE bölümün özetine/planına ve çevresindeki akışa bak, bu sahnenin TÜRÜNÜ belirle '
+      + '(polisiye/soruşturma, gerilim, aksiyon, dramatik/duygusal, atmosferik betimleme, diyalog) '
+      + 've ona uygun tekniği kullan:\n'
+      + '- polisiye/soruşturma: somut kanıt ve gözlem detayı, dedektif bakışı, gereksiz süsten kaçın\n'
+      + '- gerilim: kısa ve kesik cümleler, tehdit sezgisi, bilgi saklama\n'
+      + '- aksiyon: güçlü fiiller, hız, uzun betimleme yok\n'
+      + '- dramatik: iç ses, beden dili, duygunun dolaylı gösterimi\n'
+      + '- atmosferik betimleme: duyuları çeşitlendir (koku, ses, sıcaklık, doku), mekanı canlandır\n'
+      + 'KURALLAR: (1) KISALTMA - gerekirse metni BÜYÜT, derinleştir; sadece gerçekten boş '
+      + 'tekrarları at. (2) Mevcut SOMUT detayları (rakam, ölçü, renk, özel isim) AYNEN KORU, '
+      + 'asla düşürme. (3) Olay akışını ve anlamı değiştirme, yeni olay ekleme. '
+      + '(4) Üslup uyarılarındaki kalıplardan kaçın.\n'
       + 'SADECE yeni paragraf metnini döndür - açıklama, başlık, tırnak ekleme.'
-    : 'MEVCUT METİN olarak verilen paragrafı deneyimli bir editör gözüyle eleştir: '
-      + 'güçlü yönler (1-2 madde), zayıf yönler ve her zayıf yön için SOMUT bir öneri. '
+    : 'MEVCUT METİN olarak verilen paragrafı deneyimli bir editör gözüyle eleştir. '
+      + 'Önce bölümün özetine/planına bakıp sahnenin türünü belirle ve eleştiriyi O TÜRÜN '
+      + 'ölçütlerine göre yap (polisiye ise ipucu/gözlem, gerilim ise tempo, dramatik ise '
+      + 'duygunun inandırıcılığı vb.). '
+      + 'Yanıt: güçlü yönler (1-2 madde), zayıf yönler ve her zayıf yön için SOMUT bir öneri. '
       + 'Paragrafı YENİDEN YAZMA - sadece analiz.';
   try {
     const result = await api.post('/ai/assist', {
@@ -4158,4 +4214,48 @@ async function runSuggestEvents(chapter) {
   } catch (err) {
     container.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   }
+}
+
+// TALİMAT KASASI: satır (aşama) düzenleme - ad, tür ve kalıcı yazım kısıtları.
+// Buraya yazdığın kısıtlar, bu satıra bağlı HER bölümün AI isteğine plan
+// katmanıyla birlikte gider; "iyi talimat"ı her sahnede yeniden yazmak
+// gerekmez (ör. "duyguyu adlandırma", "sanık tek cümle konuşur").
+async function openMatrixRowEditor(m, rowId) {
+  const editor = document.getElementById('matrixCellEditor');
+  const row = m.rows.find(r => r.id === rowId);
+  editor.innerHTML = `
+    <div class="panel">
+      <b>Aşamayı Düzenle</b>
+      <div class="field" style="margin-top:8px;"><label>Ad</label>
+        <input type="text" id="mRowLabel" value="${escapeHtml(row.label)}"></div>
+      <div class="field"><label>Tür</label>
+        <select id="mRowKind">
+          <option value="main" ${row.kind !== 'sub' ? 'selected' : ''}>Ana başlık</option>
+          <option value="sub" ${row.kind === 'sub' ? 'selected' : ''}>Ara başlık</option>
+        </select></div>
+      <div class="field">
+        <label>📌 Talimat Kasası <span style="font-weight:400;color:var(--text-muted);font-size:11.5px;">(bu aşamanın KALICI yazım kısıtları - bağlı her bölümde AI'ya gider)</span></label>
+        <textarea id="mRowInstructions" style="min-height:110px;" placeholder="Örn:&#10;- Duyguyu ADLANDIRMA: beden, ses, nesne ve sessizlikle göster&#10;- Sanık bu aşamada en fazla tek cümle konuşur&#10;- Şişenin rengini betimlemeye yedir, rapor gibi verme">${escapeHtml(row.instructions || '')}</textarea>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="mRowSave">Kaydet</button>
+        <button class="btn" id="mRowCancel">Kapat</button>
+      </div>
+      <div id="mRowError" class="error-text"></div>
+    </div>`;
+  editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  document.getElementById('mRowCancel').addEventListener('click', () => { editor.innerHTML = ''; });
+  document.getElementById('mRowSave').addEventListener('click', async () => {
+    const label = document.getElementById('mRowLabel').value.trim();
+    if (!label) { document.getElementById('mRowError').textContent = 'Ad boş olamaz.'; return; }
+    try {
+      await api.put(`/matrix/${m.id}/rows/${rowId}`, {
+        label,
+        kind: document.getElementById('mRowKind').value,
+        instructions: document.getElementById('mRowInstructions').value,
+      });
+      editor.innerHTML = '';
+      await loadMatrixGrid();
+    } catch (err) { document.getElementById('mRowError').textContent = err.message; }
+  });
 }

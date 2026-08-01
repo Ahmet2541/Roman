@@ -334,7 +334,14 @@ def build_plan_layer(db: Session, novel_id: int, chapter_number: int | None, ins
         row = db.query(models.MatrixRow).filter(models.MatrixRow.id == cell.row_id).first()
         header = " × ".join(x.label for x in (col, row) if x)
         code_part = f"{cell.code}: " if cell.code else ""
-        return f"[{code_part}{header}]\n{content}" if header or code_part else content
+        block = f"[{code_part}{header}]\n{content}" if header or code_part else content
+        # TALİMAT KASASI: satıra (aşamaya) kayıtlı kalıcı yazım kısıtları
+        # planın hemen ardından gider - "iyi talimat"ı her seferinde
+        # yeniden yazmak gerekmesin diye.
+        row_rules = (getattr(row, "instructions", "") or "").strip() if row else ""
+        if row_rules:
+            block += f"\nBU AŞAMANIN YAZIM KISITLARI (uy):\n{row_rules}"
+        return block
 
     parts = []
     own_cell_ids = set()
@@ -417,12 +424,39 @@ def build_context(
 # (bkz. routers/chapters.py generate-summary + mevcut PUT /chapters/{id}).
 # ---------------------------------------------------------------------------
 
+# Özet artık SADECE olay değil, bölümün DUYGUSU ve tonu da taşır. Sebep:
+# bu özet, sonraki bölümler yazılırken fihrist katmanıyla AI'ya gidiyor -
+# "ne oldu" bilgisi tek başına yetmiyor, "hangi duyguyla bitti / sahnenin
+# rengi neydi" bilinmezse sonraki bölüm yanlış tonda başlıyor. Bir bölüm
+# gerilimle bitip diğeri neşeyle açılmasın diye ton bilgisi şart.
+# Özet artık YAPILANDIRILMIŞ ve DEVAMLILIK bilinçli. Sebepler:
+#  - Serbest paragraf özet, atmosfer/mekan/duygu gibi bilgileri rastgele
+#    atlıyordu; sabit başlıklar modeli bu soruları TEK TEK cevaplamaya
+#    zorluyor (atlanan alan gözle görülür oluyor).
+#  - Önceki bölümün özeti prompt'a veriliyor: "bu bölüm ne devraldı, neyi
+#    değiştirdi" sorusu ancak öncesi bilinirse cevaplanabilir. Zincir
+#    böylece kopmuyor - fihrist katmanı sonraki bölümlere hem olayı hem
+#    duygusal devri taşıyor.
 CHAPTER_SUMMARY_SYSTEM_PROMPT = """Sen bir roman editörüsün. Sana bir bölümün
-tüm paragrafları verilecek. Görevin bu bölümü 3-5 cümlelik, olay örgüsünü
-net şekilde anlatan bir ÖZET yazmak. Yorum katma, sadece ne olduğunu anlat.
-Bu özet başka bölümler yazılırken bağlam olarak kullanılacağı için isim ve
-olayları açık ve net yaz. Yanıtını SADECE düz metin olarak ver, başlık,
-tırnak ya da markdown ekleme."""
+tüm paragrafları ve (varsa) BİR ÖNCEKİ bölümün özeti verilecek. Bu bölüm için
+aşağıdaki başlıkları TEK TEK, kısa ve bilgi dolu şekilde doldur. Her başlık
+tek satır olsun, başlık adlarını AYNEN koru:
+
+OLAY: Kim, ne yaptı, ne oldu? Bölüm sonunda durum ne? (isimler açık, 1-3 cümle)
+MEKAN: Sahne nerede geçiyor? Mekanın bölümdeki işlevi/değişimi ne?
+ATMOSFER: Duyusal ve fiziksel hava - ışık, ses, koku, sıcaklık, kalabalık/boşluk;
+  sahnenin dokusu nasıl?
+DUYGU: Kilit karakterlerin duygusal durumu ve aralarındaki gerilim. Okurda
+  bırakması amaçlanan his ne?
+DEVAMLILIK: Önceki bölümden neyi devraldı, neyi değiştirdi? Açık kalan
+  soru/tehdit/vaat ne? (önceki bölüm verilmediyse "Açılış bölümü" yaz)
+KAPANIŞ TONU: Bölüm hangi duyguyla ve hangi eşikte kapanıyor? Sonraki bölüm
+  bunu nasıl devralmalı?
+
+Kurallar: metinde OLMAYAN olay ya da duygu UYDURMA - sadece yazılanlardan
+çıkar; bir başlığın karşılığı metinde yoksa "belirtilmemiş" yaz. Süslü edebi
+dil kullanma, bilgi ver. Yanıtını SADECE bu düz metin başlıklarla ver;
+markdown, tırnak, madde işareti ekleme."""
 
 
 # ---------------------------------------------------------------------------
@@ -474,7 +508,30 @@ def split_paragraphs_with_ai(raw_text: str) -> list[str]:
 def summarize_chapter(db: Session, chapter: "models.Chapter") -> str:
     text = "\n".join(f"[Paragraf {p.number}] {p.text}" for p in chapter.paragraphs)
     title_part = f" - {chapter.title}" if chapter.title else ""
-    user_message = f"BÖLÜM {chapter.number}{title_part}:\n{text}"
+
+    # DEVAMLILIK için bir önceki (özeti olan) bölümü bul - Kısım/Alt Başlık
+    # girdileri atlanır, sadece gerçek bölümler zincire girer.
+    previous = (
+        db.query(models.Chapter)
+        .filter(
+            models.Chapter.novel_id == chapter.novel_id,
+            models.Chapter.kind == "chapter",
+            models.Chapter.number < chapter.number,
+        )
+        .order_by(models.Chapter.number.desc())
+        .all()
+    )
+    prev_block = ""
+    for prev in previous:
+        if (prev.summary or "").strip():
+            prev_title = f" - {prev.title}" if prev.title else ""
+            prev_block = (
+                f"ÖNCEKİ BÖLÜMÜN ÖZETİ (Bölüm {prev.number}{prev_title}):\n"
+                f"{prev.summary.strip()}\n\n"
+            )
+            break
+
+    user_message = f"{prev_block}ÖZETLENECEK BÖLÜM {chapter.number}{title_part}:\n{text}"
 
     client = get_client()
     response = client.chat.completions.create(
@@ -1998,3 +2055,121 @@ def suggest_paragraph_entities(db: Session, universe_id: int, text: str) -> list
                 "existing_entity_id": None,
             })
     return out
+
+
+# ---------------------------------------------------------------------------
+# KALIP ADAYI ÖNERİSİ (üslup taramasının kendi kendini beslemesi).
+# Regex listesi ancak insan fark edip eklerse büyür - oysa asıl tehlikeli
+# tikler SAHNELER ARASINDA oluşuyor ve tek bölümde göze çarpmıyor. Bu
+# fonksiyon romandan örnek pasajlar alıp AI'ya "hangi YAPI tekrar ediyor"
+# diye sorar ve regex ADAYI önerir. Hiçbir şey kaydedilmez - kullanıcı
+# onaylarsa StylePattern olarak eklenir.
+# ---------------------------------------------------------------------------
+
+PATTERN_SUGGEST_PROMPT = """Sen bir üslup analistisin. Sana bir romandan
+rastgele pasajlar verilecek. Görevin, yazarın FARKINDA OLMADAN tekrarladığı
+YAPISAL kalıpları bulmak - tek tek kelimeleri değil, cümle kalıplarını:
+- paralel üçlemeler ("aynı X, aynı Y, aynı Z")
+- aynı fiille biten ardışık kısa cümleler ("...baktı. ...baktı. ...baktı.")
+- tekrarlayan jestler ("eli ... üzerinde bir kez gezindi")
+- kalıplaşmış vurgu fragmanları ("Bir an. Sadece bir an.")
+- "X değil, Y" / "X yerine Y" tarzı retorik hamleler
+
+Kurallar:
+1. En fazla 5 aday döndür; sadece EN AZ İKİ farklı yerde geçenleri seç.
+2. Her aday için Python re modülüyle uyumlu, KÜÇÜK HARF bir regex yaz.
+   Metin küçültülerek taranacak (İ->i, I->ı). Regex çok dar olmasın
+   (birebir cümle değil, kalıbın kendisi) ama çok geniş de olmasın.
+3. Türkçe ek almış halleri düşün (\\w* ile esnet).
+4. example alanına metinden kısa bir örnek koy (en fazla 10 kelime).
+5. Zaten verilen KAYITLI KALIPLAR listesindekileri TEKRAR ÖNERME.
+
+Yanıtın SADECE şu JSON olsun:
+{"candidates": [{"name": "...", "pattern": "...", "example": "...", "why": "..."}]}
+Bulamazsan candidates boş liste."""
+
+
+def suggest_style_patterns(db: Session, universe_id: int, max_chars: int = 12000) -> list[dict]:
+    """Evrendeki bölümlerden örnek pasajlar alıp yeni kalıp ADAYLARI önerir.
+    Tüm romanı göndermek hem pahalı hem gereksiz - bölümlerin başından
+    eşit aralıklı örnekler alınır (tikler her yerde tekrarlandığı için
+    örnekleme yeterlidir). Dönen adaylar kaydedilmez; regex'i derlenemeyen
+    ya da zaten kayıtlı olan adaylar ayıklanır."""
+    novels = db.query(models.Novel).filter(models.Novel.universe_id == universe_id).all()
+    chapters = []
+    for novel in novels:
+        chapters.extend(
+            db.query(models.Chapter)
+            .filter(models.Chapter.novel_id == novel.id, models.Chapter.kind == "chapter")
+            .order_by(models.Chapter.number)
+            .all()
+        )
+    texts = []
+    for ch in chapters:
+        body = "\n".join(p.text for p in ch.paragraphs if p.text)
+        if body.strip():
+            texts.append(body.strip())
+    if not texts:
+        return []
+
+    # Eşit aralıklı örnekleme + bölüm başına üst sınır
+    budget = max_chars
+    per_chapter = max(600, budget // max(1, min(len(texts), 12)))
+    sample_parts, used = [], 0
+    step = max(1, len(texts) // 12)
+    for body in texts[::step]:
+        chunk = body[:per_chapter]
+        sample_parts.append(chunk)
+        used += len(chunk)
+        if used >= budget:
+            break
+
+    existing = (
+        db.query(models.StylePattern)
+        .filter(models.StylePattern.universe_id == universe_id)
+        .all()
+    )
+    existing_patterns = {(p.pattern or "").strip() for p in existing}
+    existing_names = {_tr_lower(p.name or "") for p in existing}
+    existing_block = "\n".join(f"- {p.name}: {p.pattern}" for p in existing) or "(yok)"
+
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": PATTERN_SUGGEST_PROMPT},
+            {"role": "user", "content": f"KAYITLI KALIPLAR:\n{existing_block}\n\nPASAJLAR:\n" + "\n\n---\n\n".join(sample_parts)},
+        ],
+    )
+    raw = response.choices[0].message.content
+    cleaned = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return []
+
+    out = []
+    for c in data.get("candidates", []):
+        if not isinstance(c, dict):
+            continue
+        name = (c.get("name") or "").strip()
+        pattern = (c.get("pattern") or "").strip()
+        if not name or not pattern:
+            continue
+        if pattern in existing_patterns or _tr_lower(name) in existing_names:
+            continue
+        try:
+            compiled = re.compile(pattern)
+        except re.error:
+            continue  # derlenemeyen regex sessizce atılır
+        # Adayı GERÇEKTEN doğrula: örneklemde en az 2 kez geçmiyorsa alma
+        hits = sum(len(compiled.findall(_tr_lower(part))) for part in sample_parts)
+        if hits < 2:
+            continue
+        out.append({
+            "name": name, "pattern": pattern,
+            "example": (c.get("example") or "")[:120],
+            "why": (c.get("why") or "")[:200],
+            "sample_hits": hits,
+        })
+    return out[:5]
