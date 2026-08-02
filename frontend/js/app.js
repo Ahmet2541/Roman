@@ -1,3 +1,45 @@
+// ---------------------------------------------------------------------------
+// AI ODALARI: aynı motor, beş ön ayar. Her oda bağlam kapsamını, hangi
+// araçların görüneceğini ve sohbetin çerçevesini belirler - ama DUVAR
+// değildir: @isim ile her odada dışarıdan varlık çağırabilirsin. Her odanın
+// kendi sohbet geçmişi vardır (karakter tartışması, bölüm tartışmasını
+// kirletmesin diye).
+// ---------------------------------------------------------------------------
+const AI_ROOMS = {
+  chapter: {
+    icon: '📖', label: 'Bu Bölüm', scope: 'chapter', showPlan: true, showPicker: true,
+    hint: 'Bölümün metni, planı ve özeti AI\'ya gider - sahne yazma, tartışma, devam ettirme.',
+    frame: 'Bu sohbette ÜZERİNDE ÇALIŞILAN BÖLÜM konuşulacak: metni, planı, akışı ve sahneleri. Kısa ve somut konuş.',
+    starters: ['Bu bölüm önceki bölümle bağlanıyor mu?', 'Bu bölümde tempo nerede düşüyor?', 'Plandaki hangi madde henüz işlenmemiş?'],
+  },
+  people: {
+    icon: '👤', label: 'Kişiler', scope: 'none', showPlan: false, showPicker: true,
+    hint: 'Bölüm metni GİTMEZ - sadece seçili kişilerin profilleri. Karakter tutarlılığı ve ses için.',
+    frame: 'Bu sohbette KARAKTERLER konuşulacak: profilleri, sesleri, tutarlılıkları, ilişkileri. Bölüm metni verilmedi; gerekirse sor.',
+    starters: ['Bu karakterin sesi tutarlı mı?', 'Profilinde eksik ne var?', 'Bu karakteri diğerlerinden ne ayırıyor?'],
+  },
+  world: {
+    icon: '📍', label: 'Mekân & Nesne', scope: 'none', showPlan: false, showPicker: true,
+    hint: 'Seçili mekan/nesnelerin profilleri gider. Dünya tutarlılığı ve atmosfer için.',
+    frame: 'Bu sohbette MEKANLAR ve NESNELER konuşulacak: fiziksel yapı, atmosfer, kurallar, işlev. Bölüm metni verilmedi.',
+    starters: ['Bu mekanın atmosferi nasıl güçlenir?', 'Bu nesnenin kuralları çelişiyor mu?', 'Mekan profilinde ne eksik?'],
+  },
+  paragraph: {
+    icon: '✍️', label: 'Paragraf', scope: 'chapter', showPlan: false, showPicker: true,
+    hint: 'Bölüm metni gider; "P12" gibi numarayla nokta atışı çalışırsın. Yanıt beğenilirse tek tıkla paragrafın yerine geçer.',
+    frame: 'Bu sohbette TEK TEK PARAGRAFLAR üzerinde çalışılacak. Kullanıcı "P12" gibi numaralarla atıf yapar; yanıtların doğrudan o paragrafın yerine geçebilecek nitelikte, temiz metin olsun (açıklama ekleme).',
+    starters: ['P1\'i daha gergin bir tonda yaz', 'Bu paragrafta hangi kelimeler fazla?', 'P2 ile P3 arasındaki geçiş pürüzlü mü?'],
+  },
+  novel: {
+    icon: '🌍', label: 'Roman Geneli', scope: 'novel', showPlan: false, showPicker: false,
+    hint: 'TÜM KİTABIN metni gider (pahalı) - tutarlılık, yapı, tekrar ve sonuç soruları için.',
+    frame: 'Bu sohbette ROMANIN TAMAMI konuşulacak: yapı, tutarlılık, tekrarlar, karakter yayları, açık kalan ipuçları. Bulgularını bölüm numaralarıyla göster.',
+    starters: ['Açık kalan ipuçları hangileri?', 'Hangi bölümler birbirini tekrar ediyor?', 'Karakter yayları tutarlı mı?'],
+  },
+};
+let currentAiRoom = 'chapter';
+const aiRoomHistories = {};
+
 // Derin profil bölüm tanımları - backend'deki app/sections.py ile senkron
 // tutulmalı (anahtarlar birebir aynı olmak ZORUNDA, backend bilinmeyen
 // anahtarı 422 ile reddeder). "meta" AI'ya asla gönderilmez - formda da
@@ -2047,6 +2089,11 @@ async function renderAiPanel(chapter) {
 
     panel.innerHTML = `
       <h3>AI Yazım Desteği</h3>
+      <div id="aiRoomTabs" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
+        ${Object.entries(AI_ROOMS).map(([key, r]) => `
+          <button class="btn btn-sm ai-room-btn${key === currentAiRoom ? ' btn-primary' : ''}" data-room="${key}" title="${escapeHtml(r.hint)}">${r.icon} ${r.label}</button>`).join('')}
+      </div>
+      <div id="aiRoomHint" style="font-size:11.5px;color:var(--text-muted);margin-bottom:6px;"></div>
       ${planHtml}
       <div id="selectedEntityChips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
       <input type="text" id="entityPickerSearch" placeholder="Kişi/mekan/olay ara… (metinde @isim yazarak da seçebilirsin)" style="width:100%;margin-bottom:6px;">
@@ -2082,6 +2129,7 @@ async function renderAiPanel(chapter) {
       </div>
 
       <div id="aiChatMode">
+        <div id="aiRoomStarters" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
         <div id="aiChatMessages" class="ai-chat-messages"></div>
         <div class="chat-input-row" style="display:flex;gap:6px;">
           <textarea id="aiChatInput" placeholder="Ör: Ahmet için bir sahne fikrin var mı?" style="flex:1;min-height:44px;box-sizing:border-box;max-width:100%;"></textarea>
@@ -2155,8 +2203,23 @@ async function renderAiPanel(chapter) {
       });
     });
 
-    aiChatMessages = [];
+    // Oda geçmişleri AYRI: karakter tartışırken bölüm konuşmasının artıkları
+    // bağlamı kirletmesin. Oda değişince o odanın geçmişi yüklenir.
+    aiChatMessages = aiRoomHistories[currentAiRoom] || [];
     renderChatMessages();
+    applyAiRoom(currentAiRoom, chapter);
+
+    panel.querySelectorAll('.ai-room-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        aiRoomHistories[currentAiRoom] = aiChatMessages;   // mevcut odayı sakla
+        currentAiRoom = btn.dataset.room;
+        panel.querySelectorAll('.ai-room-btn').forEach(b => b.classList.remove('btn-primary'));
+        btn.classList.add('btn-primary');
+        aiChatMessages = aiRoomHistories[currentAiRoom] || [];
+        renderChatMessages();
+        applyAiRoom(currentAiRoom, chapter);
+      });
+    });
 
     panel.querySelectorAll('.ai-mode-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -2187,6 +2250,7 @@ async function renderAiPanel(chapter) {
     });
     document.getElementById('clearChatBtn').addEventListener('click', () => {
       aiChatMessages = [];
+      aiRoomHistories[currentAiRoom] = [];   // sadece AKTİF odayı temizle
       renderChatMessages();
     });
     document.getElementById('aiAssistBtn').addEventListener('click', () => runAiAssist(chapter));
@@ -2378,6 +2442,13 @@ async function sendChatMessage(chapter) {
       include_hidden: !!document.getElementById('includeHiddenChk')?.checked,
       text_scope: document.getElementById('textScopeSelect')?.value || 'chapter',
     };
+    // Oda çerçevesi: AI'ya bu odanın amacını söyler (ilk mesaja iliştirilir)
+    if (aiChatMessages.length === 1 && AI_ROOMS[currentAiRoom]?.frame) {
+      payload.messages = [
+        { role: 'user', content: AI_ROOMS[currentAiRoom].frame },
+        ...payload.messages,
+      ];
+    }
     const result = await api.post('/ai/chat', payload);
     aiChatMessages.push({
       role: 'assistant', content: result.reply, actions: result.actions_taken || [],
@@ -4698,5 +4769,43 @@ async function runInferEventDate(eventId) {
     });
   } catch (err) {
     panel.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// Odanın ön ayarlarını panele uygular: kapsam, görünür araçlar, ipucu ve
+// hazır başlangıç soruları.
+function applyAiRoom(room, chapter) {
+  const cfg = AI_ROOMS[room] || AI_ROOMS.chapter;
+  const hintEl = document.getElementById('aiRoomHint');
+  if (hintEl) hintEl.textContent = cfg.hint;
+
+  const scopeSel = document.getElementById('textScopeSelect');
+  if (scopeSel) scopeSel.value = cfg.scope;
+
+  // Plan kutusu ve varlık listeleri odaya göre gizlenir - ekran sadeleşir
+  const planBox = document.querySelector('#aiPanel .panel[style*="var(--gold)"]');
+  if (planBox) planBox.style.display = cfg.showPlan ? '' : 'none';
+  const picker = document.getElementById('entityPickerBox');
+  const search = document.getElementById('entityPickerSearch');
+  [picker, search].forEach(el => { if (el) el.style.display = cfg.showPicker ? '' : 'none'; });
+
+  // Kişiler/Mekan odalarında sadece ilgili tür açık kalsın
+  document.querySelectorAll('.entity-type-group').forEach(g => {
+    const t = g.dataset.type;
+    let visible = true;
+    if (room === 'people') visible = (t === 'character');
+    else if (room === 'world') visible = (t === 'place' || t === 'object');
+    g.style.display = visible ? '' : 'none';
+  });
+
+  const starters = document.getElementById('aiRoomStarters');
+  if (starters) {
+    starters.innerHTML = (cfg.starters || []).map(q =>
+      `<button class="btn btn-sm room-starter" style="font-size:11.5px;">${escapeHtml(q)}</button>`).join('');
+    starters.querySelectorAll('.room-starter').forEach(b => b.addEventListener('click', () => {
+      const input = document.getElementById('aiChatInput');
+      input.value = b.textContent;
+      input.focus();
+    }));
   }
 }

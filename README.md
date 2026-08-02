@@ -166,6 +166,16 @@ roman yazım destek uygulaması - backend + frontend.
   kaydedilmez. Uyarı dili "asla kullanma" değil BÜTÇE mantığında: kalıplar
   kötü araç değildir, sorun bütçesiz tekrarlanmalarıdır - "her kalıbı en
   fazla bir kez kullan".
+- **AI Odaları (5 ön ayar)**: sohbet paneli artık amaca göre beş odaya
+  ayrılıyor - 📖 Bu Bölüm (metin+plan+özet gider), 👤 Kişiler (bölüm metni
+  GİTMEZ, sadece karakter profilleri - ses/tutarlılık), 📍 Mekân & Nesne,
+  ✍️ Paragraf (P12 gibi numaralarla nokta atışı; yanıtlar doğrudan
+  paragrafın yerine geçebilecek temizlikte), 🌍 Roman Geneli (tüm kitap -
+  yapı, tekrar, açık ipuçları). Oda seçimi bağlam kapsamını, görünen
+  araçları (plan kutusu, varlık listeleri) ve sohbetin çerçevesini otomatik
+  ayarlar; her odanın KENDİ sohbet geçmişi vardır. Odalar duvar DEĞİL:
+  @isim ile her odada dışarıdan varlık çağırabilirsin. Her odada 3 hazır
+  başlangıç sorusu var.
 - **Sohbet bağlam yönetimi (araştırma temelli)**: üç mekanizma birlikte.
   (1) **Kapsam seçici**: "AI neyi okusun" - Bu bölümün metni (varsayılan) /
   Metin gönderme (kısa, ucuz sorular) / Tüm kitap (tutarlılık soruları,
