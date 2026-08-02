@@ -4494,7 +4494,10 @@ async function runBulkEventScan() {
   box.innerHTML = '<div class="empty-state">Bölümler taranıyor…</div>';
   btn.disabled = true;
   try {
-    const chapters = (await api.get('/chapters/')).filter(c => c.kind === 'chapter' && (c.summary || '').trim());
+    // Tür filtresi YOK: kullanıcının fihristinde metin ve özet, Kısım/Alt
+    // Başlık türündeki girdilerde de durabiliyor (içe aktarılan romanlarda
+    // sık). Ölçüt tek: ÖZETİ olan her girdi taranır.
+    const chapters = (await api.get('/chapters/')).filter(c => (c.summary || '').trim());
     if (!chapters.length) {
       box.innerHTML = '<div style="font-size:12.5px;color:var(--danger);padding:6px 0;">Özeti olan bölüm yok. Önce bölümlerin özetini oluştur (Roman menüsü → bölüm → "AI ile özet oluştur").</div>';
       return;
