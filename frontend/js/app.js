@@ -1985,15 +1985,38 @@ async function renderAiPanel(chapter) {
       (p.mentions || []).forEach(m => mentionedKeys.add(`${m.entity_type}:${m.entity_id}`));
     });
 
+    // Her varlık türü KENDİ açılır bölümünde: başlıkta toplam ve seçili
+    // sayısı, içinde liste + o menüye gidip düzenleme kısayolu. Tek yığın
+    // halinde 30-40 kayıt paneli kullanılmaz hale getiriyordu.
+    const TYPE_ICONS = { character: '👤', place: '📍', event: '📅', object: '🔹', foreshadowing: '🔮' };
     const pickerHtml = PICKER_TYPES.map((t, idx) => {
       const items = lists[idx];
-      if (!items.length) return '';
-      return `<div class="entity-picker-group" style="margin-bottom:8px;">
-        <strong style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">${ENTITY_TYPES[t].plural.toUpperCase()}</strong><br>
-        ${items.map(i => {
-          const isMentioned = mentionedKeys.has(`${t}:${i.id}`);
-          return `<label class="entity-picker-label" data-name="${escapeHtml(i.name.toLowerCase())}"><input type="checkbox" class="entity-check" data-type="${t}" data-id="${i.id}" ${isMentioned ? 'checked' : ''}> ${escapeHtml(i.name)}${isMentioned ? ' <span style="color:var(--gold);font-size:11px;" title="Bu bölümde geçiyor">●</span>' : ''}</label>`;
-        }).join('')}
+      const selectedCount = items.filter(i => mentionedKeys.has(`${t}:${i.id}`)).length;
+      const cfgLabel = ENTITY_TYPES[t].plural.toUpperCase();
+      if (!items.length) {
+        return `<div class="entity-type-group" data-type="${t}" style="border-top:1px solid var(--border);padding:6px 0;">
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--text-muted);">
+            <span>${TYPE_ICONS[t] || ''} ${cfgLabel} <span style="opacity:0.6;">(kayıt yok)</span></span>
+            <button class="btn btn-sm goto-menu-btn" data-type="${t}" title="${cfgLabel} menüsüne git ve ekle">+ ekle</button>
+          </div>
+        </div>`;
+      }
+      return `<div class="entity-type-group" data-type="${t}" style="border-top:1px solid var(--border);padding:6px 0;">
+        <div class="entity-type-header" data-type="${t}" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;">
+          <strong style="font-size:11.5px;letter-spacing:0.3px;">
+            <span class="type-caret" data-type="${t}" style="color:var(--text-muted);">▸</span>
+            ${TYPE_ICONS[t] || ''} ${cfgLabel}
+            <span style="font-weight:400;color:var(--text-muted);">(${items.length})</span>
+            <span class="type-selected-count" data-type="${t}" style="font-weight:400;color:var(--gold);">${selectedCount ? '· ' + selectedCount + ' seçili' : ''}</span>
+          </strong>
+          <button class="btn btn-sm goto-menu-btn" data-type="${t}" title="${cfgLabel} menüsünde düzenle/ekle">✎</button>
+        </div>
+        <div class="entity-type-body" data-type="${t}" style="display:none;margin-top:4px;max-height:200px;overflow-y:auto;">
+          ${items.map(i => {
+            const isMentioned = mentionedKeys.has(`${t}:${i.id}`);
+            return `<label class="entity-picker-label" data-name="${escapeHtml(i.name.toLowerCase())}"><input type="checkbox" class="entity-check" data-type="${t}" data-id="${i.id}" ${isMentioned ? 'checked' : ''}> ${escapeHtml(i.name)}${isMentioned ? ' <span style="color:var(--gold);font-size:11px;" title="Bu bölümde geçiyor">●</span>' : ''}</label>`;
+          }).join('')}
+        </div>
       </div>`;
     }).join('');
 
@@ -2021,7 +2044,7 @@ async function renderAiPanel(chapter) {
       ${planHtml}
       <div id="selectedEntityChips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
       <input type="text" id="entityPickerSearch" placeholder="Kişi/mekan/olay ara… (metinde @isim yazarak da seçebilirsin)" style="width:100%;margin-bottom:6px;">
-      <button type="button" class="btn btn-sm" id="togglePickerBtn" style="margin-bottom:6px;">▸ Listeyi göster</button>
+      <button type="button" class="btn btn-sm" id="togglePickerBtn" style="margin-bottom:6px;" title="Kişi, mekan, olay, nesne ve ipuçları ayrı başlıklar altında">▸ Kişi / Mekan / Olay listeleri</button>
       <div class="entity-picker" id="entityPickerBox" style="display:none;">${pickerHtml || '<div class="empty-state">Henüz kayıt yok</div>'}</div>
 
       <div class="ai-mode-tabs" style="display:flex;gap:6px;margin:10px 0 4px;">
@@ -2084,18 +2107,35 @@ async function renderAiPanel(chapter) {
     // Liste varsayılan KAPALI: 30-40 karakterli seride onay kutusu yığını
     // paneli boğuyordu. Seçilenler üstte rozet olarak görünür; seçim ya
     // aramayla ya da metinde @isim yazarak yapılır.
+    // Tür başlıkları: aç/kapa
+    panel.querySelectorAll('.entity-type-header').forEach(h => h.addEventListener('click', (e) => {
+      if (e.target.closest('.goto-menu-btn')) return;
+      const t = h.dataset.type;
+      const body = panel.querySelector(`.entity-type-body[data-type="${t}"]`);
+      const caret = panel.querySelector(`.type-caret[data-type="${t}"]`);
+      const hidden = body.style.display === 'none';
+      body.style.display = hidden ? '' : 'none';
+      if (caret) caret.textContent = hidden ? '▾' : '▸';
+    }));
+    // "✎ / + ekle": ilgili menüye geç (kayıt orada düzenlenir)
+    panel.querySelectorAll('.goto-menu-btn').forEach(b => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      switchView(b.dataset.type);
+    }));
+
     const pickerBox = document.getElementById('entityPickerBox');
     const toggleBtn = document.getElementById('togglePickerBtn');
     toggleBtn.addEventListener('click', () => {
       const hidden = pickerBox.style.display === 'none';
       pickerBox.style.display = hidden ? '' : 'none';
-      toggleBtn.textContent = hidden ? '▾ Listeyi gizle' : '▸ Listeyi göster';
+      toggleBtn.textContent = hidden ? '▾ Listeleri gizle' : '▸ Kişi / Mekan / Olay listeleri';
     });
     // Bölümde geçen varlıklar otomatik işaretli geliyor - kullanıcı en az
     // bir seçimle karşılaşırsa listeyi açmasına gerek kalmasın diye rozetler.
     renderSelectedEntityChips();
     panel.querySelectorAll('.entity-check').forEach(cb =>
-      cb.addEventListener('change', renderSelectedEntityChips));
+      cb.addEventListener('change', () => { renderSelectedEntityChips(); updateTypeCounts(); }));
+    updateTypeCounts();
 
     document.getElementById('entityPickerSearch').addEventListener('input', (e) => {
       const q = e.target.value.trim().toLowerCase();
@@ -2775,7 +2815,7 @@ async function loadEventList() {
     listEl.innerHTML = events.map(ev => `
       <div class="entity-row" style="flex-wrap:wrap;">
         <div>
-          <div class="name">${escapeHtml(ev.name)}${ev.story_order !== null && ev.story_order !== undefined ? ` <span style="color:var(--text-muted);font-weight:400;">· sıra ${ev.story_order}</span>` : ''}</div>
+          <div class="name">${escapeHtml(ev.name)}${formatStoryOrder(ev.story_order)}</div>
           <div class="desc">${ev.story_date ? escapeHtml(ev.story_date) + ' · ' : ''}${ev.place_name ? '📍 ' + escapeHtml(ev.place_name) : ''}${ev.character_names.length ? ' · ' + ev.character_names.map(escapeHtml).join(', ') : ''}</div>
           <div class="desc">${escapeHtml(truncate(ev.description, 100))}</div>
         </div>
@@ -2830,7 +2870,10 @@ async function showEventForm(event) {
           </select>
         </div>
         <div class="field"><label>Hikaye içi tarih (serbest metin, ör. "3. gün")</label><input type="text" id="ev_date" value="${escapeHtml(isEdit ? event.story_date : '')}"></div>
-        <div class="field"><label>Kronolojik sıra (sayı - zaman çizelgesinde sıralamak için)</label><input type="number" id="ev_order" value="${isEdit && event.story_order !== null ? event.story_order : ''}"></div>
+        <div class="field">
+          <label>Anlatı sırası <span style="font-weight:400;color:var(--text-muted);font-size:11.5px;">(olayın ROMANDA anlatıldığı sıra - takvim sırası değil. Otomatik hesap: bölüm no × 1000 + o bölümdeki kaçıncı olay; ör. Bölüm 2'nin ilk olayı = 2000)</span></label>
+          <input type="number" id="ev_order" value="${isEdit && event.story_order !== null ? event.story_order : ''}">
+        </div>
         <div class="field"><label>Katılan karakterler</label>
           <div class="entity-picker">
             ${characters.length ? characters.map(c => `<label><input type="checkbox" class="ev-char-check" value="${c.id}" ${selectedCharIds.includes(c.id) ? 'checked' : ''}> ${escapeHtml(c.name)}</label>`).join('') : '<div class="empty-state">Henüz karakter yok</div>'}
@@ -4517,4 +4560,27 @@ async function runBulkEventScan() {
   } catch (err) {
     box.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   } finally { btn.disabled = false; }
+}
+
+// story_order ham sayı olarak anlamsız görünüyordu ("· sıra 2000").
+// Formül: bölüm no × 1000 + o bölümdeki kaçıncı olay. Buradan geri çevirip
+// "Bölüm 2 · 1. olay" diye gösteriyoruz; formüle uymayan (elle girilmiş)
+// değerlerde ham sayıya düşülür.
+function formatStoryOrder(order) {
+  if (order === null || order === undefined) return '';
+  const chapter = Math.floor(order / 1000);
+  const idx = order % 1000;
+  const label = (chapter > 0 && idx < 100)
+    ? `Bölüm ${chapter} · ${idx + 1}. olay`
+    : `anlatı sırası ${order}`;
+  return ` <span style="color:var(--text-muted);font-weight:400;font-size:11.5px;" title="Olayın romanda anlatıldığı sıra (takvim sırası değil)">· ${label}</span>`;
+}
+
+// Tür başlıklarındaki "· N seçili" sayaçlarını tazeler.
+function updateTypeCounts() {
+  document.querySelectorAll('.type-selected-count').forEach(el => {
+    const t = el.dataset.type;
+    const n = document.querySelectorAll(`.entity-check[data-type="${t}"]:checked`).length;
+    el.textContent = n ? `· ${n} seçili` : '';
+  });
 }
