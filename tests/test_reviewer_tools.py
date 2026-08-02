@@ -358,7 +358,7 @@ def test_summary_includes_previous_chapter_and_structure(client, headers):
         mc.return_value.chat.completions.create.side_effect = fake_create
         summarize_chapter(db, chapter)
 
-    for baslik in ("OLAY:", "MEKAN:", "ATMOSFER:", "DUYGU:", "DEVAMLILIK:", "KAPANIŞ TONU:"):
+    for baslik in ("ZAMAN:", "OLAY:", "MEKAN:", "ATMOSFER:", "DUYGU:", "DEVAMLILIK:", "KAPANIŞ TONU:"):
         assert baslik in captured["system"], baslik
     assert "ÖNCEKİ BÖLÜMÜN ÖZETİ" in captured["user"]
     assert "Vicdan salonu açtı" in captured["user"]      # gerçek önceki özet geldi

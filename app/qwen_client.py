@@ -442,6 +442,17 @@ tüm paragrafları ve (varsa) BİR ÖNCEKİ bölümün özeti verilecek. Bu böl
 aşağıdaki başlıkları TEK TEK, kısa ve bilgi dolu şekilde doldur. Her başlık
 tek satır olsun, başlık adlarını AYNEN koru:
 
+ZAMAN: Sahnenin başladığı AN. Takvim tarihi ve saat kaçta başladığını yaz
+  (ör. "28 Haziran 2030, 21:05"). Metinde açık tarih/saat yoksa göreli
+  zamanı yaz ("önceki bölümden hemen sonra", "ertesi sabah"); hiçbir zaman
+  bilgisi yoksa "belirtilmemiş" yaz. Bu satır Zaman Çizelgesi'ni besler,
+  ASLA atlanmaz.
+  DİKKAT - şunları ZAMAN satırına KARIŞTIRMA:
+  * SÜRE ("10 dakika", "5 dk", "20 dakikalık sorgu") bir an değil, uzunluktur;
+    varsa ayrı yaz: "Süre: 10 dk".
+  * GERİ DÖNÜŞ / anımsanan geçmiş tarihler (hologram kayıtları, yıllar önceki
+    olaylar) sahnenin zamanı DEĞİLDİR; varsa ayrı yaz: "Geri dönüş: 2023 yangını".
+  Yani bu satır en fazla üç parçadan oluşur: sahnenin anı, süresi, geri dönüşler.
 OLAY: Kim, ne yaptı, ne oldu? Bölüm sonunda durum ne? (isimler açık, 1-3 cümle)
 MEKAN: Sahne nerede geçiyor? Mekanın bölümdeki işlevi/değişimi ne?
 ATMOSFER: Duyusal ve fiziksel hava - ışık, ses, koku, sıcaklık, kalabalık/boşluk;
