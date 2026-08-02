@@ -2392,8 +2392,26 @@ def build_current_chapter_layer(db: Session, novel_id: int, chapter_number: int 
     )
 
 
-ENTRY_CODE_SUFFIX = {"chapter": "BLM", "part": "KSM", "subtitle": "ABS"}
-ENTRY_CODE_RE = re.compile(r"\b(\d+(?:[-.]\d+)*)\s*(BLM|KSM|ABS)\b", re.IGNORECASE)
+# Atıf biçimleri: "1-1", "1.1", "bölüm 1-1", "1-1 numaralı", "1BLM" (eski ek
+# yazılsa bile numara alınır). Tek başına "1" gibi sayılar da yakalanır ama
+# yalnızca bir başlık/numara bağlamı varsa - bkz. _extract_entry_codes.
+ENTRY_CODE_RE = re.compile(
+    r"\b(\d+(?:[-.]\d+)+)\b"                                   # 1-1, 1.2.3
+    r"|\b(\d+)\s*(?:BLM|KSM|ABS)\b"                            # eski ekler
+    r"|\b(?:bölüm|kısım|alt ?başlık|girdi)\s+(\d+(?:[-.]\d+)*)\b"  # "bölüm 1"
+    r"|\b(\d+(?:[-.]\d+)*)\s*(?:numaralı|nolu|no'?lu)\b",       # "1 numaralı"
+    re.IGNORECASE,
+)
+
+
+def _extract_entry_codes(text: str) -> set:
+    """Metinden fihrist numarası adaylarını çıkarır ('1-1', '1.2' -> '1-2')."""
+    out = set()
+    for m in ENTRY_CODE_RE.finditer(text or ""):
+        raw = m.group(1) or m.group(2) or m.group(3) or m.group(4)
+        if raw:
+            out.add(raw.replace(".", "-"))
+    return out
 
 
 def build_referenced_entries_layer(db: Session, universe_id: int, current_novel_id: int, text: str, max_chars: int = 8000) -> str:
@@ -2403,7 +2421,7 @@ def build_referenced_entries_layer(db: Session, universe_id: int, current_novel_
     özetle" dendiğinde AI başlığı biliyor, metni bilmiyordu."""
     if not text:
         return ""
-    codes = {(m.group(1).replace(".", "-"), m.group(2).upper()) for m in ENTRY_CODE_RE.finditer(text)}
+    codes = _extract_entry_codes(text)
     if not codes:
         return ""
 
@@ -2412,31 +2430,34 @@ def build_referenced_entries_layer(db: Session, universe_id: int, current_novel_
     # KATI EŞLEŞME: kod TAM olarak tutmalı. Eskiden sadece numaraya bakan
     # gevşek bir yedek vardı ve "1KSM" istendiğinde 1 numaralı BÖLÜM'ü
     # getiriyordu - yanlış girdiyi sessizce vermek, hiç vermemekten kötü.
-    available = []   # (kod, sistem no)
+    available = []   # (numara, sistem no, başlık)
     for line in outline.split("\n"):
-        m = re.match(r"^([\d\-]+)\s+\[.+?\]\s+KOD:\s+(\S+)\s+·\s*(.*?)\s*\(sistem no:\s*(\d+)", line)
+        m = re.match(r"^([\d\-]+)\s+·\s*(.*?)\s*\[.*?\]\s*\(sistem no:\s*(\d+)", line)
         if m:
-            available.append((m.group(2).upper(), int(m.group(4)), m.group(1), m.group(3)))
+            available.append((m.group(1), int(m.group(3)), m.group(2)))
 
     wanted_numbers, unresolved = [], []
-    for want_display, want_kind in codes:
-        want_code = f"{want_display}{want_kind}"
-        hit = next((a for a in available if a[0] == want_code), None)
+    for want in codes:
+        hit = next((a for a in available if a[0] == want), None)
         if hit:
             wanted_numbers.append((hit[0], hit[1]))
         else:
-            unresolved.append((want_code, want_display))
+            unresolved.append((want, want))
 
     # Çözülemeyen kod varsa AI'ya AÇIKÇA söyle ve yakın alternatifleri ver -
     # böylece yanlış girdiyi anlatmak yerine "böyle bir kod yok, şunu mu
     # demek istedin" diyebilir.
     notes = []
-    for want_code, want_display in unresolved:
-        near = [a[0] for a in available if a[2] == want_display or a[2].startswith(want_display + "-")][:6]
+    for want_code, _ in unresolved:
+        # Alt girdileri öner: "1" istenip yoksa "1-1", "1-2" gibi
+        near = [f"{a[0]} ({a[2]})" for a in available if a[0].startswith(want_code + "-")][:6]
         if near:
-            notes.append(f"UYARI: '{want_code}' diye bir girdi YOK. Bu numarayla en yakın girdiler: {', '.join(near)}. Kullanıcıya hangisini kastettiğini sor, uydurma.")
+            notes.append(
+                f"NOT: '{want_code}' numaralı girdi doğrudan yok ama ALT GİRDİLERİ var: {', '.join(near)}. "
+                "Kullanıcıya hangisini kastettiğini sor ya da hepsini birlikte değerlendir."
+            )
         else:
-            notes.append(f"UYARI: '{want_code}' diye bir girdi YOK ve bu numarayla eşleşen başka girdi de bulunamadı.")
+            notes.append(f"UYARI: '{want_code}' numaralı bir girdi YOK. Uydurma; fihrist haritasından doğrusunu öner.")
 
     if not wanted_numbers:
         return ("=== ATIF YAPILAN GİRDİLER ===\n" + "\n".join(notes)) if notes else ""
@@ -2500,9 +2521,12 @@ def build_outline_layer(db: Session, universe_id: int, current_novel_id: int) ->
         return ""
 
     lines = [
-        "FİHRİST HARİTASI (kullanıcının ekranda gördüğü numaralar ve KISAYOL KODLARI):",
-        "Kullanıcı 'Kısım 1.1', '1-1', ya da kısayol koduyla ('1BLM', '1-2KSM') atıf yapabilir - "
-        "BLM=Bölüm, KSM=Kısım, ABS=Alt Başlık. Bu tabloyla eşleştir.",
+        "FİHRİST HARİTASI - romanın yapısı, kullanıcının ekranda gördüğü NUMARALARLA:",
+        "Kullanıcı bir girdiye NUMARASIYLA atıf yapar: '1', '1-1', '1-2-3' ya da '1.1'.",
+        "Numaralandırma hiyerarşiktir: '1-2', 1 numaralı girdinin İKİNCİ alt girdisidir.",
+        "Kullanıcının BAŞLIK METİNLERİ ('BİRİNCİ BÖLÜM', 'KISIM 2' gibi) kendi tercihidir -",
+        "hiyerarşiyi başlık adından değil, NUMARADAN ve seviyeden çöz. Bir girdi 'BÖLÜM'",
+        "diye adlandırılmış olsa bile üst seviyede olabilir; buna göre yorumla.",
     ]
     counters = [0, 0, 0, 0]
     container_id = part_id = subtitle_id = None
@@ -2541,16 +2565,18 @@ def build_outline_layer(db: Session, universe_id: int, current_novel_id: int) ->
             kind_tr = {"part": "KISIM", "subtitle": "ALT BAŞLIK"}.get(c.kind, "Bölüm")
             if is_container:
                 kind_tr = "ÜST BAŞLIK"
-            # KISAYOL KODU: kullanıcı "1BLM", "1-2KSM" diye atıf yapabilsin.
-            # BLM=Bölüm, KSM=Kısım, ABS=Alt Başlık. Kod, ekrandaki hiyerarşik
-            # numaradan türetilir - kullanıcı ne görüyorsa onu yazar.
-            code = display.replace("-", "-") + ENTRY_CODE_SUFFIX.get(
-                "part" if c.kind == "part" else ("subtitle" if c.kind == "subtitle" else "chapter"), "BLM"
-            )
+            # KISAYOL KODU = EKRANDAKİ NUMARA. Eskiden BLM/KSM/ABS ekleri
+            # vardı ama kullanıcının kendi adlandırması ("BİRİNCİ BÖLÜM" bir
+            # ÜST başlık, "KISIM"lar onun ALTINDA) sistemin varsayımıyla ters
+            # düşüyor ve yanlış girdi çözülüyordu. Numara benzersiz ve
+            # tartışmasız: kullanıcı ne görüyorsa onu yazar.
+            code = display
             title = (c.title or "").strip() or "(başlıksız)"
             para_count = len([p for p in c.paragraphs if (p.text or "").strip()])
             extra = f", {para_count} paragraf" if para_count else ", metin yok"
-            lines.append(f"{display} [{kind_tr}] KOD: {code} · {title} (sistem no: {c.number}{extra})")
+            seviye = f"seviye {level + 1}"
+            tur = "METİN BÖLÜMÜ" if (c.kind == "chapter" and not is_container) else "BAŞLIK"
+            lines.append(f"{code} · {title} [{seviye}, {tur}, {extra.lstrip(', ')}] (sistem no: {c.number})")
     return "\n".join(lines)
 
 

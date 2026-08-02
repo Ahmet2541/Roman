@@ -993,7 +993,7 @@ function renderChapterListDOM() {
       return `<div class="chapter-item ${isPart ? 'chapter-part-divider' : 'chapter-subtitle-divider'}" data-id="${c.id}" style="cursor:${item.hasChildren ? 'pointer' : 'default'};padding-left:${14 + indent}px;${isPart ? 'background:var(--paper-dim);' : ''}" ${item.hasChildren ? `title="${isCollapsed ? 'Genişletmek' : 'Daraltmak'} için tıkla"` : ''}>
         ${toggle}
         <div class="chapter-label-edit" data-id="${c.id}" style="flex:1;cursor:pointer;${isPart ? 'font-weight:700;letter-spacing:0.5px;text-transform:uppercase;font-size:12.5px;' : 'font-style:italic;font-size:12.5px;color:var(--text-muted);'}" title="${hasOrphanText ? 'Bu kısımda paragraf var - tıklayınca aç' : 'Bu kısımdaki ilk bölüme git'}">
-          <span style="opacity:0.6;font-weight:600;">${item.displayNumber}</span> ${escapeHtml(cleanTitle) || '<span style=\"opacity:0.5;\">(başlıksız)</span>'} <span style="font-size:9.5px;letter-spacing:0.3px;opacity:0.55;border:1px solid var(--border);border-radius:3px;padding:0 3px;font-style:normal;text-transform:none;" title="Girdi türü - ✎ ile değiştirilebilir. Kısım en üst seviyedir; Alt Başlık bir Kısım'ın altına girer.">${isPart ? 'KISIM' : 'ALT BAŞLIK'}</span>  <span class="entry-code" style="font-size:9.5px;color:var(--gold);font-weight:600;cursor:pointer;" title="AI kisayolu - sohbette bu kodu yazarsan bu girdinin ozeti ve metni baglama girer (tikla: kopyala)">${item.displayNumber}${isPart ? 'KSM' : 'ABS'}</span> ${countBadge} ${orphanBadge}
+          <span style="opacity:0.6;font-weight:600;">${item.displayNumber}</span> ${escapeHtml(cleanTitle) || '<span style=\"opacity:0.5;\">(başlıksız)</span>'} <span style="font-size:9.5px;letter-spacing:0.3px;opacity:0.55;border:1px solid var(--border);border-radius:3px;padding:0 3px;font-style:normal;text-transform:none;" title="Girdi türü - ✎ ile değiştirilebilir. Kısım en üst seviyedir; Alt Başlık bir Kısım'ın altına girer.">${isPart ? 'ÜST BAŞLIK' : 'ARA BAŞLIK'}</span>  <span class="entry-code" style="font-size:9.5px;color:var(--gold);font-weight:600;cursor:pointer;" title="AI atıf numarası - sohbette bu numarayı yazarsan (ör. 1-2) bu girdinin özeti ve metni bağlama girer (tıkla: kopyala)">#${item.displayNumber}</span> ${countBadge} ${orphanBadge}
         </div>
         ${bulkScanBtn}
         <button class="btn-icon-sm edit-chapter-btn" data-id="${c.id}" title="Başlığı ve TÜRÜ düzenle (Bölüm / Kısım / Alt Başlık)">✎</button>
@@ -1021,7 +1021,7 @@ function renderChapterListDOM() {
     return `<div class="chapter-item${currentChapter && String(currentChapter.id) === String(c.id) ? ' active' : ''}" data-id="${c.id}" style="padding-left:${14 + indent}px;" title="${escapeHtml(c.summary || 'Henüz özet yok')}">
       ${chToggle}
       <div style="flex:1;min-width:0;">
-        <span>${item.displayNumber}${cleanTitle ? ' — ' + escapeHtml(cleanTitle) : ''}${chCountBadge} <span class="entry-code" style="font-size:9.5px;color:var(--gold);font-weight:600;cursor:pointer;" title="AI kisayolu - sohbette bu kodu yazarsan bolumun ozeti ve metni baglama girer (tikla: kopyala)">${item.displayNumber}BLM</span></span>
+        <span>${item.displayNumber}${cleanTitle ? ' — ' + escapeHtml(cleanTitle) : ''}${chCountBadge} <span class="entry-code" style="font-size:9.5px;color:var(--gold);font-weight:600;cursor:pointer;" title="AI atıf numarası - sohbette bu numarayı yazarsan bu bölümün özeti ve metni bağlama girer (tıkla: kopyala)">#${item.displayNumber}</span></span>
         ${preview ? `<div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(preview)}</div>` : ''}
       </div>
       <button class="btn-icon-sm edit-chapter-btn" data-id="${c.id}" title="Başlığı ve TÜRÜ düzenle - Kısım/Alt Başlık yaparsan altındakiler ona bağlanır ve daraltılabilir olur">✎</button>
@@ -1061,7 +1061,7 @@ function renderChapterListDOM() {
   });
   listEl.querySelectorAll('.entry-code').forEach(el => el.addEventListener('click', (e) => {
     e.stopPropagation();
-    const code = el.textContent.trim();
+    const code = el.textContent.trim().replace(/^#/, '');
     navigator.clipboard?.writeText(code);
     const prev = el.textContent;
     el.textContent = '✓ kopyalandı';
@@ -1139,7 +1139,14 @@ function openChapterEditPrompt(id) {
   if (!c) return;
   const overlay = document.getElementById('createItemModalOverlay');
   if (!overlay) return;
-  const kindLabels = { chapter: 'Bölüm (metin içerir)', part: 'Kısım (üst başlık - altındakileri gruplar)', subtitle: 'Alt Başlık (ara başlık)' };
+  // Tür adları SEVİYE anlatımıyla: kullanıcının kendi başlık metinleri
+  // ("BİRİNCİ BÖLÜM", "KISIM 2") sistemin tür adlarıyla çakışıyordu.
+  // Artık soru "bu ne isimle anılıyor" değil, "hiyerarşide nerede duruyor".
+  const kindLabels = {
+    chapter: '📄 Metin bölümü (paragrafları burada tutulur)',
+    part: '📁 Üst başlık (en üst seviye - altındakileri gruplar)',
+    subtitle: '📂 Ara başlık (bir üst başlığın altına girer)',
+  };
   overlay.innerHTML = `
     <div class="panel" style="max-width:420px;width:92%;">
       <b>Fihrist Girdisini Düzenle</b>
@@ -1150,8 +1157,10 @@ function openChapterEditPrompt(id) {
           ${Object.entries(kindLabels).map(([k, label]) => `<option value="${k}" ${c.kind === k ? 'selected' : ''}>${label}</option>`).join('')}
         </select>
         <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px;">
-          Kısım/Alt Başlık yaptığında altındaki girdiler ona bağlanır ve
-          listede ▾ daraltma oku belirir. Bölümdeki paragraflar korunur.
+          Bu seçim <b>hiyerarşideki yeri</b> belirler, başlığın adını değil.
+          İstediğin adı yazabilirsin ("BİRİNCİ BÖLÜM" bir üst başlık olabilir).
+          Üst/Ara başlık yaptığında altındaki girdiler ona bağlanır, numarası
+          "1-1" gibi olur ve ▾ ile daraltılır. Paragraflar korunur.
         </div>
       </div>
       <div class="form-actions">
