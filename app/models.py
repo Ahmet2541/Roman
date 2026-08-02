@@ -176,8 +176,14 @@ class Event(Base):
     description = Column(EncryptedString, default="")
     notes = Column(EncryptedString, default="")
     place_id = Column(Integer, ForeignKey("places.id"), nullable=True)
-    story_date = Column(EncryptedString, default="")  # serbest metin, ör. "3. gün", "Mayıs 1950"
-    story_order = Column(Integer, nullable=True)  # kronolojik sıralama için sayı
+    story_date = Column(EncryptedString, default="")  # GÖRÜNEN metin, ör. "28 Haziran 2030 gece", "3. gün"
+    # GERÇEKLEŞME ZAMANI - sıralanabilir/filtrelenebilir biçim (ISO benzeri,
+    # sıfır dolgulu): "2030-06-28T21:00", "2023-02" ya da "2023". Serbest
+    # metin (story_date) okunur ama SIRALANAMAZ; kurguda zaman hatası
+    # olmaması için karşılaştırılabilir bir anahtar şart. Kısmi tarihler
+    # kabul edilir - sözlük sıralaması doğru kronolojiyi verir.
+    occurred_at = Column(EncryptedString, default="")
+    story_order = Column(Integer, nullable=True)  # ANLATI sırası (romanda kaçıncı sırada anlatıldığı)
     character_ids = Column(EncryptedString, default="")  # virgülle ayrılmış id listesi, ör. "1,3"
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -102,6 +102,17 @@ roman yazım destek uygulaması - backend + frontend.
   ironi: karakterin diyalogları sırra göre incelikle şekillenir ama sır
   yazılmaz. Meta = yazarın notu (asla gitmez); Gizli = dünyanın henüz
   açığa çıkmamış gerçeği (istenirse alt-metin olarak gider).
+- **Zaman Çizelgesi (yeniden tasarım)**: Olaylar artık iki ayrı zaman
+  eksenine sahip. `occurred_at` = GERÇEKLEŞME zamanı, sıralanabilir biçimde
+  ("2030-06-28T21:00" / "2023-02" / "2023"); kronoloji buna göre kurulur ve
+  kurgudaki zaman hataları ancak böyle görünür. `story_order` = ANLATI
+  sırası (romanda kaçıncı sırada anlatıldığı). Liste iki eksene göre de
+  sıralanabilir, tarihe göre süzülebilir ("2030" yazınca o yılın olayları),
+  "sadece tarihi eksik olanlar" filtresi ve üstte "N olayın gerçekleşme
+  zamanı yok" sayacı var. Tarihi olmayan olayda "🕐 AI ile tarih bul"
+  düğmesi çıkar: anlatıldığı bölümün ÖZETİNDEKİ ZAMAN satırından ve geri
+  dönüş bilgilerinden tarihi çıkarır, gerekçesiyle birlikte önerir -
+  onaysız kaydetmez; istenirse Düzenle ile elle girilir.
 - **Kayda özel kurallar**: bir kural bir Kişi/Mekan/Nesne'ye bağlanabilir
   ("Vicdan yargıç değil" -> Vicdan). Bağlı kural SABİT katmandan çıkar ve
   SADECE o kayıt seçili varlıklardayken "Bu kayda ÖZEL kurallar (İHLAL

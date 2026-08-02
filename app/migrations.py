@@ -42,6 +42,7 @@ def run_startup_migrations(engine):
         _add_style_refrain_column(engine)
         _add_rule_scope_columns(engine)
         _add_matrix_row_instructions(engine)
+        _add_event_occurred_at(engine)
     except Exception:
         logger.exception("Şema göçü sırasında beklenmeyen bir hata oluştu - uygulama yine de başlatılıyor")
 
@@ -452,3 +453,15 @@ def _add_matrix_row_instructions(engine):
         with engine.begin() as conn:
             logger.info("Göç: matrix_rows.instructions ekleniyor")
             conn.execute(text("ALTER TABLE matrix_rows ADD COLUMN instructions TEXT"))
+
+
+def _add_event_occurred_at(engine):
+    """events.occurred_at (sıralanabilir gerçekleşme zamanı) - idempotent."""
+    inspector = inspect(engine)
+    if "events" not in inspector.get_table_names():
+        return
+    cols = {c["name"] for c in inspector.get_columns("events")}
+    if "occurred_at" not in cols:
+        with engine.begin() as conn:
+            logger.info("Göç: events.occurred_at ekleniyor")
+            conn.execute(text("ALTER TABLE events ADD COLUMN occurred_at TEXT"))

@@ -191,6 +191,8 @@ class EventCreate(BaseModel):
     notes: str = ""
     place_id: Optional[int] = None
     story_date: str = ""
+    # Sıralanabilir gerçekleşme zamanı: "2030-06-28T21:00" / "2023-02" / "2023"
+    occurred_at: str = ""
     story_order: Optional[int] = None
     character_ids: List[int] = []
 
@@ -203,6 +205,7 @@ class EventUpdate(BaseModel):
     story_date: Optional[str] = None
     story_order: Optional[int] = None
     character_ids: Optional[List[int]] = None
+    occurred_at: Optional[str] = None
 
 
 class EventOut(BaseModel):
@@ -223,6 +226,7 @@ class EventOut(BaseModel):
     # kitapları kapsar).
     source_novel_id: Optional[int] = None
     source_novel_name: Optional[str] = None
+    occurred_at: str = ""
 
 
 class EventConflict(BaseModel):
@@ -875,3 +879,10 @@ class StylePatternCandidate(BaseModel):
 
 class StylePatternCandidateList(BaseModel):
     candidates: List[StylePatternCandidate] = []
+
+
+class EventDateSuggestion(BaseModel):
+    """AI'nın önerdiği gerçekleşme zamanı - KAYDEDİLMEZ, onaya sunulur."""
+    occurred_at: str = ""
+    story_date: str = ""
+    reasoning: str = ""

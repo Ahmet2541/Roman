@@ -385,3 +385,57 @@ def test_summary_first_chapter_has_no_previous_block(client, headers):
         mc.return_value.chat.completions.create.side_effect = fake_create
         summarize_chapter(db, chapter)
     assert "ÖNCEKİ BÖLÜMÜN ÖZETİ" not in captured["user"]
+
+
+# ---- Olay gerçekleşme zamanı (kronoloji) -----------------------------------
+
+def test_event_occurred_at_sorting_and_filter(client, headers):
+    """Kronoloji occurred_at'e göre kurulur; tarihi olmayanlar SONA düşer
+    ki eksikler göze batsın. Anlatı sırası ayrı bir eksendir."""
+    payloads = [
+        {"name": "Süper bilgisayar aktif", "occurred_at": "2030-06-28T21:00", "story_order": 3000},
+        {"name": "Bina çöküşü", "occurred_at": "2023", "story_order": 3001},
+        {"name": "Tarihsiz olay", "story_order": 2000},
+        {"name": "Ayna kapatıldı", "occurred_at": "2023-02", "story_order": 3002},
+    ]
+    for p in payloads:
+        r = client.post("/events/", json=p, headers=headers)
+        assert r.status_code == 201, r.text
+
+    kronolojik = [e["name"] for e in client.get("/events/?sort=occurred", headers=headers).json()]
+    assert kronolojik[:3] == ["Bina çöküşü", "Ayna kapatıldı", "Süper bilgisayar aktif"]
+    assert kronolojik[-1] == "Tarihsiz olay"   # tarihi olmayan sona
+
+    anlatı = [e["name"] for e in client.get("/events/?sort=story", headers=headers).json()]
+    assert anlatı[0] == "Tarihsiz olay"        # story_order 2000 en küçük
+
+    # Güncelleme ile tarih eklenebilmeli
+    ev = next(e for e in client.get("/events/", headers=headers).json() if e["name"] == "Tarihsiz olay")
+    r = client.put(f"/events/{ev['id']}", json={"occurred_at": "2029-12-31"}, headers=headers)
+    assert r.status_code == 200 and r.json()["occurred_at"] == "2029-12-31"
+    kronolojik = [e["name"] for e in client.get("/events/?sort=occurred", headers=headers).json()]
+    assert kronolojik[-1] == "Süper bilgisayar aktif"  # artık tarihsiz yok
+
+
+def test_infer_event_date_uses_chapter_summary(client, headers):
+    """AI tarih çıkarımı, olayın anlatıldığı bölümün ÖZETİNİ görmeli."""
+    ch = _chapter_with_text(client, headers, ["Metin."], number=2)
+    client.put(f"/chapters/{ch['id']}", json={
+        "summary": "ZAMAN: 28 Haziran 2030, 21:05. Geri dönüş: 2023 depremi (yedi yıl önce).",
+    }, headers=headers)
+    ev = client.post("/events/", json={"name": "Bina çöküşü", "story_order": 2000}, headers=headers).json()
+
+    captured = {}
+    def fake_create(**kwargs):
+        captured["user"] = kwargs["messages"][1]["content"]
+        return _fake_qwen({"occurred_at": "2023", "story_date": "yedi yıl önce, 2023 depremi", "reasoning": "Özetteki geri dönüş."})
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.side_effect = fake_create
+        r = client.post(f"/events/{ev['id']}/infer-date", headers=headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["occurred_at"] == "2023"
+    assert "2023 depremi" in data["story_date"]
+    assert "ZAMAN: 28 Haziran 2030" in captured["user"]  # bölüm özeti prompt'a girdi
+    # Öneri KAYDEDİLMEZ
+    assert client.get("/events/", headers=headers).json()[0]["occurred_at"] == ""

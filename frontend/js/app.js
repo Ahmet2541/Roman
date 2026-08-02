@@ -2799,6 +2799,19 @@ async function renderEventsView() {
       <button class="btn" id="checkConflictsBtn">Çakışma kontrolü yap</button>
       <button class="btn btn-primary" id="addEventBtn">+ Yeni Olay</button>
     </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0 10px;">
+      <label style="font-size:12.5px;">Sırala:
+        <select id="eventSortSelect" style="max-width:220px;">
+          <option value="occurred">Gerçekleşme zamanı (kronoloji)</option>
+          <option value="story">Anlatı sırası (romanda)</option>
+        </select>
+      </label>
+      <input type="text" id="eventDateFilter" placeholder="Tarihe göre süz: 2030 / 2030-06 / 2023" style="max-width:260px;">
+      <label style="font-size:12.5px;display:flex;align-items:center;gap:4px;">
+        <input type="checkbox" id="eventMissingOnly"> Sadece tarihi eksik olanlar
+      </label>
+      <span id="eventDateStats" style="font-size:12px;color:var(--text-muted);"></span>
+    </div>
     <div id="conflictsBox"></div>
     <div id="bulkEventScanResult"></div>
     <div class="entity-list" id="eventList"><div class="empty-state">Yükleniyor…</div></div>
@@ -2807,31 +2820,61 @@ async function renderEventsView() {
   document.getElementById('addEventBtn').addEventListener('click', () => showEventForm(null));
   document.getElementById('checkConflictsBtn').addEventListener('click', checkEventConflicts);
   document.getElementById('scanAllEventsBtn').addEventListener('click', runBulkEventScan);
+  ['eventSortSelect', 'eventDateFilter', 'eventMissingOnly'].forEach(id =>
+    document.getElementById(id).addEventListener('input', loadEventList));
   await loadEventList();
 }
 
 async function loadEventList() {
   const listEl = document.getElementById('eventList');
   try {
-    const events = await api.get('/events/');
+    const sort = document.getElementById('eventSortSelect')?.value || 'occurred';
+    const dateFilter = (document.getElementById('eventDateFilter')?.value || '').trim();
+    const missingOnly = document.getElementById('eventMissingOnly')?.checked;
+    let events = await api.get(`/events/?sort=${sort}`);
+
+    // Tarih eksiği istatistiği: kurguda zaman hatası olmaması için önce
+    // KAÇ olayın tarihsiz olduğu görünür olmalı.
+    const missingCount = events.filter(e => !(e.occurred_at || '').trim()).length;
+    const stats = document.getElementById('eventDateStats');
+    if (stats) {
+      stats.innerHTML = missingCount
+        ? `<span style="color:var(--danger);">${missingCount} olayın gerçekleşme zamanı yok</span> · toplam ${events.length}`
+        : `Tüm olayların zamanı tanımlı · toplam ${events.length}`;
+    }
+    if (missingOnly) events = events.filter(e => !(e.occurred_at || '').trim());
+    if (dateFilter) events = events.filter(e => (e.occurred_at || '').startsWith(dateFilter));
+
     if (!events.length) {
-      listEl.innerHTML = `<div class="empty-state">Henüz olay yok.</div>`;
+      listEl.innerHTML = `<div class="empty-state">${missingOnly || dateFilter ? 'Bu süzgece uyan olay yok.' : 'Henüz olay yok.'}</div>`;
       return;
     }
-    listEl.innerHTML = events.map(ev => `
+    listEl.innerHTML = events.map(ev => {
+      const hasDate = (ev.occurred_at || '').trim();
+      const dateChip = hasDate
+        ? `<span style="font-size:11.5px;background:var(--paper-dim);border:1px solid var(--border);border-radius:4px;padding:1px 6px;" title="Gerçekleşme zamanı (sıralama bu değere göre)">🕐 ${escapeHtml(ev.occurred_at)}</span>`
+        : `<span style="font-size:11.5px;color:var(--danger);border:1px solid var(--danger);border-radius:4px;padding:1px 6px;" title="Bu olay kronolojide sıralanamaz">🕐 tarih yok</span>`;
+      return `
       <div class="entity-row" style="flex-wrap:wrap;">
         <div>
           <div class="name">${escapeHtml(ev.name)}${formatStoryOrder(ev.story_order)}</div>
-          <div class="desc">${ev.story_date ? escapeHtml(ev.story_date) + ' · ' : ''}${ev.place_name ? '📍 ' + escapeHtml(ev.place_name) : ''}${ev.character_names.length ? ' · ' + ev.character_names.map(escapeHtml).join(', ') : ''}</div>
+          <div class="desc" style="margin:3px 0;">${dateChip}${ev.story_date ? ' <span style="font-size:12px;">' + escapeHtml(ev.story_date) + '</span>' : ''}</div>
+          <div class="desc">${ev.place_name ? '📍 ' + escapeHtml(ev.place_name) : ''}${ev.character_names.length ? (ev.place_name ? ' · ' : '') + ev.character_names.map(escapeHtml).join(', ') : ''}</div>
           <div class="desc">${escapeHtml(truncate(ev.description, 100))}</div>
         </div>
         <div class="actions">
+          ${hasDate ? '' : `<button class="btn btn-sm infer-date-btn" data-id="${ev.id}" title="Anlatıldığı bölümün özetinden gerçekleşme zamanını çıkar">🕐 AI ile tarih bul</button>`}
           <button class="btn btn-sm edit-event-btn" data-id="${ev.id}">Düzenle</button>
           <button class="btn btn-sm progression-btn" data-id="${ev.id}">Gelişim</button>
           <button class="btn btn-sm btn-danger del-event-btn" data-id="${ev.id}">Sil</button>
         </div>
+        <div class="date-suggest-panel" data-id="${ev.id}" style="display:none;width:100%;margin-top:6px;"></div>
         <div class="progression-panel" data-id="${ev.id}" style="display:none;width:100%;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);"></div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
+
+    listEl.querySelectorAll('.infer-date-btn').forEach(btn =>
+      btn.addEventListener('click', () => runInferEventDate(parseInt(btn.dataset.id, 10))));
 
     listEl.querySelectorAll('.progression-btn').forEach(btn => {
       btn.addEventListener('click', () => toggleProgressionPanel('event', btn.dataset.id));
@@ -2877,7 +2920,11 @@ async function showEventForm(event) {
         </div>
         <div class="field"><label>Hikaye içi tarih (serbest metin, ör. "3. gün")</label><input type="text" id="ev_date" value="${escapeHtml(isEdit ? event.story_date : '')}"></div>
         <div class="field">
-          <label>Anlatı sırası <span style="font-weight:400;color:var(--text-muted);font-size:11.5px;">(olayın ROMANDA anlatıldığı sıra - takvim sırası değil. Otomatik hesap: bölüm no × 1000 + o bölümdeki kaçıncı olay; ör. Bölüm 2'nin ilk olayı = 2000)</span></label>
+          <label>🕐 Gerçekleşme zamanı <span style="font-weight:400;color:var(--text-muted);font-size:11.5px;">(SIRALANABİLİR biçim - kronoloji buna göre kurulur. Tam: 2030-06-28T21:00 · Gün: 2030-06-28 · Ay: 2023-02 · Yıl: 2023)</span></label>
+          <input type="text" id="ev_occurred" placeholder="2030-06-28T21:00" value="${isEdit ? escapeHtml(event.occurred_at || '') : ''}">
+        </div>
+        <div class="field">
+          <label>Anlatı sırası <span style="font-weight:400;color:var(--text-muted);font-size:11.5px;">(olayın ROMANDA anlatıldığı sıra - takvim sırası değil. Otomatik: bölüm no × 1000 + o bölümdeki kaçıncı olay)</span></label>
           <input type="number" id="ev_order" value="${isEdit && event.story_order !== null ? event.story_order : ''}">
         </div>
         <div class="field"><label>Katılan karakterler</label>
@@ -2905,6 +2952,7 @@ async function showEventForm(event) {
         place_id: placeVal ? parseInt(placeVal, 10) : null,
         story_date: document.getElementById('ev_date').value,
         story_order: orderVal !== '' ? parseInt(orderVal, 10) : null,
+        occurred_at: document.getElementById('ev_occurred').value.trim(),
         character_ids: Array.from(document.querySelectorAll('.ev-char-check:checked')).map(cb => parseInt(cb.value, 10)),
       };
       try {
@@ -4589,4 +4637,47 @@ function updateTypeCounts() {
     const n = document.querySelectorAll(`.entity-check[data-type="${t}"]:checked`).length;
     el.textContent = n ? `· ${n} seçili` : '';
   });
+}
+
+// AI ile olay tarihi çıkarımı: anlatıldığı bölümün özetindeki ZAMAN satırı
+// ve geri dönüş bilgilerinden hesaplar. Öneri ONAYSIZ kaydedilmez; gerekçe
+// de gösterilir ki uydurma bir tarihi fark edebilesin.
+async function runInferEventDate(eventId) {
+  const panel = document.querySelector(`.date-suggest-panel[data-id="${eventId}"]`);
+  if (!panel) return;
+  panel.style.display = '';
+  panel.innerHTML = '<div class="empty-state">Bölüm özetinden zaman çıkarılıyor…</div>';
+  try {
+    const s = await api.post(`/events/${eventId}/infer-date`, {});
+    if (!s.occurred_at) {
+      panel.innerHTML = `
+        <div class="panel" style="border-left:3px solid var(--danger);">
+          <b style="font-size:12.5px;">Tarih çıkarılamadı</b>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">${escapeHtml(s.reasoning || 'Yeterli zaman bilgisi yok.')}</div>
+          <div style="font-size:12px;margin-top:6px;">Olayın anlatıldığı bölümün özetine ZAMAN bilgisi ekleyip tekrar dene, ya da <b>Düzenle</b> ile elle gir.</div>
+        </div>`;
+      return;
+    }
+    panel.innerHTML = `
+      <div class="panel" style="border-left:3px solid var(--gold);">
+        <b style="font-size:12.5px;">Önerilen zaman: ${escapeHtml(s.occurred_at)}</b>
+        ${s.story_date ? `<div style="font-size:12.5px;">Okunur hali: ${escapeHtml(s.story_date)}</div>` : ''}
+        ${s.reasoning ? `<div style="font-size:12px;color:var(--text-muted);margin-top:3px;">Gerekçe: ${escapeHtml(s.reasoning)}</div>` : ''}
+        <div class="form-actions">
+          <button class="btn btn-sm btn-primary" id="acceptDate_${eventId}">Kaydet</button>
+          <button class="btn btn-sm" id="rejectDate_${eventId}">Vazgeç</button>
+        </div>
+      </div>`;
+    document.getElementById(`rejectDate_${eventId}`).addEventListener('click', () => {
+      panel.style.display = 'none'; panel.innerHTML = '';
+    });
+    document.getElementById(`acceptDate_${eventId}`).addEventListener('click', async () => {
+      try {
+        await api.put(`/events/${eventId}`, { occurred_at: s.occurred_at, story_date: s.story_date || undefined });
+        await loadEventList();
+      } catch (err) { alert(err.message); }
+    });
+  } catch (err) {
+    panel.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
 }

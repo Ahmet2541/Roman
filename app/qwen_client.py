@@ -2233,3 +2233,75 @@ def suggest_style_patterns(db: Session, universe_id: int, max_chars: int = 12000
             "sample_hits": hits,
         })
     return out[:5]
+
+
+# ---------------------------------------------------------------------------
+# OLAY TARİHİ ÇIKARIMI: bir olayın GERÇEKLEŞME zamanını, anlatıldığı bölümün
+# özeti (ZAMAN satırı) ve olay açıklamasından çıkarır. Amaç kurguda zaman
+# hatası kalmaması: tarihi olmayan olay çizelgede sıralanamaz.
+# ---------------------------------------------------------------------------
+
+EVENT_DATE_SYSTEM_PROMPT = """Sen bir roman editörüsün. Sana bir olayın adı,
+açıklaması ve (varsa) anlatıldığı bölümün özeti verilecek. Görevin bu olayın
+KURGU İÇİNDE ne zaman gerçekleştiğini belirlemek.
+
+Çıkarım kuralları:
+- Bölüm özetindeki "ZAMAN:" satırı sahnenin takvim anıdır. Olay o sahnede
+  geçiyorsa tarih odur.
+- Özetteki "Geri dönüş" tarihleri, geçmişte yaşanmış olaylar içindir
+  ("yedi yıl önce", "2023 depremi"). Olay bir geri dönüşse O tarihi kullan.
+- Göreli ifadeleri hesapla: sahne 2030'da geçiyorsa "yedi yıl önce" = 2023.
+- Emin olamadığın kısmı BOŞ bırak - yıl biliniyorsa sadece yılı ver.
+  Uydurma tarih verme.
+
+occurred_at biçimi (sıfır dolgulu, sıralanabilir olmalı):
+  tam: "2030-06-28T21:00"  · gün: "2030-06-28"  · ay: "2023-02"  · yıl: "2023"
+story_date: insanın okuyacağı serbest metin ("28 Haziran 2030 gece",
+  "yedi yıl önce, 2023 depremi sırasında").
+
+Yanıtın SADECE şu JSON olsun:
+{"occurred_at": "...", "story_date": "...", "reasoning": "tek cümle gerekçe"}
+Hiçbir zaman bilgisi çıkaramıyorsan occurred_at ve story_date boş olsun,
+reasoning'de nedenini yaz."""
+
+
+def infer_event_date(db: Session, event) -> dict:
+    """Olayın gerçekleşme zamanını çıkarır. Kaydetmez - öneri döner."""
+    universe_id = event.universe_id
+    # Olayın anlatıldığı bölümü story_order'dan bul (bölüm no × 1000 + sıra)
+    chapter_summary = ""
+    if event.story_order:
+        chapter_number = event.story_order // 1000
+        novels = db.query(models.Novel).filter(models.Novel.universe_id == universe_id).all()
+        for novel in novels:
+            ch = (
+                db.query(models.Chapter)
+                .filter(models.Chapter.novel_id == novel.id, models.Chapter.number == chapter_number)
+                .first()
+            )
+            if ch and (ch.summary or "").strip():
+                chapter_summary = f"ANLATILDIĞI BÖLÜM {ch.number} ÖZETİ:\n{ch.summary.strip()}\n\n"
+                break
+
+    user_message = (
+        f"{chapter_summary}OLAY: {event.name}\n"
+        f"AÇIKLAMA: {event.description or '(yok)'}\n"
+        f"MEVCUT SERBEST TARİH METNİ: {event.story_date or '(yok)'}"
+    )
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": EVENT_DATE_SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ],
+    )
+    data = _parse_json_lenient(response.choices[0].message.content)
+    if not isinstance(data, dict):
+        logger.warning("Olay tarihi çıkarımı: yanıt ayrıştırılamadı (olay id=%s)", event.id)
+        return {"occurred_at": "", "story_date": "", "reasoning": "Model yanıtı okunamadı."}
+    return {
+        "occurred_at": (data.get("occurred_at") or "").strip()[:40],
+        "story_date": (data.get("story_date") or "").strip()[:200],
+        "reasoning": (data.get("reasoning") or "").strip()[:300],
+    }
