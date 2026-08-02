@@ -1492,6 +1492,7 @@ function renderReader(chapter) {
     <div id="chapterHealthStrip" style="margin-top:8px;"></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
       <button class="btn btn-sm" id="readerTestBtn" title="Metni okur gözüyle tarar: tempo ölümü, bilgi bocası, klişe, anlaşılmaz cümle, gerilim kırılması. Sadece uyarır, metne dokunmaz.">🎯 Okur Testi</button>
+      <button class="btn btn-sm" id="timelineTopBtn" title="Özetteki ZAMAN satırından olayları çıkarıp Zaman Çizelgesi'ne öneri getirir">🕐 Zaman Çizelgesi</button>
       <button class="btn btn-sm" id="finishChapterBtn" title="Özet + Roman Haritası taramasını birlikte çalıştırır - bölümü AI'nın hafızasına işler">✅ Bölümü Kapat</button>
     </div>
     <div id="readerTestResult"></div>
@@ -1648,6 +1649,13 @@ function renderReader(chapter) {
 
   renderChapterHealthStrip(chapter);
   document.getElementById('readerTestBtn').addEventListener('click', () => runReaderTest(chapter));
+  document.getElementById('timelineTopBtn').addEventListener('click', () => {
+    if (!(currentChapter?.summary || chapter.summary || '').trim()) {
+      alert('Önce özet oluştur - zaman bilgisi özetin ZAMAN satırından okunuyor.');
+      return;
+    }
+    runSuggestEvents(chapter, 'readerTestResult');
+  });
   document.getElementById('finishChapterBtn').addEventListener('click', () => finishChapter(chapter));
   // Özette tarih var mı? Zaman çizelgesi bölüm metnindeki tarih/saatten
   // besleniyor; özet tarihsizse çizelge boş kalır ve kronoloji kopar.
@@ -2741,15 +2749,18 @@ async function renderEventsView() {
   main().innerHTML = `
     <h1 class="view-title">Olaylar / Zaman Çizelgesi</h1>
     <div class="toolbar">
+      <button class="btn" id="scanAllEventsBtn" title="Özeti olan TÜM bölümleri tarayıp zaman çizelgesine eklenecek olayları önerir">🕐 Bölümlerden Güncelle</button>
       <button class="btn" id="checkConflictsBtn">Çakışma kontrolü yap</button>
       <button class="btn btn-primary" id="addEventBtn">+ Yeni Olay</button>
     </div>
     <div id="conflictsBox"></div>
+    <div id="bulkEventScanResult"></div>
     <div class="entity-list" id="eventList"><div class="empty-state">Yükleniyor…</div></div>
     <div id="eventFormContainer"></div>`;
 
   document.getElementById('addEventBtn').addEventListener('click', () => showEventForm(null));
   document.getElementById('checkConflictsBtn').addEventListener('click', checkEventConflicts);
+  document.getElementById('scanAllEventsBtn').addEventListener('click', runBulkEventScan);
   await loadEventList();
 }
 
@@ -4472,4 +4483,30 @@ function renderSummaryDateWarning(chapter) {
         ? 'Bölüm metninde tarih var ama özete yansımamış - özeti yeniden ürettirir ya da elle eklersen Zaman Çizelgesi doğru kurulur.'
         : 'Bölüm metninde de tarih/saat yok. Zaman Çizelgesi bu bölümü konumlandıramaz; sahnenin ne zaman geçtiğini metne ya da özete ekle.'}
     </div>`;
+}
+
+// Olaylar menüsünden TOPLU tarama: özeti olan tüm bölümleri tek seferde
+// tarar. Özetsiz bölümler atlanır - zaman bilgisi özetin ZAMAN satırından
+// okunuyor, özetsiz bölüm çizelgeye yanlış tarih sokar.
+async function runBulkEventScan() {
+  const box = document.getElementById('bulkEventScanResult');
+  const btn = document.getElementById('scanAllEventsBtn');
+  box.innerHTML = '<div class="empty-state">Bölümler taranıyor…</div>';
+  btn.disabled = true;
+  try {
+    const chapters = (await api.get('/chapters/')).filter(c => c.kind === 'chapter' && (c.summary || '').trim());
+    if (!chapters.length) {
+      box.innerHTML = '<div style="font-size:12.5px;color:var(--danger);padding:6px 0;">Özeti olan bölüm yok. Önce bölümlerin özetini oluştur (Roman menüsü → bölüm → "AI ile özet oluştur").</div>';
+      return;
+    }
+    const suggestions = await api.post('/chapters/suggest-events-bulk', { chapter_ids: chapters.map(c => c.id) });
+    if (!suggestions.length) {
+      box.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0;">${chapters.length} bölüm tarandı - eklenecek yeni olay bulunamadı.</div>`;
+      return;
+    }
+    box.innerHTML = `<div style="font-size:12px;color:var(--text-muted);margin:6px 0;">${chapters.length} bölüm tarandı, ${suggestions.length} olay önerisi:</div>`;
+    renderEventSuggestionsInto(box, suggestions);
+  } catch (err) {
+    box.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  } finally { btn.disabled = false; }
 }
