@@ -397,7 +397,8 @@ def build_plan_layer(db: Session, novel_id: int, chapter_number: int | None, ins
 def build_context(
     db: Session, novel_id: int, universe_id: int, selected_entities: list,
     chapter_number: int | None = None, instruction_text: str = "",
-    include_hidden: bool = False,
+    include_hidden: bool = False, include_chapter_text: bool = False,
+    text_scope: str = "chapter",
 ) -> str:
     """chapter_number verilirse (o an üzerinde çalışılan bölüm), fihrist
     katmanında o bölüm dışlanır - bir bölümün kendi özetini kendi context'i
@@ -410,6 +411,20 @@ def build_context(
     kitapları kapsıyor."""
     fixed = build_fixed_layer(db, universe_id, instruction_text=instruction_text)
     index = build_index_layer(db, universe_id, novel_id, exclude_chapter_number=chapter_number)
+    # Fihrist HARİTASI: kullanıcının gördüğü numaralar ("Kısım 1.1") -
+    # atıfları çözebilmek için. Özetlerden bağımsız, ucuz bir liste.
+    outline = build_outline_layer(db, universe_id, novel_id)
+    # Sohbet modunda çalışılan bölümün METNİ de gider (include_chapter_text);
+    # talimat modunda metin zaten existing_text ile gidiyor, tekrarlamayalım.
+    # Kapsam: "none" (metin gitmesin - kısa sorular, ucuz),
+    # "chapter" (varsayılan: açık bölümün metni),
+    # "novel" (tüm kitap - tutarlılık soruları, pahalı).
+    if not include_chapter_text or text_scope == "none":
+        chapter_text = ""
+    elif text_scope == "novel":
+        chapter_text = build_whole_novel_layer(db, novel_id)
+    else:
+        chapter_text = build_current_chapter_layer(db, novel_id, chapter_number)
     style = build_style_layer(db, universe_id)
     # Üslup uyarıları: son üslup taramasının ÖNBELLEĞİNDEN, sadece eşiği
     # aşan yazım tiklerini "bundan kaçın" olarak ekler. build_style_layer
@@ -418,7 +433,7 @@ def build_context(
     style_warnings = build_style_warning_layer(db, universe_id)
     plan = build_plan_layer(db, novel_id, chapter_number, instruction_text=instruction_text)
     dynamic = build_dynamic_layer(db, universe_id, selected_entities, instruction_text=instruction_text, include_hidden=include_hidden)
-    return "\n\n".join(part for part in [fixed, index, style, style_warnings, plan, dynamic] if part)
+    return "\n\n".join(part for part in [fixed, index, outline, style, style_warnings, plan, chapter_text, dynamic] if part)
 
 
 # ---------------------------------------------------------------------------
@@ -2305,3 +2320,219 @@ def infer_event_date(db: Session, event) -> dict:
         "story_date": (data.get("story_date") or "").strip()[:200],
         "reasoning": (data.get("reasoning") or "").strip()[:300],
     }
+
+
+# ---------------------------------------------------------------------------
+# ÜZERİNDE ÇALIŞILAN BÖLÜMÜN METNİ (sohbet modu için).
+# Neden gerekli: fihrist katmanı, çalışılan bölümün ÖZETİNİ bilerek dışlar
+# (assist modunda metin zaten existing_text ile gidiyordu). Ama SOHBET
+# modunda hiçbir yerden bölüm metni gitmiyordu - AI "yazdığın metni biliyor
+# muyum?" diye soruyor, "şu paragrafı tartışalım" denince bilmiyordu.
+# Bu katman o boşluğu kapatır: bölümün kendi metni, P numaralarıyla.
+# ---------------------------------------------------------------------------
+
+def build_whole_novel_layer(db: Session, novel_id: int, max_chars: int = 60000) -> str:
+    """TÜM KİTABIN metni (kapsam='novel' seçildiğinde). Tutarlılık sorusu,
+    "romanın tamamında X kaç kez geçiyor", "sonu başına uyuyor mu" gibi
+    sorular ancak bütün metinle cevaplanır. Pahalıdır - bu yüzden asla
+    varsayılan değil, kullanıcının bilerek seçtiği bir moddur. Bütçe
+    aşılırsa bölüm başına eşit pay verilerek kırpılır ki roman TAMAMI
+    temsil edilsin (baştan kesip sonu hiç görmemek daha kötü olurdu)."""
+    chapters = (
+        db.query(models.Chapter)
+        .filter(models.Chapter.novel_id == novel_id, models.Chapter.kind == "chapter")
+        .order_by(models.Chapter.number)
+        .all()
+    )
+    filled = [(c, "\n".join(p.text.strip() for p in c.paragraphs if (p.text or "").strip())) for c in chapters]
+    filled = [(c, t) for c, t in filled if t]
+    if not filled:
+        return ""
+    per_chapter = max(800, max_chars // len(filled))
+    blocks = []
+    for c, text in filled:
+        title_part = f" - {c.title}" if c.title else ""
+        if len(text) > per_chapter:
+            text = text[:per_chapter] + f"\n[... Bölüm {c.number} kırpıldı ...]"
+        blocks.append(f"--- Bölüm {c.number}{title_part} ---\n{text}")
+    return (
+        "=== KİTABIN TAM METNİ (tutarlılık ve bütünlük soruları için) ===\n"
+        + "\n\n".join(blocks)
+    )
+
+
+def build_current_chapter_layer(db: Session, novel_id: int, chapter_number: int | None, max_chars: int = 12000) -> str:
+    if chapter_number is None:
+        return ""
+    chapter = (
+        db.query(models.Chapter)
+        .filter(models.Chapter.novel_id == novel_id, models.Chapter.number == chapter_number)
+        .first()
+    )
+    if not chapter:
+        return ""
+    paragraphs = [p for p in chapter.paragraphs if (p.text or "").strip()]
+    if not paragraphs:
+        return ""
+    title_part = f" - {chapter.title}" if chapter.title else ""
+    body_lines, used = [], 0
+    for p in paragraphs:
+        line = f"[P{p.number}] {p.text.strip()}"
+        if used + len(line) > max_chars:
+            body_lines.append(f"[... bölümün kalanı kırpıldı, toplam {len(paragraphs)} paragraf ...]")
+            break
+        body_lines.append(line)
+        used += len(line)
+    return (
+        f"=== ÜZERİNDE ÇALIŞILAN BÖLÜMÜN METNİ (Bölüm {chapter.number}{title_part}) ===\n"
+        "Kullanıcı 'bu bölüm', 'şu paragraf', 'P12' derken bunu kastediyor:\n"
+        + "\n".join(body_lines)
+    )
+
+
+def build_outline_layer(db: Session, universe_id: int, current_novel_id: int) -> str:
+    """FİHRİST HARİTASI: Kısım/Alt Başlık/Bölüm ağacı, kullanıcının ekranda
+    gördüğü NUMARALARLA ("1", "1-1", "1-1-2"). Kullanıcı "Kısım 1.1'i
+    konuşalım" dediğinde AI'nın bunu çözebilmesi için şart - fihrist katmanı
+    sadece özetleri veriyor ve hiyerarşi numaralarını içermiyordu."""
+    novels = (
+        db.query(models.Novel)
+        .filter(models.Novel.universe_id == universe_id)
+        .order_by(models.Novel.book_number.is_(None), models.Novel.book_number, models.Novel.id)
+        .all()
+    )
+    novel_ids = [n.id for n in novels] or [current_novel_id]
+    chapters = (
+        db.query(models.Chapter)
+        .filter(models.Chapter.novel_id.in_(novel_ids))
+        .order_by(models.Chapter.novel_id, models.Chapter.number)
+        .all()
+    )
+    if not chapters:
+        return ""
+
+    lines = ["FİHRİST HARİTASI (kullanıcının ekranda gördüğü numaralar - 'Kısım 1.1' gibi atıfları bununla çöz):"]
+    counters = [0, 0, 0, 0]
+    container_id = part_id = subtitle_id = None
+    by_novel = {}
+    for c in chapters:
+        by_novel.setdefault(c.novel_id, []).append(c)
+
+    for nid, chs in by_novel.items():
+        if len(novel_ids) > 1:
+            name = next((n.name for n in novels if n.id == nid), "?")
+            lines.append(f"-- {name} --")
+        counters = [0, 0, 0, 0]
+        container_id = part_id = subtitle_id = None
+        for idx, c in enumerate(chs):
+            nxt = chs[idx + 1] if idx + 1 < len(chs) else None
+            is_container = (
+                c.kind == "chapter"
+                and not [p for p in c.paragraphs if (p.text or "").strip()]
+                and nxt is not None and nxt.kind in ("part", "subtitle")
+            )
+            if c.kind == "part":
+                level = 1 if container_id else 0
+                part_id, subtitle_id = c.id, None
+            elif c.kind == "subtitle":
+                level = (1 if container_id else 0) + (1 if part_id else 0)
+                subtitle_id = c.id
+            elif is_container:
+                level = 0
+                container_id, part_id, subtitle_id = c.id, None, None
+            else:
+                level = (1 if container_id else 0) + (1 if part_id else 0) + (1 if subtitle_id else 0)
+            counters[level] += 1
+            for l in range(level + 1, len(counters)):
+                counters[l] = 0
+            display = "-".join(str(x) for x in counters[: level + 1])
+            kind_tr = {"part": "KISIM", "subtitle": "ALT BAŞLIK"}.get(c.kind, "Bölüm")
+            if is_container:
+                kind_tr = "ÜST BAŞLIK"
+            title = (c.title or "").strip() or "(başlıksız)"
+            para_count = len([p for p in c.paragraphs if (p.text or "").strip()])
+            extra = f", {para_count} paragraf" if para_count else ", metin yok"
+            lines.append(f"{display} [{kind_tr}] {title} (sistem no: {c.number}{extra})")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# SOHBET GEÇMİŞİ BUDAMA. Araştırmanın önerdiği desen: son birkaç turu TAM
+# tut, öncesini ÖZETLE. Eskiden 40 mesajlık bir sohbette 40 mesaj birden
+# gidiyordu - hem maliyet katlanıyor hem model eski/alakasız turlara takılıp
+# kalite düşüyordu. Özet AI'ya ek istek attırmaz: yerel, deterministik bir
+# sıkıştırma (kim ne istedi / ne yapıldı) - ucuz ve öngörülebilir.
+# ---------------------------------------------------------------------------
+
+def trim_chat_history(messages: list, keep_recent: int = 8, summary_char_budget: int = 1500) -> list:
+    """Son `keep_recent` mesajı olduğu gibi bırakır; öncesini tek bir
+    'ÖNCEKİ KONUŞMANIN ÖZETİ' mesajına sıkıştırır. Kısa sohbetlerde
+    (<= keep_recent) hiçbir şey yapmaz."""
+    if len(messages) <= keep_recent:
+        return messages
+    older, recent = messages[:-keep_recent], messages[-keep_recent:]
+    lines = []
+    for m in older:
+        role = "Yazar" if m.get("role") == "user" else "AI"
+        content = (m.get("content") or "").strip().replace("\n", " ")
+        if not content:
+            continue
+        if len(content) > 220:
+            content = content[:220] + "…"
+        lines.append(f"{role}: {content}")
+    digest = "\n".join(lines)
+    if len(digest) > summary_char_budget:
+        # Baştan değil SONDAN kırp: yakın geçmiş daha alakalı
+        digest = "[... sohbetin başı kırpıldı ...]\n" + digest[-summary_char_budget:]
+    return [{
+        "role": "user",
+        "content": (
+            "ÖNCEKİ KONUŞMANIN ÖZETİ (bağlam - buna yanıt verme, sadece "
+            f"hatırla; {len(older)} mesaj sıkıştırıldı):\n{digest}"
+        ),
+    }] + recent
+
+
+# ---------------------------------------------------------------------------
+# BAĞLAM ŞEFFAFLIĞI: context'i katmanlara ayırıp boyutlarını ölçer.
+# "AI neyi görüyor" sorusunun yanıtı zaten Bağlam Önizleme'de vardı ama NE
+# KADAR BÜYÜK olduğu görünmüyordu - hem maliyet hem "neden yavaş" sorusu
+# buradan çıkıyor. Katman başlıkları "=== ... ===" ile ayrıldığı için
+# ayrıştırma deterministik; token tahmini Türkçe için ~3.3 karakter/token.
+# ---------------------------------------------------------------------------
+
+CHARS_PER_TOKEN = 3.3
+
+
+def estimate_context_size(context: str) -> tuple[int, int, list[dict]]:
+    """(karakter, ~token, katman dökümü) döner. Döküm büyükten küçüğe."""
+    total_chars = len(context)
+    total_tokens = int(total_chars / CHARS_PER_TOKEN)
+    if not context.strip():
+        return 0, 0, []
+
+    layers, current_name, buffer = [], "Kurallar ve temel bilgiler", []
+    for line in context.split("\n"):
+        header = re.match(r"^===\s*(.+?)\s*===$", line.strip())
+        if not header:
+            header = re.match(r"^(ROMAN FİHRİSTİ|FİHRİST HARİTASI|İLGİLİ GEÇMİŞ BİLGİLER)\b.*", line.strip())
+        if header:
+            if buffer:
+                layers.append({"name": current_name, "text": "\n".join(buffer)})
+            current_name = header.group(1).strip()
+            buffer = [line]
+        else:
+            buffer.append(line)
+    if buffer:
+        layers.append({"name": current_name, "text": "\n".join(buffer)})
+
+    breakdown = [
+        {
+            "name": l["name"][:60],
+            "char_count": len(l["text"]),
+            "approx_tokens": int(len(l["text"]) / CHARS_PER_TOKEN),
+        }
+        for l in layers if l["text"].strip()
+    ]
+    breakdown.sort(key=lambda x: -x["char_count"])
+    return total_chars, total_tokens, breakdown

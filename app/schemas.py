@@ -471,6 +471,17 @@ class AiChatRequest(BaseModel):
     # set_draft_result ile geri döner (bkz. qwen_client.CHAT_SYSTEM_PROMPT).
     current_result: Optional[str] = None
     include_hidden: bool = False
+    # BAĞLAM KAPSAMI: "chapter" (varsayılan - açık bölümün metni),
+    # "none" (metin gitmesin, kısa/ucuz sorular),
+    # "novel" (tüm kitap - tutarlılık soruları, pahalı).
+    text_scope: str = "chapter"
+
+    @field_validator("text_scope")
+    @classmethod
+    def _check_scope(cls, v):
+        if v not in ("none", "chapter", "novel"):
+            raise ValueError("text_scope none/chapter/novel olmalı")
+        return v
 
 
 class EntityUpdateProposal(BaseModel):
@@ -520,10 +531,20 @@ class ContextPreviewRequest(BaseModel):
     # birebir aynı olur (talimata göre seçilen derin profil bölümleri dahil).
     instruction: str = ""
     include_hidden: bool = False
+    text_scope: str = "chapter"
+    include_chapter_text: bool = False
 
 
 class ContextPreviewResponse(BaseModel):
     context: str
+    char_count: int
+    approx_tokens: int
+    # Şeffaflık: hangi katman ne kadar yer kaplıyor (en büyükten küçüğe)
+    breakdown: List["ContextLayerSize"] = []
+
+
+class ContextLayerSize(BaseModel):
+    name: str
     char_count: int
     approx_tokens: int
 

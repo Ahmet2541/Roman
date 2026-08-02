@@ -5,7 +5,10 @@ import logging
 from ..database import get_db
 from ..auth import get_current_user
 from .. import schemas, models
-from ..qwen_client import build_context, ask_qwen, full_scan, chat_with_qwen, reader_test_chapter, suggest_paragraph_entities
+from ..qwen_client import (
+    build_context, ask_qwen, full_scan, chat_with_qwen, reader_test_chapter,
+    suggest_paragraph_entities, trim_chat_history, estimate_context_size,
+)
 from ..entities import ENTITY_MODELS
 from ..sections import SECTIONS_BY_ENTITY_TYPE, _tr_lower
 from ..ratelimit import rate_limit
@@ -57,11 +60,17 @@ def preview_context(
     gösterir - Qwen'e hiç istek atmadığı için ücretsiz ve rate-limitsizdir.
     Amaç: 'AI'ya gerçekte ne gidiyor' sorusuna güvenle cevap bulabilmek
     (Novelcrafter'daki 'prompt preview' fikrinin karşılığı)."""
-    context = build_context(db, novel_id, universe_id, payload.selected_entities, chapter_number=payload.chapter_number, instruction_text=payload.instruction, include_hidden=payload.include_hidden)
+    context = build_context(
+        db, novel_id, universe_id, payload.selected_entities,
+        chapter_number=payload.chapter_number, instruction_text=payload.instruction,
+        include_hidden=payload.include_hidden,
+        include_chapter_text=payload.include_chapter_text,
+        text_scope=payload.text_scope,
+    )
+    chars, tokens, breakdown = estimate_context_size(context)
     return schemas.ContextPreviewResponse(
-        context=context,
-        char_count=len(context),
-        approx_tokens=len(context) // 4,  # kabaca tahmin - kesin token sayımı değil
+        context=context, char_count=chars, approx_tokens=tokens,
+        breakdown=[schemas.ContextLayerSize(**b) for b in breakdown],
     )
 
 
@@ -86,10 +95,17 @@ def chat(
         db, novel_id, universe_id, payload.selected_entities,
         chapter_number=payload.chapter_number, instruction_text=last_user_message,
         include_hidden=payload.include_hidden,
+        # Sohbette bölümün METNİ de gitmeli: "bu bölümü konuşalım",
+        # "P12'yi tartışalım" gibi istekler ancak metin varsa anlamlı.
+        include_chapter_text=True,
+        text_scope=payload.text_scope,
     )
     try:
+        # GEÇMİŞ BUDAMA: son turlar tam, öncesi özet (bkz. trim_chat_history).
+        # Uzun sohbetlerde hem maliyet hem kalite kaybını önler.
+        trimmed = trim_chat_history([m.model_dump() for m in payload.messages])
         reply, actions_taken, pending_entity_updates, draft_result = chat_with_qwen(
-            db, novel_id, universe_id, context, payload.messages,
+            db, novel_id, universe_id, context, trimmed,
             current_result=payload.current_result,
         )
     except Exception as exc:

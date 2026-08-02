@@ -74,3 +74,66 @@ def test_progression_below_threshold_shows_all_verbatim_no_compaction(client, he
     assert "ESKİ NOTLARIN ÖZETİ" not in context
     for i in range(1, 6):
         assert f"Not {i}" in context
+
+
+# ---- Bağlam kapsamı, geçmiş budama, boyut ölçümü --------------------------
+
+def test_text_scope_none_chapter_novel(client, headers):
+    """Kapsam seçimi: none (metin yok) / chapter (açık bölüm) / novel (tümü)."""
+    from app.qwen_client import build_context
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+    from app import models
+
+    for n, txt in ((1, "Birinci bölümün metni."), (2, "İkinci bölümün metni.")):
+        ch = client.post("/chapters/", json={"number": n, "kind": "chapter", "title": f"B{n}"}, headers=headers).json()
+        client.put(f"/chapters/{ch['id']}/paragraphs/1", json={"number": 1, "text": txt}, headers=headers)
+
+    db = sessionmaker(bind=engine)()
+    novel_id = int(headers["X-Novel-Id"])
+    uid = db.query(models.Novel).filter(models.Novel.id == novel_id).first().universe_id
+
+    ctx_none = build_context(db, novel_id, uid, [], chapter_number=1, include_chapter_text=True, text_scope="none")
+    assert "Birinci bölümün metni" not in ctx_none
+
+    ctx_chapter = build_context(db, novel_id, uid, [], chapter_number=1, include_chapter_text=True, text_scope="chapter")
+    assert "Birinci bölümün metni" in ctx_chapter
+    assert "İkinci bölümün metni" not in ctx_chapter   # sadece açık bölüm
+
+    ctx_novel = build_context(db, novel_id, uid, [], chapter_number=1, include_chapter_text=True, text_scope="novel")
+    assert "Birinci bölümün metni" in ctx_novel and "İkinci bölümün metni" in ctx_novel
+    assert "KİTABIN TAM METNİ" in ctx_novel
+
+
+def test_chat_history_trimming():
+    """Uzun sohbette son turlar tam kalır, öncesi tek özete sıkışır."""
+    from app.qwen_client import trim_chat_history
+    kısa = [{"role": "user", "content": f"m{i}"} for i in range(5)]
+    assert trim_chat_history(kısa) == kısa          # kısa sohbete dokunulmaz
+
+    uzun = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"mesaj{i}"} for i in range(30)]
+    trimmed = trim_chat_history(uzun, keep_recent=8)
+    assert len(trimmed) == 9                        # 1 özet + 8 güncel
+    assert "ÖNCEKİ KONUŞMANIN ÖZETİ" in trimmed[0]["content"]
+    assert "22 mesaj sıkıştırıldı" in trimmed[0]["content"]
+    assert trimmed[1:] == uzun[-8:]                 # son 8 mesaj AYNEN korunur
+    assert "mesaj3" in trimmed[0]["content"]        # eski içerik özette yaşıyor
+
+
+def test_context_size_breakdown(client, headers):
+    """Önizleme, katman bazında boyut dökümü vermeli (şeffaflık)."""
+    client.post("/rules/", json={"title": "Şişe mekaniği", "description": "Yalan karartır."}, headers=headers)
+    ch = client.post("/chapters/", json={"number": 1, "kind": "chapter", "title": "B1"}, headers=headers).json()
+    client.put(f"/chapters/{ch['id']}/paragraphs/1", json={"number": 1, "text": "Uzun bir metin. " * 50}, headers=headers)
+
+    r = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 1,
+        "include_chapter_text": True, "text_scope": "chapter",
+    }, headers=headers)
+    data = r.json()
+    assert data["char_count"] > 0 and data["approx_tokens"] > 0
+    assert data["breakdown"], "katman dökümü boş olmamalı"
+    assert sum(b["char_count"] for b in data["breakdown"]) <= data["char_count"] + 50
+    # En büyük katman başta olmalı
+    sizes = [b["char_count"] for b in data["breakdown"]]
+    assert sizes == sorted(sizes, reverse=True)

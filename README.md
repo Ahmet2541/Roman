@@ -166,6 +166,16 @@ roman yazım destek uygulaması - backend + frontend.
   kaydedilmez. Uyarı dili "asla kullanma" değil BÜTÇE mantığında: kalıplar
   kötü araç değildir, sorun bütçesiz tekrarlanmalarıdır - "her kalıbı en
   fazla bir kez kullan".
+- **Sohbet bağlam yönetimi (araştırma temelli)**: üç mekanizma birlikte.
+  (1) **Kapsam seçici**: "AI neyi okusun" - Bu bölümün metni (varsayılan) /
+  Metin gönderme (kısa, ucuz sorular) / Tüm kitap (tutarlılık soruları,
+  pahalı; bölüm başına eşit pay verilerek kırpılır ki roman tamamı temsil
+  edilsin). (2) **Geçmiş budama**: uzun sohbette son 8 tur AYNEN korunur,
+  öncesi tek bir "ÖNCEKİ KONUŞMANIN ÖZETİ" mesajına sıkıştırılır (yerel,
+  ek AI isteği yok) - eskiden 40 mesajlık sohbette 40 mesaj birden
+  gidiyordu. (3) **Bağlam şeffaflığı**: önizleme artık toplam karakter/token
+  ve KATMAN BAZINDA döküm gösteriyor (hangi katman ~kaç token, yüzde kaç);
+  25K token üstü sarı, 60K üstü kırmızı uyarı verir.
 - **Okur Testi (denetçi katmanı)**: bölüm metnini okur gözüyle tarar -
   tempo ölümü, bilgi bocası, klişe, anlaşılmaz cümle, gerilim kırılması,
   inandırıcılık çatlağı. Bulguları paragraf numarası + kısa alıntı +

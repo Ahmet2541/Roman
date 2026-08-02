@@ -2010,14 +2010,14 @@ async function renderAiPanel(chapter) {
       return `<div class="entity-type-group" data-type="${t}" style="border-top:1px solid var(--border);padding:6px 0;">
         <div class="entity-type-header" data-type="${t}" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;">
           <strong style="font-size:11.5px;letter-spacing:0.3px;">
-            <span class="type-caret" data-type="${t}" style="color:var(--text-muted);">▸</span>
+            <span class="type-caret" data-type="${t}" style="color:var(--text-muted);">${(t === 'character' || t === 'place') ? '▾' : '▸'}</span>
             ${TYPE_ICONS[t] || ''} ${cfgLabel}
             <span style="font-weight:400;color:var(--text-muted);">(${items.length})</span>
             <span class="type-selected-count" data-type="${t}" style="font-weight:400;color:var(--gold);">${selectedCount ? '· ' + selectedCount + ' seçili' : ''}</span>
           </strong>
           <button class="btn btn-sm goto-menu-btn" data-type="${t}" title="${cfgLabel} menüsünde düzenle/ekle">✎</button>
         </div>
-        <div class="entity-type-body" data-type="${t}" style="display:none;margin-top:4px;max-height:200px;overflow-y:auto;">
+        <div class="entity-type-body" data-type="${t}" style="display:${(t === 'character' || t === 'place') ? '' : 'none'};margin-top:4px;max-height:200px;overflow-y:auto;">
           ${items.map(i => {
             const isMentioned = mentionedKeys.has(`${t}:${i.id}`);
             return `<label class="entity-picker-label" data-name="${escapeHtml(i.name.toLowerCase())}"><input type="checkbox" class="entity-check" data-type="${t}" data-id="${i.id}" ${isMentioned ? 'checked' : ''}> ${escapeHtml(i.name)}${isMentioned ? ' <span style="color:var(--gold);font-size:11px;" title="Bu bölümde geçiyor">●</span>' : ''}</label>`;
@@ -2050,12 +2050,19 @@ async function renderAiPanel(chapter) {
       ${planHtml}
       <div id="selectedEntityChips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
       <input type="text" id="entityPickerSearch" placeholder="Kişi/mekan/olay ara… (metinde @isim yazarak da seçebilirsin)" style="width:100%;margin-bottom:6px;">
-      <button type="button" class="btn btn-sm" id="togglePickerBtn" style="margin-bottom:6px;" title="Kişi, mekan, olay, nesne ve ipuçları ayrı başlıklar altında">▸ Kişi / Mekan / Olay listeleri</button>
-      <div class="entity-picker" id="entityPickerBox" style="display:none;">${pickerHtml || '<div class="empty-state">Henüz kayıt yok</div>'}</div>
+      <div class="entity-picker" id="entityPickerBox">${pickerHtml || '<div class="empty-state">Henüz kayıt yok</div>'}</div>
 
       <div class="ai-mode-tabs" style="display:flex;gap:6px;margin:10px 0 4px;">
         <button class="btn btn-sm ai-mode-btn active" data-mode="chat">Sohbet</button>
         <button class="btn btn-sm ai-mode-btn" data-mode="instruct">Talimat</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;margin:0 0 6px;flex-wrap:wrap;">
+        <span style="color:var(--text-muted);">AI neyi okusun:</span>
+        <select id="textScopeSelect" style="max-width:210px;" title="Bölüm metninin AI'ya ne kadarının gideceğini seçer - maliyeti ve isabeti doğrudan etkiler">
+          <option value="chapter">Bu bölümün metni (varsayılan)</option>
+          <option value="none">Metin gönderme (kısa/ucuz)</option>
+          <option value="novel">Tüm kitap (tutarlılık - pahalı)</option>
+        </select>
       </div>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin:0 0 8px;cursor:pointer;" title="Seçili varlıkların 🔒 Gizli Katmanı AI'ya 'BİL ama ASLA açıkça yazma' direktifiyle verilir - diyaloglar/davranışlar sırra göre incelikle şekillenir (dramatik ironi). Kapalıyken gizli katman AI'ya hiç gitmez.">
         <input type="checkbox" id="includeHiddenChk"> 🔒 Gizli katmanı alt-metin olarak ver
@@ -2129,13 +2136,7 @@ async function renderAiPanel(chapter) {
       switchView(b.dataset.type);
     }));
 
-    const pickerBox = document.getElementById('entityPickerBox');
-    const toggleBtn = document.getElementById('togglePickerBtn');
-    toggleBtn.addEventListener('click', () => {
-      const hidden = pickerBox.style.display === 'none';
-      pickerBox.style.display = hidden ? '' : 'none';
-      toggleBtn.textContent = hidden ? '▾ Listeleri gizle' : '▸ Kişi / Mekan / Olay listeleri';
-    });
+
     // Bölümde geçen varlıklar otomatik işaretli geliyor - kullanıcı en az
     // bir seçimle karşılaşırsa listeyi açmasına gerek kalmasın diye rozetler.
     renderSelectedEntityChips();
@@ -2375,6 +2376,7 @@ async function sendChatMessage(chapter) {
       messages: aiChatMessages,
       current_result: currentResult,
       include_hidden: !!document.getElementById('includeHiddenChk')?.checked,
+      text_scope: document.getElementById('textScopeSelect')?.value || 'chapter',
     };
     const result = await api.post('/ai/chat', payload);
     aiChatMessages.push({
@@ -2417,11 +2419,28 @@ async function runContextPreview(chapter) {
       selected_entities: selected,
       instruction: instructionEl ? instructionEl.value.trim() : '',
       include_hidden: !!document.getElementById('includeHiddenChk')?.checked,
+      text_scope: document.getElementById('textScopeSelect')?.value || 'chapter',
+      include_chapter_text: true,  // önizleme sohbetle AYNI bağlamı göstermeli
     };
     const result = await api.post('/ai/context-preview', payload);
+    // BAĞLAM ŞEFFAFLIĞI: sadece "ne gidiyor" değil "ne kadar" ve "hangi
+    // katman ne kadar yer kaplıyor". Maliyeti ve şişkinliği görünür kılar.
+    const tokens = result.approx_tokens;
+    const level = tokens > 60000 ? 'var(--danger)' : (tokens > 25000 ? '#b08d3f' : 'var(--text-muted)');
+    const bar = (result.breakdown || []).map(b => {
+      const pct = result.char_count ? Math.round(b.char_count / result.char_count * 100) : 0;
+      return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--text-muted);">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(b.name)}</span>
+        <span style="white-space:nowrap;">~${b.approx_tokens} tk · %${pct}</span>
+      </div>`;
+    }).join('');
     container.innerHTML = `
-      <div class="ai-result" style="white-space:pre-wrap;font-size:12px;max-height:260px;overflow:auto;">${escapeHtml(result.context) || '<em>Bu seçimle context boş olacak.</em>'}</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${result.char_count} karakter, ~${result.approx_tokens} token (kaba tahmin)</div>`;
+      <div style="font-size:12px;color:${level};margin-bottom:4px;font-weight:600;">
+        ${result.char_count.toLocaleString('tr-TR')} karakter · ~${tokens.toLocaleString('tr-TR')} token
+        ${tokens > 60000 ? '(çok büyük - kapsamı daralt)' : (tokens > 25000 ? '(büyük)' : '')}
+      </div>
+      ${bar ? `<div style="border:1px solid var(--border);border-radius:6px;padding:6px;margin-bottom:6px;">${bar}</div>` : ''}
+      <div class="ai-result" style="white-space:pre-wrap;font-size:12px;max-height:260px;overflow:auto;">${escapeHtml(result.context) || '<em>Bu seçimle context boş olacak.</em>'}</div>`;
   } catch (err) {
     container.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   }
