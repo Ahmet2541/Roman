@@ -454,3 +454,14 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
 }
 .ai-toast-hide { opacity: 0; transform: translateY(8px); }
 .pending-ai-badge { color: var(--gold); font-size: 16px; margin-left: 6px; flex-shrink: 0; }
+
+
+/* PARAGRAF AI PANELİ - İKİ SÜTUN: solda öneri metni, sağda sohbet.
+   "Oku → tartış → yeni versiyon" döngüsü tek ekranda dönsün diye yan yana;
+   dar ekranda alt alta düşer. */
+.para-ai-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.para-ai-col-right { border-left: 1px solid var(--border); padding-left: 14px; }
+@media (max-width: 1100px) {
+  .para-ai-grid { grid-template-columns: 1fr; }
+  .para-ai-col-right { border-left: none; border-top: 1px dashed var(--border); padding-left: 0; padding-top: 10px; }
+}

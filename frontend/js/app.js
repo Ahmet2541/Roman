@@ -4485,39 +4485,43 @@ async function runParagraphAi(chapter, number, mode) {
     });
     const notes = (result.consistency_notes && result.consistency_notes.length)
       ? `<div style="font-size:12px;color:var(--danger);margin-top:6px;">⚠ ${result.consistency_notes.map(escapeHtml).join(' · ')}</div>` : '';
+    // İKİ SÜTUN: solda öneri metni, sağda sohbet. Yan yana durunca
+    // "öneriyi oku → tartış → yeni versiyon" döngüsü tek ekranda dönüyor;
+    // eskiden sohbet önerinin ALTINDA açılıyor ve öneri ekrandan kayıyordu.
+    // Dar ekranda CSS ile alt alta düşer (bkz. .para-ai-grid).
     panel.innerHTML = `
-      <div class="panel" style="border-left:3px solid ${mode === 'suggest' ? 'var(--gold)' : 'var(--border)'};">
-        <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">${mode === 'suggest' ? '✨ ÖNERİLEN VERSİYON - onaysız değişmez' : '🔍 EDİTÖR ELEŞTİRİSİ - metne dokunulmadı'}</strong>
-        <div style="white-space:pre-wrap;font-size:13px;margin-top:6px;">${escapeHtml(result.generated_text || '')}</div>
-        ${notes}
-        <div class="form-actions">
-          ${mode === 'suggest' ? `<button class="btn btn-primary btn-sm para-ai-replace" data-number="${number}">Paragrafı Değiştir</button>` : ''}
-          <button class="btn btn-sm para-ai-chat-toggle" data-number="${number}" title="Bu paragrafı AI ile konuş - sadece bu paragraf ve komşuları bağlamda">💬 Bu paragrafı konuş</button>
-          <button class="btn btn-sm para-ai-close">Kapat</button>
+      <div class="panel para-ai-grid" style="border-left:3px solid ${mode === 'suggest' ? 'var(--gold)' : 'var(--border)'};">
+        <div class="para-ai-col-left">
+          <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">${mode === 'suggest' ? '✨ ÖNERİLEN VERSİYON - onaysız değişmez' : '🔍 EDİTÖR ELEŞTİRİSİ - metne dokunulmadı'}</strong>
+          <div style="white-space:pre-wrap;font-size:13px;margin-top:6px;">${escapeHtml(result.generated_text || '')}</div>
+          ${notes}
+          <div class="form-actions">
+            ${mode === 'suggest' ? `<button class="btn btn-primary btn-sm para-ai-replace" data-number="${number}">Paragrafı Değiştir</button>` : ''}
+            <button class="btn btn-sm para-ai-close">Kapat</button>
+          </div>
         </div>
-        <div class="para-chat-box" data-number="${number}" style="display:none;border-top:1px dashed var(--border);margin-top:8px;padding-top:8px;">
-          <div class="para-chat-log" data-number="${number}" style="max-height:200px;overflow-y:auto;font-size:12.5px;"></div>
-          <div style="display:flex;gap:6px;margin-top:6px;">
-            <textarea class="para-chat-input" data-number="${number}" placeholder="Ör: daha kısa olsun / sesi daha soğuk / mendil detayını çıkar" style="flex:1;min-height:38px;box-sizing:border-box;font-size:12.5px;"></textarea>
-            <button class="btn btn-sm btn-primary para-chat-send" data-number="${number}">Gönder</button>
+        <div class="para-ai-col-right">
+          <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">💬 BU PARAGRAFI KONUŞ</strong>
+          <div class="para-chat-box" data-number="${number}" style="margin-top:6px;">
+            <div class="para-chat-log" data-number="${number}" style="max-height:260px;overflow-y:auto;font-size:12.5px;"></div>
+            <div style="display:flex;gap:6px;margin-top:6px;">
+              <textarea class="para-chat-input" data-number="${number}" placeholder="Ör: bu paragraf sence nasıl? / ritmi ağır mı?" style="flex:1;min-height:38px;box-sizing:border-box;font-size:12.5px;"></textarea>
+              <button class="btn btn-sm btn-primary para-chat-send" data-number="${number}">Gönder</button>
+            </div>
+            <button class="btn btn-sm para-chat-write" data-number="${number}" style="margin-top:6px;width:100%;" title="Konuştuklarımızı uygulayan yeni bir paragraf versiyonu üretir">✍️ Konuştuklarımıza göre yeni versiyonu yaz</button>
           </div>
         </div>
       </div>`;
+    renderParaChatLog(number);
     panel.querySelector('.para-ai-close').addEventListener('click', () => { panel.style.display = 'none'; panel.innerHTML = ''; });
     // Paragraf sohbeti: öneriyi tartışarak iyileştirme. Bağlam SADECE bu
     // paragraf + komşuları + son öneri - tüm bölüm sohbetine karışmaz,
     // kendi geçmişi vardır (paragraf bazlı).
-    const chatToggle = panel.querySelector('.para-ai-chat-toggle');
-    if (chatToggle) chatToggle.addEventListener('click', () => {
-      const box = panel.querySelector('.para-chat-box');
-      box.style.display = box.style.display === 'none' ? '' : 'none';
-      if (box.style.display !== 'none') {
-        renderParaChatLog(number);
-        panel.querySelector('.para-chat-input').focus();
-      }
-    });
+
     const sendBtn = panel.querySelector('.para-chat-send');
     if (sendBtn) sendBtn.addEventListener('click', () => sendParagraphChat(chapter, number, neighborBlock, text));
+    const writeBtn = panel.querySelector('.para-chat-write');
+    if (writeBtn) writeBtn.addEventListener('click', () => writeParagraphVersion(chapter, number, neighborBlock, text));
     const chatInput = panel.querySelector('.para-chat-input');
     if (chatInput) chatInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendParagraphChat(chapter, number, neighborBlock, text); }
@@ -4992,14 +4996,14 @@ function renderParaChatLog(number) {
   if (!log) return;
   const msgs = paraChatHistories[number] || [];
   if (!msgs.length) {
-    log.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">Bu paragraf hakkında ne değişsin? Yazdıkça yeni versiyonlar üretilir.</div>';
+    log.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">Bu paragrafı AI ile konuş: fikrini sor, tartış, birlikte karar verin. Hazır olunca aşağıdaki <b>✍️ yeni versiyonu yaz</b> düğmesiyle metni ürettir.</div>';
     return;
   }
   log.innerHTML = msgs.map((m, i) => `
-    <div style="margin-bottom:6px;padding:5px 7px;border-radius:6px;background:${m.role === 'user' ? 'var(--paper-dim)' : '#fff'};border:1px solid var(--border);">
-      <div style="font-size:10px;color:var(--text-muted);">${m.role === 'user' ? 'Sen' : 'AI'}</div>
+    <div style="margin-bottom:6px;padding:5px 7px;border-radius:6px;background:${m.role === 'user' ? 'var(--paper-dim)' : '#fff'};border:1px solid ${m.isVersion ? 'var(--gold)' : 'var(--border)'};">
+      <div style="font-size:10px;color:var(--text-muted);">${m.role === 'user' ? 'Sen' : (m.isVersion ? '✍️ AI - YENİ VERSİYON' : 'AI')}</div>
       <div style="white-space:pre-wrap;">${escapeHtml(m.content)}</div>
-      ${m.role === 'assistant' ? `<button class="btn btn-sm para-chat-apply" data-number="${number}" data-idx="${i}" style="margin-top:4px;font-size:11px;">Bu metni paragrafa yaz</button>` : ''}
+      ${m.role === 'assistant' && m.isVersion ? `<button class="btn btn-sm btn-primary para-chat-apply" data-number="${number}" data-idx="${i}" style="margin-top:4px;font-size:11px;">✓ Bu versiyonu paragrafa yaz</button>` : ''}
     </div>`).join('');
   log.scrollTop = log.scrollHeight;
   log.querySelectorAll('.para-chat-apply').forEach(btn => btn.addEventListener('click', async () => {
@@ -5018,30 +5022,72 @@ async function sendParagraphChat(chapter, number, neighborBlock, originalText) {
   paraChatHistories[number].push({ role: 'user', content: userMsg });
   renderParaChatLog(number);
 
-  // Son üretilen versiyon (varsa) temel alınır; yoksa paragrafın kendisi
-  const history = paraChatHistories[number];
-  const lastAi = [...history].reverse().find(m => m.role === 'assistant');
-  const base = lastAi ? lastAi.content : originalText;
-  const selected = Array.from(document.querySelectorAll('.entity-check:checked')).map(cb => ({
-    entity_type: cb.dataset.type, entity_id: parseInt(cb.dataset.id, 10),
-  }));
-  const instruction =
-    `Bu bir TEK PARAGRAF üzerinde çalışma turudur (P${number}). Aşağıdaki isteği uygula ve `
-    + 'SADECE paragrafın yeni halini döndür - açıklama, başlık, tırnak ekleme.\n'
-    + 'EYLEM SIRASINI BOZMA: tamamlanmış bir eylemi yeniden başlatma, zaman akışı tek yönlü.\n'
-    + `İSTEK: ${userMsg}` + (neighborBlock || '');
+  // GERÇEK SOHBET: burada versiyon ÜRETİLMEZ - fikir alışverişi yapılır.
+  // Eskiden her mesaj yeniden yazılmış paragraf döndürüyordu; "ne
+  // düşünüyorsun" diye sorulduğunda bile metin geliyordu. Yeni versiyon
+  // ancak "✍️ yeni versiyonu yaz" düğmesiyle üretilir (bkz.
+  // writeParagraphVersion) - önce anlaş, sonra yaz.
+  const base = currentParagraphBase(number, originalText);
+  const frame =
+    `P${number} adlı TEK BİR PARAGRAF üzerinde konuşuyoruz. Şu anki hali:\n"${base}"\n`
+    + (neighborBlock || '')
+    + '\nBu bir TARTIŞMA: fikrini söyle, sorun varsa göster, alternatif öner, gerekirse soru sor. '
+    + 'Paragrafı YENİDEN YAZMA - kullanıcı hazır olduğunda ayrıca isteyecek. Kısa ve somut konuş.';
 
   const log = document.querySelector(`.para-chat-log[data-number="${number}"]`);
-  if (log) log.insertAdjacentHTML('beforeend', '<div class="para-chat-pending" style="color:var(--text-muted);font-size:12px;">yazılıyor…</div>');
+  if (log) log.insertAdjacentHTML('beforeend', '<div class="para-chat-pending" style="color:var(--text-muted);font-size:12px;">düşünüyor…</div>');
   try {
-    const result = await api.post('/ai/assist', {
-      chapter_number: chapter.number, instruction,
-      selected_entities: selected, existing_text: base,
+    const result = await api.post('/ai/chat', {
+      chapter_number: chapter.number,
+      selected_entities: Array.from(document.querySelectorAll('.entity-check:checked')).map(cb => ({
+        entity_type: cb.dataset.type, entity_id: parseInt(cb.dataset.id, 10),
+      })),
+      messages: [{ role: 'user', content: frame }, ...paraChatHistories[number]],
+      text_scope: 'none',   // bölüm metni yerine paragraf + komşular yeter
     });
-    paraChatHistories[number].push({ role: 'assistant', content: (result.generated_text || '').trim() });
+    paraChatHistories[number].push({ role: 'assistant', content: (result.reply || '').trim(), isVersion: false });
     renderParaChatLog(number);
   } catch (err) {
     document.querySelector('.para-chat-pending')?.remove();
     if (log) log.insertAdjacentHTML('beforeend', `<div class="error-text" style="font-size:12px;">${escapeHtml(err.message)}</div>`);
   }
+}
+
+// Sohbette varılan ortak karara göre YENİ VERSİYON üretir. Ayrı bir eylem
+// olması bilinçli: önce anlaş, sonra yaz.
+async function writeParagraphVersion(chapter, number, neighborBlock, originalText) {
+  const history = paraChatHistories[number] || [];
+  const base = currentParagraphBase(number, originalText);
+  const konusma = history.map(m => `${m.role === 'user' ? 'Yazar' : 'AI'}: ${m.content}`).join('\n');
+  const instruction =
+    `P${number} paragrafının YENİ VERSİYONUNU yaz. Aşağıdaki konuşmada varılan kararları uygula.\n`
+    + 'KURALLAR: Eylem sırasını bozma (tamamlanmış eylemi yeniden başlatma, zaman tek yönlü). '
+    + 'Somut detayları koru. SADECE paragraf metnini döndür - açıklama, başlık, tırnak ekleme.\n'
+    + (konusma ? `KONUŞMA:\n${konusma}\n` : '')
+    + (neighborBlock || '');
+  const log = document.querySelector(`.para-chat-log[data-number="${number}"]`);
+  if (log) log.insertAdjacentHTML('beforeend', '<div class="para-chat-pending" style="color:var(--text-muted);font-size:12px;">yeni versiyon yazılıyor…</div>');
+  try {
+    const result = await api.post('/ai/assist', {
+      chapter_number: chapter.number, instruction,
+      selected_entities: Array.from(document.querySelectorAll('.entity-check:checked')).map(cb => ({
+        entity_type: cb.dataset.type, entity_id: parseInt(cb.dataset.id, 10),
+      })),
+      existing_text: base,
+    });
+    paraChatHistories[number] = paraChatHistories[number] || [];
+    paraChatHistories[number].push({ role: 'assistant', content: (result.generated_text || '').trim(), isVersion: true });
+    renderParaChatLog(number);
+  } catch (err) {
+    document.querySelector('.para-chat-pending')?.remove();
+    if (log) log.insertAdjacentHTML('beforeend', `<div class="error-text" style="font-size:12px;">${escapeHtml(err.message)}</div>`);
+  }
+}
+
+// Üzerine çalışılacak temel metin: son ÜRETİLMİŞ versiyon varsa o, yoksa
+// paragrafın kendisi (sohbet yorumları temel alınmaz).
+function currentParagraphBase(number, originalText) {
+  const history = paraChatHistories[number] || [];
+  const lastVersion = [...history].reverse().find(m => m.role === 'assistant' && m.isVersion);
+  return lastVersion ? lastVersion.content : originalText;
 }
