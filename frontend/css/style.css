@@ -342,10 +342,26 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   .roman-layout .reader { order: 2; }
   .roman-layout .side-panel { order: 3; width: 100%; padding: 14px; }
   .roman-layout .side-panel textarea { min-height: 72px; }
-  /* Sohbet giriş satırı: kutu boydan boya, Gönder altta tam genişlik */
+  /* Sohbet giriş satırı: kutu boydan boya, Gönder altta tam genişlik.
+     box-sizing şart - padding/border eklenince textarea konteyneri taşırıp
+     paneli yana kaydırıyordu (mobilde "sohbet bozuk" görünmesinin sebebi). */
   .roman-layout .side-panel .chat-input-row { display: block; }
-  .roman-layout .side-panel .chat-input-row textarea { width: 100%; }
+  .roman-layout .side-panel .chat-input-row textarea { width: 100%; flex: none; box-sizing: border-box; }
   .roman-layout .side-panel .chat-input-row .btn { width: 100%; margin-top: 6px; }
+  /* Panelin TÜM giriş öğeleri taşmasın */
+  .roman-layout .side-panel input,
+  .roman-layout .side-panel textarea,
+  .roman-layout .side-panel select { width: 100%; max-width: 100%; box-sizing: border-box; }
+  .roman-layout .side-panel { overflow-x: hidden; }
+  /* Uzun kişi listesi ve seçili rozetler dar ekranda sarsın/kaydırılsın */
+  .roman-layout .side-panel .entity-picker { max-height: 220px; overflow-y: auto; }
+  #selectedEntityChips { max-width: 100%; }
+  #selectedEntityChips .mention-chip { max-width: 100%; overflow-wrap: anywhere; }
+  /* @ öneri kutusu tam genişlik, ekrandan taşmasın */
+  #mentionSuggestBox { width: 100%; box-sizing: border-box; }
+  /* Sohbet balonları dar ekranda uzun kelimelerle taşmasın */
+  .ai-chat-messages { max-height: 260px; }
+  .ai-chat-bubble { overflow-wrap: anywhere; }
   /* "+ Yeni" araç çubuğunda sağa yaslı kalsın (dar ekranda ortalanmasın) */
   .toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
   .toolbar > div:first-child { display: none; }

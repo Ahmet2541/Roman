@@ -1506,6 +1506,11 @@ function renderReader(chapter) {
       <p id="chapterSummaryText" style="font-size:13px;color:var(--text-muted);margin:6px 0 0;">
         ${chapter.summary ? escapeHtml(chapter.summary) : '<em>Henüz özet yok - romanın fihristinde ve AI bağlamında bu bölüm görünmeyecek.</em>'}
       </p>
+      <div id="summaryDateWarning"></div>
+      <div style="margin-top:8px;">
+        <button class="btn btn-sm" id="timelineFromSummaryBtn" title="Bölüm metnindeki tarih/saat bilgisinden olayları çıkarıp Zaman Çizelgesi'ne öneri olarak getirir">🕐 Zaman Çizelgesini Güncelle</button>
+      </div>
+      <div id="summaryEventScanResult"></div>
     </div>
     <div id="pendingAiSuggestionsBanner"></div>
     <div class="chapter-summary-box" style="margin-top:10px;">
@@ -1644,6 +1649,12 @@ function renderReader(chapter) {
   renderChapterHealthStrip(chapter);
   document.getElementById('readerTestBtn').addEventListener('click', () => runReaderTest(chapter));
   document.getElementById('finishChapterBtn').addEventListener('click', () => finishChapter(chapter));
+  // Özette tarih var mı? Zaman çizelgesi bölüm metnindeki tarih/saatten
+  // besleniyor; özet tarihsizse çizelge boş kalır ve kronoloji kopar.
+  renderSummaryDateWarning(chapter);
+  document.getElementById('timelineFromSummaryBtn').addEventListener('click', () => {
+    runSuggestEvents(chapter, 'summaryEventScanResult');
+  });
   document.getElementById('genSummaryBtn').addEventListener('click', async () => {
     const btn = document.getElementById('genSummaryBtn');
     const summaryText = document.getElementById('chapterSummaryText');
@@ -2026,7 +2037,7 @@ async function renderAiPanel(chapter) {
       <div id="aiChatMode">
         <div id="aiChatMessages" class="ai-chat-messages"></div>
         <div class="chat-input-row" style="display:flex;gap:6px;">
-          <textarea id="aiChatInput" placeholder="Ör: Ahmet için bir sahne fikrin var mı?" style="flex:1;min-height:44px;"></textarea>
+          <textarea id="aiChatInput" placeholder="Ör: Ahmet için bir sahne fikrin var mı?" style="flex:1;min-height:44px;box-sizing:border-box;max-width:100%;"></textarea>
           <button class="btn btn-primary" id="aiChatSendBtn">Gönder</button>
         </div>
         <button class="btn btn-sm" id="clearChatBtn" style="margin-top:6px;">Sohbeti temizle</button>
@@ -4136,6 +4147,37 @@ async function runParagraphAi(chapter, number, mode) {
   const selected = Array.from(document.querySelectorAll('.entity-check:checked')).map(cb => ({
     entity_type: cb.dataset.type, entity_id: parseInt(cb.dataset.id, 10),
   }));
+
+  // YEREL BAĞLAM: paragrafın bölümdeki YERİ. Bölüm özeti "ne olduğunu"
+  // söylüyor ama paragrafın hemen öncesi/sonrası olmadan AI, önceki
+  // cümleyle bağ kuramıyor ve sonraki paragrafta zaten anlatılan bilgiyi
+  // tekrar edebiliyor. 4 üst + 4 alt komşu gönderilir; her biri ~500
+  // karakterde kırpılır ki token maliyeti kontrollü kalsın.
+  const allParas = (chapter.paragraphs || []).slice().sort((a, b) => a.number - b.number);
+  const idx = allParas.findIndex(x => String(x.number) === String(number));
+  const clip = (t) => {
+    const v = (t || '').trim();
+    return v.length > 500 ? v.slice(0, 500) + '…' : v;
+  };
+  const before = idx > 0 ? allParas.slice(Math.max(0, idx - 4), idx) : [];
+  const after = idx >= 0 ? allParas.slice(idx + 1, idx + 5) : [];
+  let neighborBlock = '';
+  if (before.length || after.length) {
+    neighborBlock = '\n\nBU PARAGRAFIN BÖLÜMDEKİ YERİ (yalnızca BAĞLAM - bunları yeniden yazma):\n';
+    if (before.length) {
+      neighborBlock += '--- ÖNCEKİ PARAGRAFLAR ---\n'
+        + before.map(pp => `[P${pp.number}] ${clip(pp.text)}`).join('\n') + '\n';
+    }
+    neighborBlock += `--- ÜZERİNDE ÇALIŞILAN PARAGRAF: P${number} ---\n`;
+    if (after.length) {
+      neighborBlock += '--- SONRAKİ PARAGRAFLAR ---\n'
+        + after.map(pp => `[P${pp.number}] ${clip(pp.text)}`).join('\n') + '\n';
+    }
+    neighborBlock += 'BAĞLAM KURALLARI: öncekiyle akışı, zamanı ve mekânı tutarlı sürdür; '
+      + 'sonraki paragraflarda ZATEN anlatılan bilgiyi burada tekrar etme ya da önden verme; '
+      + 'komşu paragraflarda kullanılmış imge, benzetme ve cümle kalıplarını yineleme.';
+  }
+
   // Öneri artık KISALTMIYOR, GÜÇLENDİRİYOR - ve türe göre yön alıyor.
   // Bölümün fihrist özeti + planı zaten context'e gidiyor; model önce
   // sahnenin niteliğini (polisiye/gerilim/dramatik/betimleyici) oradan
@@ -4163,9 +4205,10 @@ async function runParagraphAi(chapter, number, mode) {
       + 'duygunun inandırıcılığı vb.). '
       + 'Yanıt: güçlü yönler (1-2 madde), zayıf yönler ve her zayıf yön için SOMUT bir öneri. '
       + 'Paragrafı YENİDEN YAZMA - sadece analiz.';
+  const fullInstruction = instruction + neighborBlock;
   try {
     const result = await api.post('/ai/assist', {
-      chapter_number: chapter.number, instruction,
+      chapter_number: chapter.number, instruction: fullInstruction,
       selected_entities: selected, existing_text: text,
     });
     const notes = (result.consistency_notes && result.consistency_notes.length)
@@ -4232,8 +4275,8 @@ async function chatReplaceParagraph(assistantIdx, pid) {
 // Olay/Zaman Çizelgesi çıkarımı: bölüm metnindeki tarih-saat bilgilerinden
 // olayları önerir. "AI ile özet oluştur" kabul edilince ve "Bölümü Kapat"ta
 // otomatik çalışır; öneriler onaysız KAYDEDİLMEZ (çizelge çöplüğe dönmesin).
-async function runSuggestEvents(chapter) {
-  const container = document.getElementById('eventScanResult');
+async function runSuggestEvents(chapter, containerId = 'eventScanResult') {
+  const container = document.getElementById(containerId);
   if (!container) return;
   container.innerHTML = '<div class="empty-state">Zaman çizelgesi için olaylar aranıyor…</div>';
   try {
@@ -4398,4 +4441,30 @@ function handleMentionKeydown(e) {
   if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); box._applyOption(active); return true; }
   if (e.key === 'Escape') { e.preventDefault(); box.remove(); return true; }
   return false;
+}
+
+// Özette/metinde tarih var mı kontrolü. Zaman Çizelgesi bölümdeki tarih ve
+// saat bilgisinden besleniyor; ikisi de yoksa olay çıkarımı boş döner ve
+// kronoloji sessizce kopar. Bu yüzden erken uyarı veriyoruz.
+function renderSummaryDateWarning(chapter) {
+  const el = document.getElementById('summaryDateWarning');
+  if (!el) return;
+  const AYLAR = 'ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık';
+  // Tarih biçimleri: "28 Haziran 2030", "28.06.2030", "2030", saat "21:00"
+  const dateRe = new RegExp(`(\\\\d{1,2}\\\\s*(${AYLAR}))|(\\\\d{1,2}[./]\\\\d{1,2}[./]\\\\d{2,4})|\\\\b(19|20|21)\\\\d{2}\\\\b|\\\\b\\\\d{1,2}:\\\\d{2}\\\\b`, 'i');
+  const summary = (chapter.summary || '');
+  const body = (chapter.paragraphs || []).map(p => p.text || '').join(' ');
+  const inSummary = dateRe.test(summary);
+  const inBody = dateRe.test(body);
+
+  if (!summary.trim()) { el.innerHTML = ''; return; }  // özet yoksa ayrı uyarı zaten var
+  if (inSummary) { el.innerHTML = ''; return; }
+
+  el.innerHTML = `
+    <div style="margin-top:6px;font-size:12px;color:var(--danger);border-left:3px solid var(--danger);padding-left:8px;">
+      ⚠ Özette tarih/saat geçmiyor.
+      ${inBody
+        ? 'Bölüm metninde tarih var ama özete yansımamış - özeti yeniden ürettirir ya da elle eklersen Zaman Çizelgesi doğru kurulur.'
+        : 'Bölüm metninde de tarih/saat yok. Zaman Çizelgesi bu bölümü konumlandıramaz; sahnenin ne zaman geçtiğini metne ya da özete ekle.'}
+    </div>`;
 }
