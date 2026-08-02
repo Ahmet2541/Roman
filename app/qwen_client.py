@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 
 from openai import OpenAI
@@ -14,6 +15,8 @@ from .sections import (
 )
 from .novel_context import get_universe_id_for_novel
 from .style_scan import build_style_warning_layer
+
+logger = logging.getLogger("roman_api.qwen")
 
 _client = None
 
@@ -1003,6 +1006,33 @@ def suggest_events_for_chapter(db: Session, chapter: "models.Chapter") -> list[d
     return suggest_events_for_chapters(db, [chapter])
 
 
+def _parse_json_lenient(raw: str):
+    """Model yanıtından JSON çıkarır. Katı json.loads, modelin araya açıklama
+    cümlesi koyduğu ya da kod bloğu kapatmayı unuttuğu durumlarda patlıyor ve
+    fonksiyonlar SESSİZCE boş dönüyordu ("olay bulunamadı" gibi görünen ama
+    aslında ayrıştırma hatası olan vakalar). Bu yardımcı sırayla dener:
+    1) düz parse, 2) kod bloğu işaretlerini temizleyip parse,
+    3) metindeki ilk '{' ile son '}' arasını parse.
+    Hiçbiri olmazsa None döner - çağıran taraf bunu loglayabilir."""
+    if not raw:
+        return None
+    for candidate in (
+        raw.strip(),
+        re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip(),
+    ):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+    start, end = raw.find("{"), raw.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(raw[start:end + 1])
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
 def suggest_events_for_chapters(db: Session, chapters: list) -> list[dict]:
     if not chapters:
         return []
@@ -1030,6 +1060,12 @@ def suggest_events_for_chapters(db: Session, chapters: list) -> list[dict]:
         # etmeye çalışıyor ve "10 dk" gibi süreleri saat sanabiliyor.
         summary = (chapter.summary or "").strip()
         summary_part = f"BÖLÜM ÖZETİ (zaman bilgisi için ÖNCELİKLİ kaynak):\n{summary}\n\n" if summary else ""
+        # 100+ paragraflık bölümler modelin yanıtını bozabiliyor (kesik JSON
+        # -> sessizce sıfır olay). Özet kilit bilgiyi zaten taşıdığı için
+        # metin kırpılır; sınır bölüm sayısına göre paylaştırılır.
+        limit = 14000 if len(chapters) == 1 else max(3000, 24000 // len(chapters))
+        if len(chapter_text) > limit:
+            chapter_text = chapter_text[:limit] + "\n[... bölümün kalanı kırpıldı - özet yukarıda ...]"
         chapter_blocks.append(f"=== BÖLÜM {chapter.number}{title_part} ===\n{summary_part}{chapter_text}")
 
     user_message = (
@@ -1047,10 +1083,12 @@ def suggest_events_for_chapters(db: Session, chapters: list) -> list[dict]:
         ],
     )
     raw = response.choices[0].message.content
-    cleaned = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
-    try:
-        data = json.loads(cleaned)
-    except json.JSONDecodeError:
+    data = _parse_json_lenient(raw)
+    if data is None:
+        logger.warning(
+            "Olay çıkarımı: model yanıtı JSON olarak ayrıştırılamadı (ilk 300 karakter): %s",
+            (raw or "")[:300],
+        )
         return []
 
     filtered = []

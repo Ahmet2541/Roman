@@ -4504,7 +4504,12 @@ async function runBulkEventScan() {
     }
     const suggestions = await api.post('/chapters/suggest-events-bulk', { chapter_ids: chapters.map(c => c.id) });
     if (!suggestions.length) {
-      box.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0;">${chapters.length} bölüm tarandı - eklenecek yeni olay bulunamadı.</div>`;
+      box.innerHTML = `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0;">
+        ${chapters.length} bölüm tarandı - eklenecek <b>yeni</b> olay bulunamadı.
+        Olası sebepler: olaylar zaten çizelgede kayıtlı, ya da AI bu bölümde
+        "zaman çizelgesine değer" tekil bir olay göremedi. Bölüm bazlı denemek için
+        Roman menüsünde ilgili bölümü açıp <b>🕐 Zaman Çizelgesi</b> düğmesini kullan.
+      </div>`;
       return;
     }
     box.innerHTML = `<div style="font-size:12px;color:var(--text-muted);margin:6px 0;">${chapters.length} bölüm tarandı, ${suggestions.length} olay önerisi:</div>`;
