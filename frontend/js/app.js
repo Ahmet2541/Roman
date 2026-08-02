@@ -1508,7 +1508,7 @@ function renderReader(chapter) {
       </p>
       <div id="summaryDateWarning"></div>
       <div style="margin-top:8px;">
-        <button class="btn btn-sm" id="timelineFromSummaryBtn" title="Bölüm metnindeki tarih/saat bilgisinden olayları çıkarıp Zaman Çizelgesi'ne öneri olarak getirir">🕐 Zaman Çizelgesini Güncelle</button>
+        <button class="btn btn-sm" id="timelineFromSummaryBtn" ${(chapter.summary || '').trim() ? '' : 'disabled'} title="${(chapter.summary || '').trim() ? 'Özetteki ZAMAN satırını ve bölüm metnini kullanarak olayları Zaman Çizelgesi\'ne öneri olarak getirir' : 'Önce özet oluştur - zaman bilgisi özetin ZAMAN satırından okunuyor'}">🕐 Zaman Çizelgesini Güncelle</button>
       </div>
       <div id="summaryEventScanResult"></div>
     </div>
@@ -1665,10 +1665,13 @@ function renderReader(chapter) {
       const accept = confirm(`Taslak özet:\n\n${result.generated_summary}\n\nBu özeti kaydetmek istiyor musun?`);
       if (accept) {
         await api.put(`/chapters/${chapter.id}`, { summary: result.generated_summary });
-        // Özet kaydedilir kaydedilmez OLAY/ZAMAN ÇİZELGESİ taraması da
-        // çalışır: bölüm metninde tarih/saat zaten geçtiği için olaylar
-        // oradan çıkarılır. Öneriler her zamanki gibi ONAYA düşer.
-        runSuggestEvents(chapter);
+        // Özet kaydedilir kaydedilmez ZAMAN ÇİZELGESİ taraması çalışır:
+        // çıkarım artık özetin ZAMAN satırını öncelikli kaynak alıyor.
+        chapter.summary = result.generated_summary;
+        const tlBtn = document.getElementById('timelineFromSummaryBtn');
+        if (tlBtn) { tlBtn.disabled = false; tlBtn.title = 'Özetteki ZAMAN satırını kullanarak olayları getirir'; }
+        renderSummaryDateWarning(chapter);
+        runSuggestEvents(chapter, 'summaryEventScanResult');
         const refreshed = await api.get(`/chapters/${chapter.id}`);
         currentChapter = refreshed;
         renderReader(refreshed);

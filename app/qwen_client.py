@@ -976,6 +976,11 @@ listeleri verilecek. Görevin, bu bölümlerde geçen ÖNEMLİ olayları (zaman
 çizelgesine eklenmeye değer, hikayeyi ileri götüren belirli anları) bulmak.
 
 Kurallar:
+- ZAMAN için önce BÖLÜM ÖZETİ'ndeki "ZAMAN:" satırına bak; sahnenin takvim
+  anı oradadır. Süreleri ("10 dk", "20 dakikalık sorgu") tarih sanma; onlar
+  olayın uzunluğudur, anı değil. Özetteki "Geri dönüş" tarihleri AYRI birer
+  olaydır (hologram kayıtları, yıllar önceki yangın gibi) - sahnenin
+  zamanıyla karıştırma, ayrı olay olarak öner.
 - Sadece hikaye için önemli, TEKİL ve tanımlanabilir olayları öner (sıradan
   bir diyalog değişimini değil - ör. "taç giyme töreni", "kalenin ele
   geçirilmesi", "X'in Y'yi öldürmesi" gibi belirgin olaylar).
@@ -1019,7 +1024,13 @@ def suggest_events_for_chapters(db: Session, chapters: list) -> list[dict]:
     for chapter in chapters:
         chapter_text = "\n".join(f"[Paragraf {p.number}] {p.text}" for p in chapter.paragraphs)
         title_part = f" - {chapter.title}" if chapter.title else ""
-        chapter_blocks.append(f"=== BÖLÜM {chapter.number}{title_part} ===\n{chapter_text}")
+        # ÖZET metinden ÖNCE verilir: yapılandırılmış özetin ZAMAN satırı
+        # sahnenin takvim anını, süresini ve geri dönüşlerini ayrıştırılmış
+        # halde taşıyor. Model bunu görmezse tarihi paragraflardan tahmin
+        # etmeye çalışıyor ve "10 dk" gibi süreleri saat sanabiliyor.
+        summary = (chapter.summary or "").strip()
+        summary_part = f"BÖLÜM ÖZETİ (zaman bilgisi için ÖNCELİKLİ kaynak):\n{summary}\n\n" if summary else ""
+        chapter_blocks.append(f"=== BÖLÜM {chapter.number}{title_part} ===\n{summary_part}{chapter_text}")
 
     user_message = (
         "KAYITLI KARAKTERLER:\n" + "\n".join(char_lines)
