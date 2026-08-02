@@ -2404,6 +2404,21 @@ ENTRY_CODE_RE = re.compile(
 )
 
 
+# PARAGRAF ATIFI: "1-3P1" = 1-3 numaralı girdinin 1. paragrafı.
+# Harf yerine numara kullanılıyor ("3K1P" gibi bir biçim, kullanıcının kendi
+# "KISIM" adlandırmasıyla sistemin tür adları arasındaki çakışmayı geri
+# getirirdi). Açık bölümün içindeyken sade "P3" de çalışır.
+PARAGRAPH_REF_RE = re.compile(r"\b(\d+(?:[-.]\d+)*)\s*P\s*(\d+)\b", re.IGNORECASE)
+
+
+def _extract_paragraph_refs(text: str) -> set:
+    """{(girdi_numarası, paragraf_sırası)} döner."""
+    return {
+        (m.group(1).replace(".", "-"), int(m.group(2)))
+        for m in PARAGRAPH_REF_RE.finditer(text or "")
+    }
+
+
 def _extract_entry_codes(text: str) -> set:
     """Metinden fihrist numarası adaylarını çıkarır ('1-1', '1.2' -> '1-2')."""
     out = set()
@@ -2422,7 +2437,11 @@ def build_referenced_entries_layer(db: Session, universe_id: int, current_novel_
     if not text:
         return ""
     codes = _extract_entry_codes(text)
-    if not codes:
+    para_refs = _extract_paragraph_refs(text)
+    # "1-3P1" biçimindeki atıflarda girdinin TAMAMINI değil, o paragrafı
+    # (ve komşularını) getirmek yeterli - girdi kodunu ayrıca eklemeyelim.
+    codes -= {ref[0] for ref in para_refs}
+    if not codes and not para_refs:
         return ""
 
     # Fihrist haritasındaki display numaralarını yeniden üret ve eşleştir
@@ -2459,8 +2478,12 @@ def build_referenced_entries_layer(db: Session, universe_id: int, current_novel_
         else:
             notes.append(f"UYARI: '{want_code}' numaralı bir girdi YOK. Uydurma; fihrist haritasından doğrusunu öner.")
 
-    if not wanted_numbers:
-        return ("=== ATIF YAPILAN GİRDİLER ===\n" + "\n".join(notes)) if notes else ""
+    # NOT: paragraf atıfları (1-3P1) girdi kodu olmadan da gelebilir -
+    # bu yüzden burada erken çıkmıyoruz, aşağıdaki paragraf bloğu çalışsın.
+    if not wanted_numbers and not para_refs and notes:
+        return "=== ATIF YAPILAN GİRDİLER ===\n" + "\n".join(notes)
+    if not wanted_numbers and not para_refs:
+        return ""
 
     novels = db.query(models.Novel).filter(models.Novel.universe_id == universe_id).all()
     novel_ids = [n.id for n in novels] or [current_novel_id]
@@ -2491,6 +2514,38 @@ def build_referenced_entries_layer(db: Session, universe_id: int, current_novel_
         used += len(part)
         if used >= max_chars:
             break
+    # Paragraf atıfları: hedef paragraf + 2 komşu (bağlam için)
+    for entry_no, para_no in sorted(para_refs):
+        hit = next((a for a in available if a[0] == entry_no), None)
+        if not hit:
+            notes.append(f"UYARI: '{entry_no}P{para_no}' atıfındaki '{entry_no}' numaralı girdi YOK.")
+            continue
+        ch = (
+            db.query(models.Chapter)
+            .filter(models.Chapter.novel_id.in_(novel_ids), models.Chapter.number == hit[1])
+            .first()
+        )
+        if not ch:
+            continue
+        paras = sorted([pp for pp in ch.paragraphs if (pp.text or "").strip()], key=lambda x: x.number)
+        target = next((pp for pp in paras if pp.number == para_no), None)
+        if not target:
+            notes.append(
+                f"UYARI: '{entry_no}' girdisinde {para_no}. paragraf yok "
+                f"(bu girdide {len(paras)} paragraf var)."
+            )
+            continue
+        idx = paras.index(target)
+        çevre = paras[max(0, idx - 2): idx + 3]
+        satırlar = []
+        for pp in çevre:
+            işaret = " ← ATIF YAPILAN" if pp.number == para_no else ""
+            satırlar.append(f"[{entry_no}P{pp.number}]{işaret} {pp.text.strip()}")
+        blocks.append(
+            f"--- {entry_no}P{para_no} · {ch.title or '(başlıksız)'} (komşularıyla) ---\n"
+            + "\n".join(satırlar)
+        )
+
     if not blocks and not notes:
         return ""
     body = "\n\n".join(blocks)

@@ -1504,10 +1504,15 @@ function showToast(message) {
 
 function renderReader(chapter) {
   const readerPane = document.getElementById('readerPane');
+  // Bu bölümün fihristteki numarası ("1-2") - paragraf atıf kodunun ön eki.
+  // Böylece "1-2P3" gibi tam atıf kodu kullanıcıya gösterilebiliyor.
+  const chapterEntryNumber = (buildChapterHierarchy(lastLoadedChapters)
+    .find(it => String(it.chapter.id) === String(chapter.id)) || {}).displayNumber || '';
   const paragraphsHtml = chapter.paragraphs.map(p => `
     <div class="paragraph-block" id="para-global-${p.id}">
-      <div class="paragraph-number" title="Bu bölümdeki paragraf sırası - AI'ya da bu numarayla gidiyor. Sohbette 'P${p.number}' yazarak doğrudan bu paragrafa atıf yapabilirsin.">
-        <div style="font-size:11px;color:var(--gold,#b08d3f);font-weight:700;">P${p.number}</div>
+      <div class="paragraph-number para-ref-code" data-num="${p.number}"
+           title="Atıf kodu. Bu bölümdeyken sohbette 'P${p.number}' yeter; başka bir girdiden atıf yaparken '${chapterEntryNumber}P${p.number}' yaz. Tıkla: tam kodu kopyala.">
+        <div style="font-size:11px;color:var(--gold,#b08d3f);font-weight:700;cursor:pointer;">P${p.number}</div>
       </div>
       <div style="flex:1;">
         <div class="paragraph-text" contenteditable="true" data-number="${p.number}">${escapeHtml(p.text)}</div>
@@ -1765,6 +1770,14 @@ function renderReader(chapter) {
   readerPane.querySelectorAll('.critique-para-btn').forEach(btn => {
     btn.addEventListener('click', () => runParagraphAi(chapter, btn.dataset.number, 'critique'));
   });
+  readerPane.querySelectorAll('.para-ref-code').forEach(el => el.addEventListener('click', () => {
+    const full = `${chapterEntryNumber}P${el.dataset.num}`;
+    navigator.clipboard?.writeText(full);
+    const num = el.querySelector('div');
+    const prev = num.textContent;
+    num.textContent = '✓';
+    setTimeout(() => { num.textContent = prev; }, 1000);
+  }));
   readerPane.querySelectorAll('.promote-para-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (!confirm('Bu paragraf silinip, metni bir ALT BAŞLIK girdisi olarak bu bölümün önüne konacak. Devam?')) return;

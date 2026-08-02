@@ -161,3 +161,32 @@ def test_missing_number_suggests_children(client, headers):
     ref = build_referenced_entries_layer(db, uid, novel_id, "5-9 hakkında ne düşünüyorsun?")
     assert "'5-9' numaralı bir girdi YOK" in ref
     assert "Uydurma" in ref
+
+
+def test_paragraph_reference_code(client, headers):
+    """'1-2P3' = 1-2 numaralı girdinin 3. paragrafı. Hedef paragraf
+    komşularıyla birlikte gelir; olmayan paragrafta uydurma yapılmaz."""
+    from app.qwen_client import build_referenced_entries_layer
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+    from app import models
+
+    client.post("/chapters/", json={"number": 1, "kind": "part", "title": "ÜST BAŞLIK"}, headers=headers)
+    ch = client.post("/chapters/", json={"number": 2, "kind": "chapter", "title": "Sahne"}, headers=headers).json()
+    for i, t in enumerate(["Birinci cümle.", "İkinci cümle.", "Üçüncü cümle.", "Dördüncü cümle."], start=1):
+        client.put(f"/chapters/{ch['id']}/paragraphs/{i}", json={"number": i, "text": t}, headers=headers)
+
+    db = sessionmaker(bind=engine)()
+    novel_id = int(headers["X-Novel-Id"])
+    uid = db.query(models.Novel).filter(models.Novel.id == novel_id).first().universe_id
+
+    ref = build_referenced_entries_layer(db, uid, novel_id, "1-1P3'ü daha gergin yazar mısın?")
+    assert "1-1P3" in ref and "← ATIF YAPILAN" in ref
+    assert "Üçüncü cümle." in ref
+    assert "İkinci cümle." in ref and "Dördüncü cümle." in ref   # komşular bağlam için
+    # Nokta biçimi ve boşluklu yazım da çalışır
+    assert "Üçüncü cümle." in build_referenced_entries_layer(db, uid, novel_id, "1.1 P 3 nasıl?")
+
+    # Olmayan paragraf: uyarı, uydurma yok
+    yok = build_referenced_entries_layer(db, uid, novel_id, "1-1P99 hakkında ne dersin?")
+    assert "99. paragraf yok" in yok and "4 paragraf var" in yok
