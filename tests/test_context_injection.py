@@ -144,3 +144,31 @@ def test_shortcut_codes_resolve_entries(client, headers):
     # Nokta ile de yazılabilmeli ("2.1BLM")
     ref2 = build_referenced_entries_layer(db, uid, novel_id, "2.1BLM nasıl?")
     assert "İkinci bölümün metni" in ref2
+
+
+def test_wrong_shortcut_code_warns_instead_of_guessing(client, headers):
+    """'1KSM' istenip 1 numaralı girdi BÖLÜM ise, sistem yanlış girdiyi
+    getirmemeli; kodun olmadığını söyleyip yakın alternatifleri vermeli."""
+    from app.qwen_client import build_referenced_entries_layer
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+    from app import models
+
+    ch = client.post("/chapters/", json={"number": 1, "kind": "chapter", "title": "BİRİNCİ BÖLÜM"}, headers=headers).json()
+    client.put(f"/chapters/{ch['id']}/paragraphs/1", json={"number": 1, "text": "Bölümün metni burada."}, headers=headers)
+    p1 = client.post("/chapters/", json={"number": 2, "kind": "part", "title": "DİJİTAL DOĞUM"}, headers=headers).json()
+    c2 = client.post("/chapters/", json={"number": 3, "kind": "chapter", "title": "Alt bölüm"}, headers=headers).json()
+    client.put(f"/chapters/{c2['id']}/paragraphs/1", json={"number": 1, "text": "Kısmın altındaki metin."}, headers=headers)
+
+    db = sessionmaker(bind=engine)()
+    novel_id = int(headers["X-Novel-Id"])
+    uid = db.query(models.Novel).filter(models.Novel.id == novel_id).first().universe_id
+
+    ref = build_referenced_entries_layer(db, uid, novel_id, "1KSM hakkında ne düşünüyorsun?")
+    assert "'1KSM' diye bir girdi YOK" in ref
+    assert "1BLM" in ref                      # yakın alternatif önerildi
+    assert "Bölümün metni burada" not in ref  # YANLIŞ girdi getirilmedi
+
+    # Doğru kod hâlâ çalışıyor
+    ok = build_referenced_entries_layer(db, uid, novel_id, "1BLM nasıl?")
+    assert "Bölümün metni burada" in ok and "YOK" not in ok

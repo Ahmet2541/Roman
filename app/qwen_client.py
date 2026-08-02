@@ -2409,17 +2409,37 @@ def build_referenced_entries_layer(db: Session, universe_id: int, current_novel_
 
     # Fihrist haritasındaki display numaralarını yeniden üret ve eşleştir
     outline = build_outline_layer(db, universe_id, current_novel_id)
-    wanted_numbers = []
+    # KATI EŞLEŞME: kod TAM olarak tutmalı. Eskiden sadece numaraya bakan
+    # gevşek bir yedek vardı ve "1KSM" istendiğinde 1 numaralı BÖLÜM'ü
+    # getiriyordu - yanlış girdiyi sessizce vermek, hiç vermemekten kötü.
+    available = []   # (kod, sistem no)
     for line in outline.split("\n"):
-        m = re.match(r"^([\d\-]+)\s+\[.+?\]\s+KOD:\s+(\S+)\s+·.*?\(sistem no:\s*(\d+)", line)
-        if not m:
-            continue
-        display, code, sysno = m.group(1), m.group(2).upper(), int(m.group(3))
-        for want_display, want_kind in codes:
-            if code == f"{want_display}{want_kind}" or display == want_display:
-                wanted_numbers.append((code, sysno))
+        m = re.match(r"^([\d\-]+)\s+\[.+?\]\s+KOD:\s+(\S+)\s+·\s*(.*?)\s*\(sistem no:\s*(\d+)", line)
+        if m:
+            available.append((m.group(2).upper(), int(m.group(4)), m.group(1), m.group(3)))
+
+    wanted_numbers, unresolved = [], []
+    for want_display, want_kind in codes:
+        want_code = f"{want_display}{want_kind}"
+        hit = next((a for a in available if a[0] == want_code), None)
+        if hit:
+            wanted_numbers.append((hit[0], hit[1]))
+        else:
+            unresolved.append((want_code, want_display))
+
+    # Çözülemeyen kod varsa AI'ya AÇIKÇA söyle ve yakın alternatifleri ver -
+    # böylece yanlış girdiyi anlatmak yerine "böyle bir kod yok, şunu mu
+    # demek istedin" diyebilir.
+    notes = []
+    for want_code, want_display in unresolved:
+        near = [a[0] for a in available if a[2] == want_display or a[2].startswith(want_display + "-")][:6]
+        if near:
+            notes.append(f"UYARI: '{want_code}' diye bir girdi YOK. Bu numarayla en yakın girdiler: {', '.join(near)}. Kullanıcıya hangisini kastettiğini sor, uydurma.")
+        else:
+            notes.append(f"UYARI: '{want_code}' diye bir girdi YOK ve bu numarayla eşleşen başka girdi de bulunamadı.")
+
     if not wanted_numbers:
-        return ""
+        return ("=== ATIF YAPILAN GİRDİLER ===\n" + "\n".join(notes)) if notes else ""
 
     novels = db.query(models.Novel).filter(models.Novel.universe_id == universe_id).all()
     novel_ids = [n.id for n in novels] or [current_novel_id]
@@ -2450,9 +2470,12 @@ def build_referenced_entries_layer(db: Session, universe_id: int, current_novel_
         used += len(part)
         if used >= max_chars:
             break
-    if not blocks:
+    if not blocks and not notes:
         return ""
-    return "=== ATIF YAPILAN GİRDİLER (kısayol koduyla anıldı) ===\n" + "\n\n".join(blocks)
+    body = "\n\n".join(blocks)
+    if notes:
+        body = ("\n".join(notes) + "\n\n" + body).strip()
+    return "=== ATIF YAPILAN GİRDİLER (kısayol koduyla anıldı) ===\n" + body
 
 
 def build_outline_layer(db: Session, universe_id: int, current_novel_id: int) -> str:
