@@ -4450,8 +4450,10 @@ function renderSummaryDateWarning(chapter) {
   const el = document.getElementById('summaryDateWarning');
   if (!el) return;
   const AYLAR = 'ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık';
-  // Tarih biçimleri: "28 Haziran 2030", "28.06.2030", "2030", saat "21:00"
-  const dateRe = new RegExp(`(\\\\d{1,2}\\\\s*(${AYLAR}))|(\\\\d{1,2}[./]\\\\d{1,2}[./]\\\\d{2,4})|\\\\b(19|20|21)\\\\d{2}\\\\b|\\\\b\\\\d{1,2}:\\\\d{2}\\\\b`, 'i');
+  // Tarih biçimleri: "28 Haziran 2030", "28.06.2030", "2030", saat "21:00".
+  // Regex LİTERAL yazılır - new RegExp + şablon dizesi kombinasyonunda
+  // ters bölü kaçışları katlanıp desen bozuluyordu (tarihler bulunamıyordu).
+  const dateRe = /(\d{1,2}\s*(ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık))|(\d{1,2}[./]\d{1,2}[./]\d{2,4})|\b(19|20|21)\d{2}\b|\b\d{1,2}:\d{2}\b/i;
   const summary = (chapter.summary || '');
   const body = (chapter.paragraphs || []).map(p => p.text || '').join(' ');
   const inSummary = dateRe.test(summary);
