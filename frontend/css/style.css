@@ -233,7 +233,22 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
 
 /* ---- Roman okuma/yazma görünümü ---- */
 .roman-layout { display: grid; grid-template-columns: 220px 1fr 300px; gap: 20px; align-items: start; }
-.chapter-list { border: 1px solid var(--border); border-radius: var(--radius); background: #fff; overflow: hidden; }
+/* YAPIŞKAN YAN PANELLER: uzun bölümde fihrist ve AI paneli ekranda kalır.
+   DİKKAT: kaydırılan kapsayıcı sayfa DEĞİL, .main (overflow-y:auto).
+   position:sticky en yakın kaydırılan ataya göre çalışır; top:0 ve
+   yükseklikten .main'in dikey iç boşluğu (32+32) düşülür. .chapter-list'te
+   overflow:hidden vardı - sticky ile çakıştığı için kaldırıldı. */
+.roman-layout > .chapter-list,
+.roman-layout > .side-panel {
+  position: -webkit-sticky;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.chapter-list { border: 1px solid var(--border); border-radius: var(--radius); background: #fff; }
 .chapter-list .chapter-item { padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 13.5px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .chapter-list .chapter-item:last-child { border-bottom: none; }
 .chapter-list .chapter-item:hover { background: var(--paper-dim); }
@@ -336,6 +351,9 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
 
 @media (max-width: 860px) {
   .roman-layout { grid-template-columns: 1fr; }
+  /* Tek sütunda yapışkanlık anlamsız - paneller normal akışta kalsın */
+  .roman-layout > .chapter-list,
+  .roman-layout > .side-panel { position: static; max-height: none; overflow-y: visible; }
   /* Tek sütunda AI paneli boydan boya - sohbet kutusu dar kalmasın.
      order ile okuyucunun hemen ardına alınır (liste -> okuyucu -> sohbet). */
   .roman-layout .chapter-list { order: 1; }
@@ -399,6 +417,9 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   .panel { max-width: 100%; }
 
   .roman-layout { grid-template-columns: 1fr; }
+  /* Tek sütunda yapışkanlık anlamsız - paneller normal akışta kalsın */
+  .roman-layout > .chapter-list,
+  .roman-layout > .side-panel { position: static; max-height: none; overflow-y: visible; }
   .chapter-list { max-height: 220px; overflow-y: auto; }
 
   .reader { padding: 18px 16px; }
