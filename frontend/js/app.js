@@ -1506,9 +1506,8 @@ function renderReader(chapter) {
   const readerPane = document.getElementById('readerPane');
   const paragraphsHtml = chapter.paragraphs.map(p => `
     <div class="paragraph-block" id="para-global-${p.id}">
-      <div class="paragraph-number" title="Bu paragrafın romandaki kalıcı numarası - AI sohbetinde 'P${p.id} ...' diyerek doğrudan bu paragrafa atıfta bulunabilirsin">
-        <div style="font-size:10px;color:var(--gold,#b08d3f);font-weight:700;">P${p.id}</div>
-        ${p.number}
+      <div class="paragraph-number" title="Bu bölümdeki paragraf sırası - AI'ya da bu numarayla gidiyor. Sohbette 'P${p.number}' yazarak doğrudan bu paragrafa atıf yapabilirsin.">
+        <div style="font-size:11px;color:var(--gold,#b08d3f);font-weight:700;">P${p.number}</div>
       </div>
       <div style="flex:1;">
         <div class="paragraph-text" contenteditable="true" data-number="${p.number}">${escapeHtml(p.text)}</div>
@@ -4500,8 +4499,11 @@ async function replaceParagraphText(chapterId, number, text) {
 function chatReplaceButtons(assistantIdx) {
   const prev = aiChatMessages[assistantIdx - 1];
   if (!prev || prev.role !== 'user' || !currentChapter) return '';
+  // Atıf artık BÖLÜM İÇİ SIRA numarasıyla (AI'ya giden [P{number}] ile aynı).
+  // Eskiden veritabanı kimliğine (p.id) bakılıyordu; ekranda "P220" yazıp
+  // AI'ya "P1" gitmesi kullanıcıyı da modeli de yanıltıyordu.
   const refs = [...new Set((prev.content.match(/\bP(\d+)\b/gi) || []).map(x => parseInt(x.slice(1), 10)))];
-  const valid = refs.filter(pid => (currentChapter.paragraphs || []).some(p => p.id === pid));
+  const valid = refs.filter(num => (currentChapter.paragraphs || []).some(p => p.number === num));
   return valid.map(pid =>
     `<button class="btn btn-sm btn-primary chat-replace-btn" data-idx="${assistantIdx}" data-pid="${pid}" style="margin:6px 0 0 6px;" title="Bu yanıtın metnini P${pid} paragrafının YERİNE yazar - eski hali Geçmiş'te saklanır">↺ P${pid}'i Değiştir</button>`
   ).join('');
@@ -4509,11 +4511,11 @@ function chatReplaceButtons(assistantIdx) {
 
 async function chatReplaceParagraph(assistantIdx, pid) {
   const msg = aiChatMessages[assistantIdx];
-  const para = (currentChapter.paragraphs || []).find(p => p.id === pid);
+  const para = (currentChapter.paragraphs || []).find(p => p.number === pid);
   if (!msg || !para) { alert('Paragraf bu bölümde bulunamadı.'); return; }
   const preview = msg.content.length > 400 ? msg.content.slice(0, 400) + '…' : msg.content;
-  if (!confirm(`P${pid} (${para.number}. paragraf) şu metinle DEĞİŞTİRİLECEK:\n\n${preview}\n\nEski hali "Geçmiş"ten geri alınabilir. Devam?`)) return;
-  await replaceParagraphText(currentChapter.id, para.number, msg.content);
+  if (!confirm(`P${pid} şu metinle DEĞİŞTİRİLECEK:\n\n${preview}\n\nEski hali "Geçmiş"ten geri alınabilir. Devam?`)) return;
+  await replaceParagraphText(currentChapter.id, para.number, msg.content);  // sıra numarası
   msg.actions = (msg.actions || []).concat([`P${pid} paragrafı değiştirildi`]);
   renderChatMessages();
 }
