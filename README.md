@@ -186,6 +186,13 @@ roman yazım destek uygulaması - backend + frontend.
   gidiyordu. (3) **Bağlam şeffaflığı**: önizleme artık toplam karakter/token
   ve KATMAN BAZINDA döküm gösteriyor (hangi katman ~kaç token, yüzde kaç);
   25K token üstü sarı, 60K üstü kırmızı uyarı verir.
+- **🔊 Sesli okuma**: bölümü tarayıcının Türkçe sesiyle okur (Web Speech
+  API - ücretsiz, kurulum yok, metin sunucuya GİTMEZ). Paragraf paragraf
+  okur, okunan paragrafı vurgulayıp ekranda ortalar; okuma sürerken bir
+  paragrafa tıklayınca oradan devam eder. Hız ayarı (yavaş/normal/hızlı/
+  çok hızlı) anında uygulanır. Amaç güzel seslendirme değil, kendi metnini
+  DİNLEYEREK tekrar ve ritim bozukluklarını yakalamak - üslup taramasının
+  kulakla yapılan hâli. Bölüm değişince okuma otomatik durur.
 - **Okur Testi (denetçi katmanı)**: bölüm metnini okur gözüyle tarar -
   tempo ölümü, bilgi bocası, klişe, anlaşılmaz cümle, gerilim kırılması,
   inandırıcılık çatlağı. Bulguları paragraf numarası + kısa alıntı +

@@ -1444,6 +1444,9 @@ function openCreateItemModal(kind) {
 }
 
 async function selectChapter(id) {
+  // Başka bölüme geçilirken sesli okuma dursun - yanlış metni okumaya
+  // devam etmesin.
+  if (typeof stopChapterTts === 'function' && ttsState.playing) stopChapterTts();
   // Ayrılınan bölüm "kirliyse" (bu oturumda paragraf değişikliği olduysa),
   // arka planda sessizce tara - kullanıcının beklemesine gerek yok.
   if (dirtyChapterId && String(dirtyChapterId) !== String(id)) {
@@ -1560,6 +1563,14 @@ function renderReader(chapter) {
     </div>
     <div id="chapterHealthStrip" style="margin-top:8px;"></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+      <button class="btn btn-sm" id="ttsPlayBtn" title="Bölümü sesli okur (tarayıcının Türkçe sesi - ücretsiz, metin dışarı çıkmaz). Okunan paragraf vurgulanır; bir paragrafa tıklayıp oradan devam edebilirsin.">🔊 Sesli Oku</button>
+      <button class="btn btn-sm" id="ttsStopBtn" style="display:none;" title="Okumayı durdur">⏹ Durdur</button>
+      <select id="ttsRate" style="display:none;max-width:110px;font-size:12px;" title="Okuma hızı">
+        <option value="0.85">Yavaş</option>
+        <option value="1" selected>Normal</option>
+        <option value="1.25">Hızlı</option>
+        <option value="1.5">Çok hızlı</option>
+      </select>
       <button class="btn btn-sm" id="readerTestBtn" title="Metni okur gözüyle tarar: tempo ölümü, bilgi bocası, klişe, anlaşılmaz cümle, gerilim kırılması. Sadece uyarır, metne dokunmaz.">🎯 Okur Testi</button>
       <button class="btn btn-sm" id="timelineTopBtn" title="Özetteki ZAMAN satırından olayları çıkarıp Zaman Çizelgesi'ne öneri getirir">🕐 Zaman Çizelgesi</button>
       <button class="btn btn-sm" id="finishChapterBtn" title="Özet + Roman Haritası taramasını birlikte çalıştırır - bölümü AI'nın hafızasına işler">✅ Bölümü Kapat</button>
@@ -1717,6 +1728,11 @@ function renderReader(chapter) {
   });
 
   renderChapterHealthStrip(chapter);
+  document.getElementById('ttsPlayBtn').addEventListener('click', () => startChapterTts(chapter));
+  document.getElementById('ttsStopBtn').addEventListener('click', stopChapterTts);
+  document.getElementById('ttsRate').addEventListener('change', () => {
+    if (ttsState.playing) startChapterTts(chapter, ttsState.index);   // hızı anında uygula
+  });
   document.getElementById('readerTestBtn').addEventListener('click', () => runReaderTest(chapter));
   document.getElementById('timelineTopBtn').addEventListener('click', () => {
     if (!(currentChapter?.summary || chapter.summary || '').trim()) {
@@ -1770,6 +1786,14 @@ function renderReader(chapter) {
   readerPane.querySelectorAll('.critique-para-btn').forEach(btn => {
     btn.addEventListener('click', () => runParagraphAi(chapter, btn.dataset.number, 'critique'));
   });
+  // Okuma sürerken bir paragrafa tıklamak oradan devam ettirir
+  readerPane.querySelectorAll('.paragraph-text').forEach(el => el.addEventListener('click', () => {
+    if (!ttsState.playing) return;
+    const num = parseInt(el.dataset.number, 10);
+    const idx = (currentChapter.paragraphs || []).sort((a, b) => a.number - b.number)
+      .findIndex(p => p.number === num);
+    if (idx >= 0) startChapterTts(currentChapter, idx);
+  }));
   readerPane.querySelectorAll('.para-ref-code').forEach(el => el.addEventListener('click', () => {
     const full = `${chapterEntryNumber}P${el.dataset.num}`;
     navigator.clipboard?.writeText(full);
@@ -5091,3 +5115,93 @@ function currentParagraphBase(number, originalText) {
   const lastVersion = [...history].reverse().find(m => m.role === 'assistant' && m.isVersion);
   return lastVersion ? lastVersion.content : originalText;
 }
+
+// ---------------------------------------------------------------------------
+// SESLİ OKUMA (tarayıcının Web Speech API'si - ücretsiz, kurulum yok, metin
+// sunucuya GİTMEZ). Amaç güzel seslendirme değil: kendi metnini DİNLEMEK,
+// tekrarları ve ritim bozukluklarını kulakla yakalamak - üslup taramasının
+// kulakla yapılan hâli. Paragraf paragraf okur, okunanı vurgular; ileride
+// aynı arayüz sunucu tarafı bir modele bağlanabilir.
+// ---------------------------------------------------------------------------
+const ttsState = { playing: false, index: 0, paragraphs: [], voice: null };
+
+function pickTurkishVoice() {
+  const voices = window.speechSynthesis?.getVoices() || [];
+  return voices.find(v => v.lang === 'tr-TR')
+      || voices.find(v => (v.lang || '').toLowerCase().startsWith('tr'))
+      || null;
+}
+
+function startChapterTts(chapter, startIndex = 0) {
+  if (!window.speechSynthesis) {
+    alert('Tarayıcın sesli okumayı desteklemiyor. Chrome, Edge ya da Safari dene.');
+    return;
+  }
+  window.speechSynthesis.cancel();
+  ttsState.paragraphs = (chapter.paragraphs || []).slice().sort((a, b) => a.number - b.number)
+    .filter(p => (p.text || '').trim());
+  if (!ttsState.paragraphs.length) { alert('Okunacak metin yok.'); return; }
+
+  ttsState.voice = pickTurkishVoice();
+  if (!ttsState.voice) {
+    // Sesler geç yüklenebiliyor - bir kez daha dene, yine yoksa uyar
+    setTimeout(() => { ttsState.voice = pickTurkishVoice(); }, 300);
+  }
+  ttsState.playing = true;
+  ttsState.index = Math.max(0, Math.min(startIndex, ttsState.paragraphs.length - 1));
+  document.getElementById('ttsPlayBtn').style.display = 'none';
+  document.getElementById('ttsStopBtn').style.display = '';
+  document.getElementById('ttsRate').style.display = '';
+  speakCurrentParagraph();
+}
+
+function speakCurrentParagraph() {
+  if (!ttsState.playing) return;
+  const p = ttsState.paragraphs[ttsState.index];
+  if (!p) { stopChapterTts(); return; }
+
+  highlightTtsParagraph(p.number);
+  const u = new SpeechSynthesisUtterance(p.text.trim());
+  u.lang = 'tr-TR';
+  if (ttsState.voice) u.voice = ttsState.voice;
+  u.rate = parseFloat(document.getElementById('ttsRate')?.value || '1');
+  u.onend = () => {
+    if (!ttsState.playing) return;
+    ttsState.index += 1;
+    if (ttsState.index >= ttsState.paragraphs.length) { stopChapterTts(); return; }
+    speakCurrentParagraph();
+  };
+  u.onerror = () => stopChapterTts();
+  window.speechSynthesis.speak(u);
+}
+
+function highlightTtsParagraph(number) {
+  document.querySelectorAll('.paragraph-text').forEach(el => {
+    const isCurrent = String(el.dataset.number) === String(number);
+    el.style.background = isCurrent ? 'var(--paper-dim)' : '';
+    el.style.boxShadow = isCurrent ? '-3px 0 0 var(--gold)' : '';
+    if (isCurrent) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+}
+
+function stopChapterTts() {
+  ttsState.playing = false;
+  window.speechSynthesis?.cancel();
+  document.querySelectorAll('.paragraph-text').forEach(el => {
+    el.style.background = '';
+    el.style.boxShadow = '';
+  });
+  const play = document.getElementById('ttsPlayBtn');
+  const stop = document.getElementById('ttsStopBtn');
+  const rate = document.getElementById('ttsRate');
+  if (play) play.style.display = '';
+  if (stop) stop.style.display = 'none';
+  if (rate) rate.style.display = 'none';
+}
+
+// Sesler tarayıcıda gecikmeli yüklenir - hazır olunca seçimi tazele
+if (window.speechSynthesis) {
+  window.speechSynthesis.onvoiceschanged = () => { ttsState.voice = pickTurkishVoice(); };
+}
+// Bölüm/görünüm değişince okuma sürmesin
+window.addEventListener('beforeunload', () => window.speechSynthesis?.cancel());
