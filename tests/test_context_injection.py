@@ -101,3 +101,46 @@ def test_chat_context_includes_chapter_text_and_outline_map(client, headers):
     # Talimat bağlamı (varsayılan) metni TEKRAR etmez - existing_text ile gidiyor
     ctx_assist = build_context(db, novel_id, universe_id, [], chapter_number=2)
     assert "ÜZERİNDE ÇALIŞILAN BÖLÜMÜN METNİ" not in ctx_assist
+
+
+def test_shortcut_codes_resolve_entries(client, headers):
+    """Kısayol kodları: '1BLM' (bölüm), '1-1KSM' (kısım). Fihrist haritası
+    kodları listeler; mesajda geçen kod o girdinin ÖZET+METNİNİ context'e
+    getirir."""
+    from app.qwen_client import build_outline_layer, build_referenced_entries_layer, build_context
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+    from app import models
+
+    ch = client.post("/chapters/", json={"number": 1, "kind": "chapter", "title": "Küllerin Sesi"}, headers=headers).json()
+    client.put(f"/chapters/{ch['id']}/paragraphs/1", json={"number": 1, "text": "Kule uzaktan görünüyordu."}, headers=headers)
+    client.put(f"/chapters/{ch['id']}", json={"summary": "ZAMAN: 2030. OLAY: Açılış."}, headers=headers)
+    part = client.post("/chapters/", json={"number": 2, "kind": "part", "title": "DİJİTAL DOĞUM"}, headers=headers).json()
+    ch2 = client.post("/chapters/", json={"number": 3, "kind": "chapter", "title": "İkinci"}, headers=headers).json()
+    client.put(f"/chapters/{ch2['id']}/paragraphs/1", json={"number": 1, "text": "İkinci bölümün metni."}, headers=headers)
+
+    db = sessionmaker(bind=engine)()
+    novel_id = int(headers["X-Novel-Id"])
+    uid = db.query(models.Novel).filter(models.Novel.id == novel_id).first().universe_id
+
+    outline = build_outline_layer(db, uid, novel_id)
+    assert "KOD: 1BLM" in outline          # ilk bölüm
+    assert "KOD: 2KSM" in outline          # kısım
+    assert "BLM=Bölüm, KSM=Kısım" in outline
+
+    ref = build_referenced_entries_layer(db, uid, novel_id, "1BLM'yi özetler misin?")
+    assert "ATIF YAPILAN GİRDİLER" in ref
+    assert "Kule uzaktan görünüyordu" in ref     # metni geldi
+    assert "ZAMAN: 2030" in ref                  # özeti de geldi
+    assert "İkinci bölümün metni" not in ref     # istenmeyen girdi gelmedi
+
+    # Kod geçmiyorsa katman hiç oluşmaz (maliyet ödenmez)
+    assert build_referenced_entries_layer(db, uid, novel_id, "genel bir soru") == ""
+    # Kod EKRANDAKİ numaraya göre üretilir, sistem numarasına göre değil:
+    # ikinci bölüm Kısım'ın altında olduğu için kodu "2-1BLM"dir.
+    assert "KOD: 2-1BLM" in outline
+    ctx = build_context(db, novel_id, uid, [], instruction_text="1BLM ile 2-1BLM'yi karşılaştır")
+    assert "Kule uzaktan görünüyordu" in ctx and "İkinci bölümün metni" in ctx
+    # Nokta ile de yazılabilmeli ("2.1BLM")
+    ref2 = build_referenced_entries_layer(db, uid, novel_id, "2.1BLM nasıl?")
+    assert "İkinci bölümün metni" in ref2

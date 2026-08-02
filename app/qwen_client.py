@@ -414,6 +414,8 @@ def build_context(
     # Fihrist HARİTASI: kullanıcının gördüğü numaralar ("Kısım 1.1") -
     # atıfları çözebilmek için. Özetlerden bağımsız, ucuz bir liste.
     outline = build_outline_layer(db, universe_id, novel_id)
+    # Kısayol kodlarıyla ("1BLM", "1-2KSM") anılan girdilerin İÇERİĞİ
+    referenced = build_referenced_entries_layer(db, universe_id, novel_id, instruction_text)
     # Sohbet modunda çalışılan bölümün METNİ de gider (include_chapter_text);
     # talimat modunda metin zaten existing_text ile gidiyor, tekrarlamayalım.
     # Kapsam: "none" (metin gitmesin - kısa sorular, ucuz),
@@ -433,7 +435,7 @@ def build_context(
     style_warnings = build_style_warning_layer(db, universe_id)
     plan = build_plan_layer(db, novel_id, chapter_number, instruction_text=instruction_text)
     dynamic = build_dynamic_layer(db, universe_id, selected_entities, instruction_text=instruction_text, include_hidden=include_hidden)
-    return "\n\n".join(part for part in [fixed, index, outline, style, style_warnings, plan, chapter_text, dynamic] if part)
+    return "\n\n".join(part for part in [fixed, index, outline, referenced, style, style_warnings, plan, chapter_text, dynamic] if part)
 
 
 # ---------------------------------------------------------------------------
@@ -2390,6 +2392,69 @@ def build_current_chapter_layer(db: Session, novel_id: int, chapter_number: int 
     )
 
 
+ENTRY_CODE_SUFFIX = {"chapter": "BLM", "part": "KSM", "subtitle": "ABS"}
+ENTRY_CODE_RE = re.compile(r"\b(\d+(?:[-.]\d+)*)\s*(BLM|KSM|ABS)\b", re.IGNORECASE)
+
+
+def build_referenced_entries_layer(db: Session, universe_id: int, current_novel_id: int, text: str, max_chars: int = 8000) -> str:
+    """Kullanıcı mesajında geçen KISAYOL KODLARINI ("1BLM", "1-2KSM")
+    çözüp o girdinin ÖZETİNİ ve metnini context'e getirir. Fihrist haritası
+    hangi girdinin ne olduğunu söylüyordu ama İÇERİĞİNİ vermiyordu - "1BLM'yi
+    özetle" dendiğinde AI başlığı biliyor, metni bilmiyordu."""
+    if not text:
+        return ""
+    codes = {(m.group(1).replace(".", "-"), m.group(2).upper()) for m in ENTRY_CODE_RE.finditer(text)}
+    if not codes:
+        return ""
+
+    # Fihrist haritasındaki display numaralarını yeniden üret ve eşleştir
+    outline = build_outline_layer(db, universe_id, current_novel_id)
+    wanted_numbers = []
+    for line in outline.split("\n"):
+        m = re.match(r"^([\d\-]+)\s+\[.+?\]\s+KOD:\s+(\S+)\s+·.*?\(sistem no:\s*(\d+)", line)
+        if not m:
+            continue
+        display, code, sysno = m.group(1), m.group(2).upper(), int(m.group(3))
+        for want_display, want_kind in codes:
+            if code == f"{want_display}{want_kind}" or display == want_display:
+                wanted_numbers.append((code, sysno))
+    if not wanted_numbers:
+        return ""
+
+    novels = db.query(models.Novel).filter(models.Novel.universe_id == universe_id).all()
+    novel_ids = [n.id for n in novels] or [current_novel_id]
+    blocks, used = [], 0
+    seen = set()
+    for code, number in wanted_numbers:
+        if number in seen:
+            continue
+        seen.add(number)
+        ch = (
+            db.query(models.Chapter)
+            .filter(models.Chapter.novel_id.in_(novel_ids), models.Chapter.number == number)
+            .first()
+        )
+        if not ch:
+            continue
+        body = "\n".join(f"[P{p.number}] {p.text.strip()}" for p in ch.paragraphs if (p.text or "").strip())
+        summary = (ch.summary or "").strip()
+        budget = max(1200, (max_chars - used) // max(1, len(wanted_numbers) - len(blocks)))
+        if len(body) > budget:
+            body = body[:budget] + "\n[... kırpıldı ...]"
+        part = f"--- {code} · {ch.title or '(başlıksız)'} ---"
+        if summary:
+            part += f"\nÖZET: {summary}"
+        if body:
+            part += f"\nMETİN:\n{body}"
+        blocks.append(part)
+        used += len(part)
+        if used >= max_chars:
+            break
+    if not blocks:
+        return ""
+    return "=== ATIF YAPILAN GİRDİLER (kısayol koduyla anıldı) ===\n" + "\n\n".join(blocks)
+
+
 def build_outline_layer(db: Session, universe_id: int, current_novel_id: int) -> str:
     """FİHRİST HARİTASI: Kısım/Alt Başlık/Bölüm ağacı, kullanıcının ekranda
     gördüğü NUMARALARLA ("1", "1-1", "1-1-2"). Kullanıcı "Kısım 1.1'i
@@ -2411,7 +2476,11 @@ def build_outline_layer(db: Session, universe_id: int, current_novel_id: int) ->
     if not chapters:
         return ""
 
-    lines = ["FİHRİST HARİTASI (kullanıcının ekranda gördüğü numaralar - 'Kısım 1.1' gibi atıfları bununla çöz):"]
+    lines = [
+        "FİHRİST HARİTASI (kullanıcının ekranda gördüğü numaralar ve KISAYOL KODLARI):",
+        "Kullanıcı 'Kısım 1.1', '1-1', ya da kısayol koduyla ('1BLM', '1-2KSM') atıf yapabilir - "
+        "BLM=Bölüm, KSM=Kısım, ABS=Alt Başlık. Bu tabloyla eşleştir.",
+    ]
     counters = [0, 0, 0, 0]
     container_id = part_id = subtitle_id = None
     by_novel = {}
@@ -2449,10 +2518,16 @@ def build_outline_layer(db: Session, universe_id: int, current_novel_id: int) ->
             kind_tr = {"part": "KISIM", "subtitle": "ALT BAŞLIK"}.get(c.kind, "Bölüm")
             if is_container:
                 kind_tr = "ÜST BAŞLIK"
+            # KISAYOL KODU: kullanıcı "1BLM", "1-2KSM" diye atıf yapabilsin.
+            # BLM=Bölüm, KSM=Kısım, ABS=Alt Başlık. Kod, ekrandaki hiyerarşik
+            # numaradan türetilir - kullanıcı ne görüyorsa onu yazar.
+            code = display.replace("-", "-") + ENTRY_CODE_SUFFIX.get(
+                "part" if c.kind == "part" else ("subtitle" if c.kind == "subtitle" else "chapter"), "BLM"
+            )
             title = (c.title or "").strip() or "(başlıksız)"
             para_count = len([p for p in c.paragraphs if (p.text or "").strip()])
             extra = f", {para_count} paragraf" if para_count else ", metin yok"
-            lines.append(f"{display} [{kind_tr}] {title} (sistem no: {c.number}{extra})")
+            lines.append(f"{display} [{kind_tr}] KOD: {code} · {title} (sistem no: {c.number}{extra})")
     return "\n".join(lines)
 
 

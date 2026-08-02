@@ -7,31 +7,31 @@
 // ---------------------------------------------------------------------------
 const AI_ROOMS = {
   chapter: {
-    icon: '📖', label: 'Bu Bölüm', scope: 'chapter', showPlan: true, showPicker: true,
+    icon: '📖', label: 'Bu Bölüm', scope: 'chapter', showPlan: true, showPicker: true, short: 'Bölüm',
     hint: 'Bölümün metni, planı ve özeti AI\'ya gider - sahne yazma, tartışma, devam ettirme.',
     frame: 'Bu sohbette ÜZERİNDE ÇALIŞILAN BÖLÜM konuşulacak: metni, planı, akışı ve sahneleri. Kısa ve somut konuş.',
     starters: ['Bu bölüm önceki bölümle bağlanıyor mu?', 'Bu bölümde tempo nerede düşüyor?', 'Plandaki hangi madde henüz işlenmemiş?'],
   },
   people: {
-    icon: '👤', label: 'Kişiler', scope: 'none', showPlan: false, showPicker: true,
+    icon: '👤', label: 'Kişiler', scope: 'none', showPlan: false, showPicker: true, short: 'Kişi',
     hint: 'Bölüm metni GİTMEZ - sadece seçili kişilerin profilleri. Karakter tutarlılığı ve ses için.',
     frame: 'Bu sohbette KARAKTERLER konuşulacak: profilleri, sesleri, tutarlılıkları, ilişkileri. Bölüm metni verilmedi; gerekirse sor.',
     starters: ['Bu karakterin sesi tutarlı mı?', 'Profilinde eksik ne var?', 'Bu karakteri diğerlerinden ne ayırıyor?'],
   },
   world: {
-    icon: '📍', label: 'Mekân & Nesne', scope: 'none', showPlan: false, showPicker: true,
+    icon: '📍', label: 'Mekân & Nesne', scope: 'none', showPlan: false, showPicker: true, short: 'Mekân',
     hint: 'Seçili mekan/nesnelerin profilleri gider. Dünya tutarlılığı ve atmosfer için.',
     frame: 'Bu sohbette MEKANLAR ve NESNELER konuşulacak: fiziksel yapı, atmosfer, kurallar, işlev. Bölüm metni verilmedi.',
     starters: ['Bu mekanın atmosferi nasıl güçlenir?', 'Bu nesnenin kuralları çelişiyor mu?', 'Mekan profilinde ne eksik?'],
   },
   paragraph: {
-    icon: '✍️', label: 'Paragraf', scope: 'chapter', showPlan: false, showPicker: true,
+    icon: '✍️', label: 'Paragraf', scope: 'chapter', showPlan: false, showPicker: true, short: 'Paragraf',
     hint: 'Bölüm metni gider; "P12" gibi numarayla nokta atışı çalışırsın. Yanıt beğenilirse tek tıkla paragrafın yerine geçer.',
     frame: 'Bu sohbette TEK TEK PARAGRAFLAR üzerinde çalışılacak. Kullanıcı "P12" gibi numaralarla atıf yapar; yanıtların doğrudan o paragrafın yerine geçebilecek nitelikte, temiz metin olsun (açıklama ekleme).',
     starters: ['P1\'i daha gergin bir tonda yaz', 'Bu paragrafta hangi kelimeler fazla?', 'P2 ile P3 arasındaki geçiş pürüzlü mü?'],
   },
   novel: {
-    icon: '🌍', label: 'Roman Geneli', scope: 'novel', showPlan: false, showPicker: false,
+    icon: '🌍', label: 'Roman Geneli', scope: 'novel', showPlan: false, showPicker: false, short: 'Roman',
     hint: 'TÜM KİTABIN metni gider (pahalı) - tutarlılık, yapı, tekrar ve sonuç soruları için.',
     frame: 'Bu sohbette ROMANIN TAMAMI konuşulacak: yapı, tutarlılık, tekrarlar, karakter yayları, açık kalan ipuçları. Bulgularını bölüm numaralarıyla göster.',
     starters: ['Açık kalan ipuçları hangileri?', 'Hangi bölümler birbirini tekrar ediyor?', 'Karakter yayları tutarlı mı?'],
@@ -993,7 +993,7 @@ function renderChapterListDOM() {
       return `<div class="chapter-item ${isPart ? 'chapter-part-divider' : 'chapter-subtitle-divider'}" data-id="${c.id}" style="cursor:${item.hasChildren ? 'pointer' : 'default'};padding-left:${14 + indent}px;${isPart ? 'background:var(--paper-dim);' : ''}" ${item.hasChildren ? `title="${isCollapsed ? 'Genişletmek' : 'Daraltmak'} için tıkla"` : ''}>
         ${toggle}
         <div class="chapter-label-edit" data-id="${c.id}" style="flex:1;cursor:pointer;${isPart ? 'font-weight:700;letter-spacing:0.5px;text-transform:uppercase;font-size:12.5px;' : 'font-style:italic;font-size:12.5px;color:var(--text-muted);'}" title="${hasOrphanText ? 'Bu kısımda paragraf var - tıklayınca aç' : 'Bu kısımdaki ilk bölüme git'}">
-          <span style="opacity:0.6;font-weight:600;">${item.displayNumber}</span> ${escapeHtml(cleanTitle) || '<span style=\"opacity:0.5;\">(başlıksız)</span>'} <span style="font-size:9.5px;letter-spacing:0.3px;opacity:0.55;border:1px solid var(--border);border-radius:3px;padding:0 3px;font-style:normal;text-transform:none;" title="Girdi türü - ✎ ile değiştirilebilir. Kısım en üst seviyedir; Alt Başlık bir Kısım'ın altına girer.">${isPart ? 'KISIM' : 'ALT BAŞLIK'}</span> ${countBadge} ${orphanBadge}
+          <span style="opacity:0.6;font-weight:600;">${item.displayNumber}</span> ${escapeHtml(cleanTitle) || '<span style=\"opacity:0.5;\">(başlıksız)</span>'} <span style="font-size:9.5px;letter-spacing:0.3px;opacity:0.55;border:1px solid var(--border);border-radius:3px;padding:0 3px;font-style:normal;text-transform:none;" title="Girdi türü - ✎ ile değiştirilebilir. Kısım en üst seviyedir; Alt Başlık bir Kısım'ın altına girer.">${isPart ? 'KISIM' : 'ALT BAŞLIK'}</span>  <span class="entry-code" style="font-size:9.5px;color:var(--gold);font-weight:600;cursor:pointer;" title="AI kisayolu - sohbette bu kodu yazarsan bu girdinin ozeti ve metni baglama girer (tikla: kopyala)">${item.displayNumber}${isPart ? 'KSM' : 'ABS'}</span> ${countBadge} ${orphanBadge}
         </div>
         ${bulkScanBtn}
         <button class="btn-icon-sm edit-chapter-btn" data-id="${c.id}" title="Başlığı ve TÜRÜ düzenle (Bölüm / Kısım / Alt Başlık)">✎</button>
@@ -1021,7 +1021,7 @@ function renderChapterListDOM() {
     return `<div class="chapter-item${currentChapter && String(currentChapter.id) === String(c.id) ? ' active' : ''}" data-id="${c.id}" style="padding-left:${14 + indent}px;" title="${escapeHtml(c.summary || 'Henüz özet yok')}">
       ${chToggle}
       <div style="flex:1;min-width:0;">
-        <span>${item.displayNumber}${cleanTitle ? ' — ' + escapeHtml(cleanTitle) : ''}${chCountBadge}</span>
+        <span>${item.displayNumber}${cleanTitle ? ' — ' + escapeHtml(cleanTitle) : ''}${chCountBadge} <span class="entry-code" style="font-size:9.5px;color:var(--gold);font-weight:600;cursor:pointer;" title="AI kisayolu - sohbette bu kodu yazarsan bolumun ozeti ve metni baglama girer (tikla: kopyala)">${item.displayNumber}BLM</span></span>
         ${preview ? `<div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(preview)}</div>` : ''}
       </div>
       <button class="btn-icon-sm edit-chapter-btn" data-id="${c.id}" title="Başlığı ve TÜRÜ düzenle - Kısım/Alt Başlık yaparsan altındakiler ona bağlanır ve daraltılabilir olur">✎</button>
@@ -1059,6 +1059,14 @@ function renderChapterListDOM() {
       else alert('Bu kısımda henüz bölüm yok. Metni değiştirmek için ✎ simgesine tıkla.');
     });
   });
+  listEl.querySelectorAll('.entry-code').forEach(el => el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const code = el.textContent.trim();
+    navigator.clipboard?.writeText(code);
+    const prev = el.textContent;
+    el.textContent = '✓ kopyalandı';
+    setTimeout(() => { el.textContent = prev; }, 1200);
+  }));
   listEl.querySelectorAll('.chapter-toggle').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2089,31 +2097,44 @@ async function renderAiPanel(chapter) {
 
     panel.innerHTML = `
       <h3>AI Yazım Desteği</h3>
-      <div id="aiRoomTabs" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
+      <!-- ODA ŞERİDİ: tek satır, ikon odaklı. Birincil eylem bu. -->
+      <div id="aiRoomTabs" style="display:flex;gap:3px;margin-bottom:6px;">
         ${Object.entries(AI_ROOMS).map(([key, r]) => `
-          <button class="btn btn-sm ai-room-btn${key === currentAiRoom ? ' btn-primary' : ''}" data-room="${key}" title="${escapeHtml(r.hint)}">${r.icon} ${r.label}</button>`).join('')}
+          <button class="btn btn-sm ai-room-btn${key === currentAiRoom ? ' btn-primary' : ''}" data-room="${key}"
+            style="flex:1;padding:4px 2px;font-size:11px;min-width:0;" title="${escapeHtml(r.label)} - ${escapeHtml(r.hint)}">
+            ${r.icon}<span class="room-label" style="display:block;font-size:9.5px;overflow:hidden;text-overflow:ellipsis;">${r.short}</span>
+          </button>`).join('')}
       </div>
-      <div id="aiRoomHint" style="font-size:11.5px;color:var(--text-muted);margin-bottom:6px;"></div>
+      <div id="aiRoomHint" style="font-size:11px;color:var(--text-muted);margin-bottom:6px;line-height:1.35;"></div>
       ${planHtml}
       <div id="selectedEntityChips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
-      <input type="text" id="entityPickerSearch" placeholder="Kişi/mekan/olay ara… (metinde @isim yazarak da seçebilirsin)" style="width:100%;margin-bottom:6px;">
-      <div class="entity-picker" id="entityPickerBox">${pickerHtml || '<div class="empty-state">Henüz kayıt yok</div>'}</div>
 
-      <div class="ai-mode-tabs" style="display:flex;gap:6px;margin:10px 0 4px;">
+      <!-- İKİNCİL: bağlam ayarları ve listeler tek düğmenin arkasında.
+           Araştırma: kullanıcıların çoğu ayarlara hiç girmez; varsayılanlar
+           doğru olduğu sürece bunları göstermek sadece gürültü yapar. -->
+      <button type="button" class="btn btn-sm" id="toggleContextTools" style="width:100%;margin-bottom:6px;font-size:11.5px;">
+        ⚙ Bağlam ve listeler <span id="contextToolsSummary" style="color:var(--text-muted);font-weight:400;"></span>
+      </button>
+      <div id="contextToolsBox" style="display:none;border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:6px;font-size:11.5px;margin-bottom:6px;flex-wrap:wrap;">
+          <span style="color:var(--text-muted);">AI neyi okusun:</span>
+          <select id="textScopeSelect" style="flex:1;min-width:150px;" title="Bölüm metninin AI'ya ne kadarının gideceği - maliyeti ve isabeti doğrudan etkiler">
+            <option value="chapter">Bu bölümün metni</option>
+            <option value="none">Metin gönderme (ucuz)</option>
+            <option value="novel">Tüm kitap (pahalı)</option>
+          </select>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;margin-bottom:6px;cursor:pointer;" title="Seçili varlıkların 🔒 Gizli Katmanı 'BİL ama ASLA açıkça yazma' direktifiyle gider.">
+          <input type="checkbox" id="includeHiddenChk"> 🔒 Gizli katmanı alt-metin olarak ver
+        </label>
+        <input type="text" id="entityPickerSearch" placeholder="Kişi/mekan/olay ara…" style="width:100%;margin-bottom:6px;">
+        <div class="entity-picker" id="entityPickerBox">${pickerHtml || '<div class="empty-state">Henüz kayıt yok</div>'}</div>
+      </div>
+
+      <div class="ai-mode-tabs" style="display:flex;gap:6px;margin:0 0 6px;">
         <button class="btn btn-sm ai-mode-btn active" data-mode="chat">Sohbet</button>
         <button class="btn btn-sm ai-mode-btn" data-mode="instruct">Talimat</button>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;font-size:12px;margin:0 0 6px;flex-wrap:wrap;">
-        <span style="color:var(--text-muted);">AI neyi okusun:</span>
-        <select id="textScopeSelect" style="max-width:210px;" title="Bölüm metninin AI'ya ne kadarının gideceğini seçer - maliyeti ve isabeti doğrudan etkiler">
-          <option value="chapter">Bu bölümün metni (varsayılan)</option>
-          <option value="none">Metin gönderme (kısa/ucuz)</option>
-          <option value="novel">Tüm kitap (tutarlılık - pahalı)</option>
-        </select>
-      </div>
-      <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin:0 0 8px;cursor:pointer;" title="Seçili varlıkların 🔒 Gizli Katmanı AI'ya 'BİL ama ASLA açıkça yazma' direktifiyle verilir - diyaloglar/davranışlar sırra göre incelikle şekillenir (dramatik ironi). Kapalıyken gizli katman AI'ya hiç gitmez.">
-        <input type="checkbox" id="includeHiddenChk"> 🔒 Gizli katmanı alt-metin olarak ver
-      </label>
 
       <div id="aiResultBox" style="display:none;margin-bottom:10px;">
         <div class="panel" style="border-color:var(--gold);background:var(--gold-dim);">
@@ -2129,10 +2150,9 @@ async function renderAiPanel(chapter) {
       </div>
 
       <div id="aiChatMode">
-        <div id="aiRoomStarters" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
         <div id="aiChatMessages" class="ai-chat-messages"></div>
         <div class="chat-input-row" style="display:flex;gap:6px;">
-          <textarea id="aiChatInput" placeholder="Ör: Ahmet için bir sahne fikrin var mı?" style="flex:1;min-height:44px;box-sizing:border-box;max-width:100%;"></textarea>
+          <textarea id="aiChatInput" placeholder="Sorunu yaz… ( / hazır sorular · @ kişi/mekan çağır )" style="flex:1;min-height:44px;box-sizing:border-box;max-width:100%;"></textarea>
           <button class="btn btn-primary" id="aiChatSendBtn">Gönder</button>
         </div>
         <button class="btn btn-sm" id="clearChatBtn" style="margin-top:6px;">Sohbeti temizle</button>
@@ -2189,7 +2209,7 @@ async function renderAiPanel(chapter) {
     // bir seçimle karşılaşırsa listeyi açmasına gerek kalmasın diye rozetler.
     renderSelectedEntityChips();
     panel.querySelectorAll('.entity-check').forEach(cb =>
-      cb.addEventListener('change', () => { renderSelectedEntityChips(); updateTypeCounts(); }));
+      cb.addEventListener('change', () => { renderSelectedEntityChips(); updateTypeCounts(); updateContextToolsSummary(); }));
     updateTypeCounts();
 
     document.getElementById('entityPickerSearch').addEventListener('input', (e) => {
@@ -2221,6 +2241,13 @@ async function renderAiPanel(chapter) {
       });
     });
 
+    // Bağlam araçları: kapalı başlar, tek tıkla açılır (progressive disclosure)
+    document.getElementById('toggleContextTools').addEventListener('click', () => {
+      const box = document.getElementById('contextToolsBox');
+      box.style.display = box.style.display === 'none' ? '' : 'none';
+    });
+    document.getElementById('textScopeSelect').addEventListener('change', updateContextToolsSummary);
+
     panel.querySelectorAll('.ai-mode-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         panel.querySelectorAll('.ai-mode-btn').forEach(b => b.classList.remove('active'));
@@ -2235,14 +2262,23 @@ async function renderAiPanel(chapter) {
     ['aiChatInput', 'aiInstruction'].forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
-      el.addEventListener('input', () => handleMentionTyping(el));
+      el.addEventListener('input', () => {
+        handleMentionTyping(el);
+        if (el.id === 'aiChatInput') handleStarterTyping(el);
+      });
+      if (el.id === 'aiChatInput') {
+        el.addEventListener('focus', () => handleStarterTyping(el));
+      }
       // capture=true: öneri kutusu açıkken Enter'ı ÖNCE burası yakalasın,
       // mesaj gönderilmesin (kutu kapalıysa hiçbir şeye karışmaz).
       el.addEventListener('keydown', (e) => {
-        if (handleMentionKeydown(e)) e.stopPropagation();
+        if (handleMentionKeydown(e) || handleStarterKeydown(e)) e.stopPropagation();
       }, true);
       el.addEventListener('blur', () => {
-        setTimeout(() => document.getElementById('mentionSuggestBox')?.remove(), 150);
+        setTimeout(() => {
+          document.getElementById('mentionSuggestBox')?.remove();
+          document.getElementById('starterSuggestBox')?.remove();
+        }, 150);
       });
     });
     document.getElementById('aiChatInput').addEventListener('keydown', (e) => {
@@ -4788,6 +4824,9 @@ function applyAiRoom(room, chapter) {
   const picker = document.getElementById('entityPickerBox');
   const search = document.getElementById('entityPickerSearch');
   [picker, search].forEach(el => { if (el) el.style.display = cfg.showPicker ? '' : 'none'; });
+  // Oda değişince açık kalan öneri kutuları kapansın (eski odanın soruları
+  // yeni odada asılı kalmasın)
+  document.getElementById('starterSuggestBox')?.remove();
 
   // Kişiler/Mekan odalarında sadece ilgili tür açık kalsın
   document.querySelectorAll('.entity-type-group').forEach(g => {
@@ -4798,14 +4837,80 @@ function applyAiRoom(room, chapter) {
     g.style.display = visible ? '' : 'none';
   });
 
-  const starters = document.getElementById('aiRoomStarters');
-  if (starters) {
-    starters.innerHTML = (cfg.starters || []).map(q =>
-      `<button class="btn btn-sm room-starter" style="font-size:11.5px;">${escapeHtml(q)}</button>`).join('');
-    starters.querySelectorAll('.room-starter').forEach(b => b.addEventListener('click', () => {
-      const input = document.getElementById('aiChatInput');
-      input.value = b.textContent;
-      input.focus();
-    }));
+  // Bağlam düğmesinin yanındaki özet: kapalıyken bile ne gittiğini söyler
+  updateContextToolsSummary();
+}
+
+// "⚙ Bağlam ve listeler" düğmesinin yanında tek satırlık durum: kapsam +
+// seçili varlık sayısı. Araştırmadaki "kapalı hâl bile yeterli bağlam
+// versin" ilkesi - kullanıcı açmadan da ne olduğunu bilir.
+function updateContextToolsSummary() {
+  const el = document.getElementById('contextToolsSummary');
+  if (!el) return;
+  const scope = document.getElementById('textScopeSelect')?.value || 'chapter';
+  const scopeLabel = { chapter: 'bölüm metni', none: 'metin yok', novel: 'tüm kitap' }[scope];
+  const n = document.querySelectorAll('.entity-check:checked').length;
+  el.textContent = `· ${scopeLabel}${n ? ` · ${n} varlık` : ''}`;
+}
+
+// ---------------------------------------------------------------------------
+// HAZIR SORULAR ARTIK AUTOCOMPLETE: kutunun üstünde yer kaplayan düğme
+// yığını yerine, kutuya odaklanınca (ya da "/" yazınca) açılan bir öneri
+// listesi. Yazmaya başlayınca kendiliğinden kayboluyor - alan sohbete kalır.
+// @isim önerileriyle aynı klavye mantığını paylaşır (↓/↑, Enter, Esc).
+// ---------------------------------------------------------------------------
+function handleStarterTyping(el) {
+  const value = el.value;
+  const cfg = AI_ROOMS[currentAiRoom] || AI_ROOMS.chapter;
+  const all = cfg.starters || [];
+  let box = document.getElementById('starterSuggestBox');
+  const isSlash = value.startsWith('/');
+  const query = isSlash ? _trLowerJs(value.slice(1)) : '';
+
+  // Boş kutuda ya da "/" ile açılır; normal yazarken kapanır
+  if (!(value.trim() === '' || isSlash) || !all.length) { if (box) box.remove(); return; }
+  const options = all.filter(q => !query || _trLowerJs(q).includes(query));
+  if (!options.length) { if (box) box.remove(); return; }
+
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'starterSuggestBox';
+    box.style.cssText = 'border:1px solid var(--border);border-radius:8px;background:#fff;margin-top:4px;max-height:180px;overflow-y:auto;box-shadow:0 2px 8px rgba(0,0,0,0.06);';
+    (el.closest('.chat-input-row') || el).insertAdjacentElement('afterend', box);
   }
+  box.innerHTML = `<div style="font-size:10.5px;color:var(--text-muted);padding:4px 8px;border-bottom:1px solid var(--border);">${cfg.icon} ${escapeHtml(cfg.label)} - hazır sorular ("/" ile ara)</div>`
+    + options.map((q, i) => `<div class="starter-opt" data-idx="${i}" style="padding:5px 8px;font-size:12.5px;cursor:pointer;${i === 0 ? 'background:var(--paper-dim);' : ''}">${escapeHtml(q)}</div>`).join('');
+  box.dataset.active = '0';
+  box._optionCount = options.length;
+  box._applyOption = (idx) => {
+    if (!options[idx]) return;
+    el.value = options[idx];
+    el.focus();
+    box.remove();
+  };
+  box.querySelectorAll('.starter-opt').forEach(opt => {
+    opt.addEventListener('mousedown', (e) => { e.preventDefault(); box._applyOption(parseInt(opt.dataset.idx, 10)); });
+    opt.addEventListener('mouseenter', () => setStarterActive(box, parseInt(opt.dataset.idx, 10)));
+  });
+}
+
+function setStarterActive(box, idx) {
+  const opts = box.querySelectorAll('.starter-opt');
+  if (!opts.length) return;
+  const next = Math.max(0, Math.min(idx, opts.length - 1));
+  opts.forEach((o, i) => { o.style.background = i === next ? 'var(--paper-dim)' : ''; });
+  box.dataset.active = String(next);
+  opts[next].scrollIntoView({ block: 'nearest' });
+}
+
+// Klavye: @ kutusu yoksa hazır soru kutusuna bak (aynı tuşlar).
+function handleStarterKeydown(e) {
+  const box = document.getElementById('starterSuggestBox');
+  if (!box || !box._optionCount) return false;
+  const active = parseInt(box.dataset.active || '0', 10);
+  if (e.key === 'ArrowDown') { e.preventDefault(); setStarterActive(box, active + 1); return true; }
+  if (e.key === 'ArrowUp') { e.preventDefault(); setStarterActive(box, active - 1); return true; }
+  if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); box._applyOption(active); return true; }
+  if (e.key === 'Escape') { e.preventDefault(); box.remove(); return true; }
+  return false;
 }
