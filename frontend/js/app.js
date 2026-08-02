@@ -930,8 +930,10 @@ function renderChapterListDOM() {
         ? `<span style="font-size:11px;color:var(--text-muted);font-weight:400;">(${hiddenCount})</span>`
         : '';
       const isPart = c.kind === 'part';
-      const bulkScanBtn = isPart
-        ? `<button class="btn-icon-sm bulk-scan-btn" data-id="${c.id}" title="Bu Kısımdaki TÜM bölümleri tara - yeni varlık ve gelişim notu önerileri">🔍</button>`
+      // Toplu tarama düğmesi yalnızca ALTINDA gerçekten girdi olan
+      // başlıklarda anlamlı - altı boş bir Kısım'da tarayacak bölüm yok.
+      const bulkScanBtn = item.hasChildren
+        ? `<button class="btn-icon-sm bulk-scan-btn" data-id="${c.id}" title="Bu ${isPart ? 'Kısımdaki' : 'Alt Başlıktaki'} TÜM bölümleri tara - yeni varlık ve gelişim notu önerileri">🔍</button>`
         : '';
       // Kısım/Alt Başlık normalde sadece bir ayraç, paragraf tutmaz - ama
       // eski bir veri/yanlış tıklama sonucu KENDİSİNE paragraf yazılmışsa
@@ -939,8 +941,12 @@ function renderChapterListDOM() {
       // eski kayıtlar hâlâ olabilir) bunu görünür kılıyoruz - yoksa o
       // içerik fihristten hiç erişilemez hale gelirdi.
       const hasOrphanText = (c.paragraph_count || 0) > 0;
+      // Başlığın kendisinde metin olması bir HATA değil, bir DURUM: içe
+      // aktarılan romanlarda olağan ve kullanıcı bilerek de böyle
+      // kurabiliyor. Bu yüzden kırmızı ⚠ yerine nötr bir belirteç:
+      // "burada metin var, tıklayınca açılır".
       const orphanBadge = hasOrphanText
-        ? `<span title="Bu ${isPart ? 'Kısım' : 'Alt Başlık'}'ın kendisinde ${c.paragraph_count} paragraf var - tıklayınca doğrudan bunları açar" style="font-size:11px;color:var(--danger);">⚠</span>`
+        ? `<span title="Bu başlığın kendisinde ${c.paragraph_count} paragraf var - tıklayınca açılır" style="font-size:10px;color:var(--text-muted);">📄${c.paragraph_count}</span>`
         : '';
       return `<div class="chapter-item ${isPart ? 'chapter-part-divider' : 'chapter-subtitle-divider'}" data-id="${c.id}" style="cursor:${item.hasChildren ? 'pointer' : 'default'};padding-left:${14 + indent}px;${isPart ? 'background:var(--paper-dim);' : ''}" ${item.hasChildren ? `title="${isCollapsed ? 'Genişletmek' : 'Daraltmak'} için tıkla"` : ''}>
         ${toggle}
