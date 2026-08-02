@@ -193,14 +193,17 @@ function renderEntityList(type, items) {
     return ` <span style="font-size:10.5px;background:var(--paper-dim);border:1px solid var(--border);border-radius:3px;padding:0 5px;" title="Bu kural sadece bu kayıt sahnedeyken AI'ya gider">🔗 ${typeLabel}${nm ? ': ' + escapeHtml(nm) : ''}</span>`;
   };
   listEl.innerHTML = items.map(item => {
-    const title = cfg.isRule ? item.title + scopeBadge(item) : item.name;
+    // Rozet HTML'dir - başlık metnine EKLENMEZ, çünkü başlık escapeHtml'den
+    // geçiyor ve etiket düz metin olarak yazılıyordu. Ayrı tutulur.
+    const title = cfg.isRule ? item.title : item.name;
+    const ruleScopeBadge = cfg.isRule ? scopeBadge(item) : '';
     const statusBadge = cfg.hasStatus ? ` · ${item.status}` : '';
     const notesLine = (!cfg.isRule && item.notes) ? `<div class="desc" style="font-style:italic;margin-top:2px;">${escapeHtml(truncate(item.notes, 140))}</div>` : '';
     const progressionBtn = cfg.isRule ? '' : `<button class="btn btn-sm progression-btn" data-id="${item.id}">Gelişim</button>`;
     const progressionPanel = cfg.isRule ? '' : `<div class="progression-panel" data-id="${item.id}" style="display:none;width:100%;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);"></div>`;
     return `<div class="entity-row" style="${cfg.isRule ? '' : 'flex-wrap:wrap;'}">
       <div>
-        <div class="name">${escapeHtml(title)}${statusBadge}</div>
+        <div class="name">${escapeHtml(title)}${ruleScopeBadge}${statusBadge}</div>
         <div class="desc">${escapeHtml(truncate(item.description, 120))}</div>
         ${notesLine}
       </div>
@@ -1564,13 +1567,7 @@ function renderReader(chapter) {
     <div id="chapterHealthStrip" style="margin-top:8px;"></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
       <button class="btn btn-sm" id="ttsPlayBtn" title="Bölümü sesli okur (tarayıcının Türkçe sesi - ücretsiz, metin dışarı çıkmaz). Okunan paragraf vurgulanır; bir paragrafa tıklayıp oradan devam edebilirsin.">🔊 Sesli Oku</button>
-      <button class="btn btn-sm" id="ttsStopBtn" style="display:none;" title="Okumayı durdur">⏹ Durdur</button>
-      <select id="ttsRate" style="display:none;max-width:110px;font-size:12px;" title="Okuma hızı">
-        <option value="0.85">Yavaş</option>
-        <option value="1" selected>Normal</option>
-        <option value="1.25">Hızlı</option>
-        <option value="1.5">Çok hızlı</option>
-      </select>
+
       <button class="btn btn-sm" id="readerTestBtn" title="Metni okur gözüyle tarar: tempo ölümü, bilgi bocası, klişe, anlaşılmaz cümle, gerilim kırılması. Sadece uyarır, metne dokunmaz.">🎯 Okur Testi</button>
       <button class="btn btn-sm" id="timelineTopBtn" title="Özetteki ZAMAN satırından olayları çıkarıp Zaman Çizelgesi'ne öneri getirir">🕐 Zaman Çizelgesi</button>
       <button class="btn btn-sm" id="finishChapterBtn" title="Özet + Roman Haritası taramasını birlikte çalıştırır - bölümü AI'nın hafızasına işler">✅ Bölümü Kapat</button>
@@ -1729,10 +1726,7 @@ function renderReader(chapter) {
 
   renderChapterHealthStrip(chapter);
   document.getElementById('ttsPlayBtn').addEventListener('click', () => startChapterTts(chapter));
-  document.getElementById('ttsStopBtn').addEventListener('click', stopChapterTts);
-  document.getElementById('ttsRate').addEventListener('change', () => {
-    if (ttsState.playing) startChapterTts(chapter, ttsState.index);   // hızı anında uygula
-  });
+
   document.getElementById('readerTestBtn').addEventListener('click', () => runReaderTest(chapter));
   document.getElementById('timelineTopBtn').addEventListener('click', () => {
     if (!(currentChapter?.summary || chapter.summary || '').trim()) {
@@ -5132,6 +5126,57 @@ function pickTurkishVoice() {
       || null;
 }
 
+// Yüzen kontrol çubuğu: ekranın sol üstünde SABİT durur, sayfa kaysa da
+// kaybolmaz. Uzun bir bölüm dinlerken metni takip ederken bile duraklat/
+// devam/atla erişilebilir olmalı.
+function ensureTtsBar(chapter) {
+  let bar = document.getElementById('ttsFloatingBar');
+  if (bar) return bar;
+  bar = document.createElement('div');
+  bar.id = 'ttsFloatingBar';
+  bar.style.cssText =
+    'position:fixed;top:12px;left:76px;z-index:1200;display:flex;align-items:center;gap:6px;'
+    + 'background:#fff;border:1px solid var(--border);border-radius:999px;'
+    + 'box-shadow:0 3px 12px rgba(0,0,0,0.12);padding:5px 10px;font-size:12px;';
+  bar.innerHTML = `
+    <span style="font-size:14px;">🔊</span>
+    <button class="btn btn-sm" id="ttsPauseBtn" title="Duraklat">⏸</button>
+    <button class="btn btn-sm" id="ttsResumeBtn" style="display:none;" title="Devam et">▶</button>
+    <button class="btn btn-sm" id="ttsPrevBtn" title="Önceki paragraf">⏮</button>
+    <button class="btn btn-sm" id="ttsNextBtn" title="Sonraki paragraf">⏭</button>
+    <select id="ttsRate" style="font-size:11.5px;max-width:96px;" title="Okuma hızı">
+      <option value="0.85">Yavaş</option>
+      <option value="1" selected>Normal</option>
+      <option value="1.25">Hızlı</option>
+      <option value="1.5">Çok hızlı</option>
+    </select>
+    <span id="ttsProgress" style="color:var(--text-muted);white-space:nowrap;"></span>
+    <button class="btn btn-sm btn-danger" id="ttsStopBtn" title="Durdur ve kapat">✕</button>`;
+  document.body.appendChild(bar);
+
+  bar.querySelector('#ttsPauseBtn').addEventListener('click', () => {
+    window.speechSynthesis.pause();
+    bar.querySelector('#ttsPauseBtn').style.display = 'none';
+    bar.querySelector('#ttsResumeBtn').style.display = '';
+  });
+  bar.querySelector('#ttsResumeBtn').addEventListener('click', () => {
+    window.speechSynthesis.resume();
+    bar.querySelector('#ttsResumeBtn').style.display = 'none';
+    bar.querySelector('#ttsPauseBtn').style.display = '';
+  });
+  bar.querySelector('#ttsPrevBtn').addEventListener('click', () => {
+    startChapterTts(chapter, Math.max(0, ttsState.index - 1));
+  });
+  bar.querySelector('#ttsNextBtn').addEventListener('click', () => {
+    startChapterTts(chapter, Math.min(ttsState.paragraphs.length - 1, ttsState.index + 1));
+  });
+  bar.querySelector('#ttsRate').addEventListener('change', () => {
+    if (ttsState.playing) startChapterTts(chapter, ttsState.index);   // hız anında uygulanır
+  });
+  bar.querySelector('#ttsStopBtn').addEventListener('click', stopChapterTts);
+  return bar;
+}
+
 function startChapterTts(chapter, startIndex = 0) {
   if (!window.speechSynthesis) {
     alert('Tarayıcın sesli okumayı desteklemiyor. Chrome, Edge ya da Safari dene.');
@@ -5149,9 +5194,9 @@ function startChapterTts(chapter, startIndex = 0) {
   }
   ttsState.playing = true;
   ttsState.index = Math.max(0, Math.min(startIndex, ttsState.paragraphs.length - 1));
-  document.getElementById('ttsPlayBtn').style.display = 'none';
-  document.getElementById('ttsStopBtn').style.display = '';
-  document.getElementById('ttsRate').style.display = '';
+  ensureTtsBar(chapter);
+  const playBtn = document.getElementById('ttsPlayBtn');
+  if (playBtn) playBtn.style.display = 'none';
   speakCurrentParagraph();
 }
 
@@ -5161,6 +5206,8 @@ function speakCurrentParagraph() {
   if (!p) { stopChapterTts(); return; }
 
   highlightTtsParagraph(p.number);
+  const prog = document.getElementById('ttsProgress');
+  if (prog) prog.textContent = `P${p.number} · ${ttsState.index + 1}/${ttsState.paragraphs.length}`;
   const u = new SpeechSynthesisUtterance(p.text.trim());
   u.lang = 'tr-TR';
   if (ttsState.voice) u.voice = ttsState.voice;
@@ -5191,12 +5238,9 @@ function stopChapterTts() {
     el.style.background = '';
     el.style.boxShadow = '';
   });
+  document.getElementById('ttsFloatingBar')?.remove();
   const play = document.getElementById('ttsPlayBtn');
-  const stop = document.getElementById('ttsStopBtn');
-  const rate = document.getElementById('ttsRate');
   if (play) play.style.display = '';
-  if (stop) stop.style.display = 'none';
-  if (rate) rate.style.display = 'none';
 }
 
 // Sesler tarayıcıda gecikmeli yüklenir - hazır olunca seçimi tazele

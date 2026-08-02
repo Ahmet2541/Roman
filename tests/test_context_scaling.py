@@ -137,3 +137,32 @@ def test_context_size_breakdown(client, headers):
     # En büyük katman başta olmalı
     sizes = [b["char_count"] for b in data["breakdown"]]
     assert sizes == sorted(sizes, reverse=True)
+
+
+def test_scans_include_text_in_heading_entries(client, headers):
+    """KRİTİK: metin Kısım/Alt Başlık girdilerinde de durabilir (içe
+    aktarılan romanlarda olağan). Taramalar TÜR'e değil İÇERİĞE bakmalı -
+    aksi halde romanın büyük kısmı hiç taranmıyordu."""
+    from app.qwen_client import build_index_layer, build_whole_novel_layer
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+    from app import models
+
+    # Gerçek senaryo: bölüm olarak yazılmış metin sonradan başlığa çevrilir
+    # (içe aktarma ya da kullanıcının yapıyı yeniden düzenlemesi). Backend
+    # başlığa YENİ paragraf eklemeyi engeller ama mevcut metin orada kalır.
+    part = client.post("/chapters/", json={"number": 1, "kind": "chapter", "title": "BİRİNCİ BÖLÜM"}, headers=headers).json()
+    client.put(f"/chapters/{part['id']}/paragraphs/1", json={"number": 1, "text": "Kısımda duran gerçek metin."}, headers=headers)
+    client.put(f"/chapters/{part['id']}", json={"summary": "ZAMAN: 2030. OLAY: Açılış.", "kind": "part"}, headers=headers)
+
+    db = sessionmaker(bind=engine)()
+    novel_id = int(headers["X-Novel-Id"])
+    uid = db.query(models.Novel).filter(models.Novel.id == novel_id).first().universe_id
+
+    # Fihrist katmanı: özeti olan başlık girdisi de görünmeli
+    idx = build_index_layer(db, uid, novel_id)
+    assert "ZAMAN: 2030" in idx
+
+    # Tüm kitap katmanı: başlıktaki metin de kitabın parçası
+    whole = build_whole_novel_layer(db, novel_id)
+    assert "Kısımda duran gerçek metin." in whole

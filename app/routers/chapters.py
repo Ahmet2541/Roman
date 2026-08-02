@@ -324,6 +324,30 @@ def resolve_chapters_for_part(db: Session, novel_id: int, part_id: int) -> list:
     return result
 
 
+@router.post("/{chapter_id}/suggest-entities", response_model=List[schemas.AiSuggestion])
+def suggest_entities_single(
+    chapter_id: int, db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=15, window_seconds=60, label="varlık önerisi")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """TEK bölüm için varlık önerisi. Frontend iki yerden bu ucu çağırıyordu
+    (bölümden ayrılınca arka plan taraması ve "AI ile varlık öner" düğmesi)
+    ama uç yalnızca TOPLU hâliyle vardı - istekler sessizce 404 alıyor,
+    öneriler hiç gelmiyordu."""
+    chapter = db.query(models.Chapter).filter(
+        models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id
+    ).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
+    if not any((p.text or "").strip() for p in chapter.paragraphs):
+        return []
+    try:
+        return suggest_entities_for_chapters(db, [chapter])
+    except Exception as exc:
+        logger.exception("Varlık önerisi üretimi başarısız oldu")
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+
+
 @router.post("/suggest-entities-bulk", response_model=List[schemas.AiSuggestion])
 def suggest_entities_bulk(
     payload: schemas.BulkSuggestRequest, db: Session = Depends(get_db),

@@ -95,7 +95,10 @@ def build_index_layer(db: Session, universe_id: int, current_novel_id: int, excl
 
     chapters = (
         db.query(models.Chapter)
-        .filter(models.Chapter.novel_id.in_(novel_ids), models.Chapter.kind == "chapter", models.Chapter.summary != "")
+        # Tür filtresi YOK: özeti olan her girdi fihriste girer. Kullanıcı
+        # metni Kısım/Alt Başlık girdilerinde tutabiliyor; tür filtresi
+        # bunları AI'dan gizliyordu.
+        .filter(models.Chapter.novel_id.in_(novel_ids), models.Chapter.summary != "")
         .all()
     )
     if current_novel_id is not None:
@@ -546,7 +549,6 @@ def summarize_chapter(db: Session, chapter: "models.Chapter") -> str:
         db.query(models.Chapter)
         .filter(
             models.Chapter.novel_id == chapter.novel_id,
-            models.Chapter.kind == "chapter",
             models.Chapter.number < chapter.number,
         )
         .order_by(models.Chapter.number.desc())
@@ -1769,9 +1771,10 @@ def full_scan(db: Session, novel_id: int, universe_id: int, full_text_last_n: in
     seferlik tarama, context penceresi büyüklüğüyle doğal olarak sınırlı -
     bu, o sınırı esneten ama tamamen ortadan kaldırmayan bir yaklaşım."""
     all_entries = db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).order_by(models.Chapter.number).all()
-    chapters = [c for c in all_entries if c.kind == "chapter"]
+    # Ölçüt tür değil İÇERİK: paragrafı olan her girdi taranır.
+    chapters = [c for c in all_entries if any((p.text or "").strip() for p in c.paragraphs)]
     if not chapters:
-        return {"summary": "Henüz taranacak bölüm yok.", "issues": []}
+        return {"summary": "Henüz taranacak metin yok.", "issues": []}
 
     cutoff_number = chapters[max(0, len(chapters) - full_text_last_n)].number
     fixed_layer = build_fixed_layer(db, universe_id)
@@ -1780,15 +1783,24 @@ def full_scan(db: Session, novel_id: int, universe_id: int, full_text_last_n: in
     # parçalama, bu blokları ardışık gruplara ayırarak yapılır.
     entry_blocks = []
     for entry in all_entries:
-        if entry.kind != "chapter":
+        paragraphs = [p for p in entry.paragraphs if (p.text or "").strip()]
+        # ÖNEMLİ: tür değil İÇERİK belirleyici. Kısım/Alt Başlık girdileri
+        # "sadece ayraçtır, metni olmaz" varsayımıyla atlanıyordu; ama içe
+        # aktarılan romanlarda (ve kullanıcı bilerek öyle kurduğunda) asıl
+        # metin bu girdilerde durabiliyor - o zaman tutarlılık taraması
+        # romanın büyük kısmını hiç görmüyordu. Artık paragrafı olan HER
+        # girdi taranır; paragrafsız olanlar yapı görünsün diye başlık
+        # satırı olarak kalır.
+        if not paragraphs:
             entry_blocks.append(f"\n### {entry.title or ('Ayraç ' + str(entry.number))} ###")
             continue
-        header = f"\n=== BÖLÜM {entry.number}{' - ' + entry.title if entry.title else ''} ==="
+        tur = "BÖLÜM" if entry.kind == "chapter" else ("KISIM" if entry.kind == "part" else "ALT BAŞLIK")
+        header = f"\n=== {tur} {entry.number}{' - ' + entry.title if entry.title else ''} ==="
         if entry.number < cutoff_number and entry.summary:
             entry_blocks.append(header + f"\n[ÖZET] {entry.summary}")
         else:
             block = [header]
-            for p in entry.paragraphs:
+            for p in paragraphs:
                 block.append(f"[Paragraf {p.number}] {p.text}")
             entry_blocks.append("\n".join(block))
 
@@ -2177,7 +2189,8 @@ def suggest_style_patterns(db: Session, universe_id: int, max_chars: int = 12000
     for novel in novels:
         chapters.extend(
             db.query(models.Chapter)
-            .filter(models.Chapter.novel_id == novel.id, models.Chapter.kind == "chapter")
+            # Tür filtresi YOK - metin nerede duruyorsa orada taranır
+            .filter(models.Chapter.novel_id == novel.id)
             .order_by(models.Chapter.number)
             .all()
         )
@@ -2342,7 +2355,8 @@ def build_whole_novel_layer(db: Session, novel_id: int, max_chars: int = 60000) 
     temsil edilsin (baştan kesip sonu hiç görmemek daha kötü olurdu)."""
     chapters = (
         db.query(models.Chapter)
-        .filter(models.Chapter.novel_id == novel_id, models.Chapter.kind == "chapter")
+        # Tür filtresi YOK - metni olan her girdi kitabın parçasıdır
+        .filter(models.Chapter.novel_id == novel_id)
         .order_by(models.Chapter.number)
         .all()
     )

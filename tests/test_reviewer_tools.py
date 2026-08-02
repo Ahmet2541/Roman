@@ -439,3 +439,25 @@ def test_infer_event_date_uses_chapter_summary(client, headers):
     assert "ZAMAN: 28 Haziran 2030" in captured["user"]  # bölüm özeti prompt'a girdi
     # Öneri KAYDEDİLMEZ
     assert client.get("/events/", headers=headers).json()[0]["occurred_at"] == ""
+
+
+def test_single_chapter_entity_suggestion_endpoint(client, headers):
+    """Regresyon: /chapters/{id}/suggest-entities ucu YOKTU ama frontend iki
+    yerden çağırıyordu - "AI ile varlık öner" sessizce başarısız oluyordu."""
+    ch = _chapter_with_text(client, headers, ["İhtiyar teknisyen kabloları onardı."])
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({"suggestions": [
+            {"entity_type": "character", "name": "İhtiyar Teknisyen", "description": "Kabloları onaran adam."},
+        ]})
+        r = client.post(f"/chapters/{ch['id']}/suggest-entities", headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()[0]["name"] == "İhtiyar Teknisyen"
+
+    # Boş bölümde Qwen'e hiç gitmez
+    bos = client.post("/chapters/", json={"number": 9, "kind": "chapter", "title": "Boş"}, headers=headers).json()
+    with patch("app.qwen_client.get_client") as mc:
+        r = client.post(f"/chapters/{bos['id']}/suggest-entities", headers=headers)
+        mc.assert_not_called()
+    assert r.json() == []
+    # Olmayan bölüm 404
+    assert client.post("/chapters/999999/suggest-entities", headers=headers).status_code == 404

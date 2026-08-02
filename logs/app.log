@@ -42,3 +42,57 @@
 2026-08-01 02:50:09,532 [INFO] roman_api.migrations: Göç: glossary_terms.universe_id, eski novel_id üzerinden dolduruldu
 2026-08-01 02:50:09,533 [INFO] roman_api.migrations: Göç: rules.universe_id, eski novel_id üzerinden dolduruldu
 2026-08-01 02:50:09,534 [INFO] roman_api.migrations: Göç: progressions.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:04,363 [INFO] roman_api.migrations: Göç: characters.novel_id ekleniyor
+2026-08-02 16:31:04,370 [INFO] roman_api.migrations: Göç: character_relationships.novel_id ekleniyor
+2026-08-02 16:31:04,374 [INFO] roman_api.migrations: Göç: places.novel_id ekleniyor
+2026-08-02 16:31:04,377 [INFO] roman_api.migrations: Göç: events.novel_id ekleniyor
+2026-08-02 16:31:04,382 [INFO] roman_api.migrations: Göç: objects.novel_id ekleniyor
+2026-08-02 16:31:04,404 [INFO] roman_api.migrations: Göç: foreshadowings.novel_id ekleniyor
+2026-08-02 16:31:04,409 [INFO] roman_api.migrations: Göç: glossary_terms.novel_id ekleniyor
+2026-08-02 16:31:04,413 [INFO] roman_api.migrations: Göç: rules.novel_id ekleniyor
+2026-08-02 16:31:04,417 [INFO] roman_api.migrations: Göç: progressions.novel_id ekleniyor
+2026-08-02 16:31:04,427 [INFO] roman_api.migrations: Göç: characters.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:04,428 [INFO] roman_api.migrations: Göç: character_relationships.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:04,428 [INFO] roman_api.migrations: Göç: places.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:04,429 [INFO] roman_api.migrations: Göç: events.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:04,429 [INFO] roman_api.migrations: Göç: objects.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:04,430 [INFO] roman_api.migrations: Göç: foreshadowings.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:04,430 [INFO] roman_api.migrations: Göç: glossary_terms.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:04,431 [INFO] roman_api.migrations: Göç: rules.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:04,431 [INFO] roman_api.migrations: Göç: progressions.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:19,517 [INFO] roman_api.migrations: Göç: characters.novel_id ekleniyor
+2026-08-02 16:31:19,525 [INFO] roman_api.migrations: Göç: character_relationships.novel_id ekleniyor
+2026-08-02 16:31:19,530 [INFO] roman_api.migrations: Göç: places.novel_id ekleniyor
+2026-08-02 16:31:19,535 [INFO] roman_api.migrations: Göç: events.novel_id ekleniyor
+2026-08-02 16:31:19,542 [INFO] roman_api.migrations: Göç: objects.novel_id ekleniyor
+2026-08-02 16:31:19,547 [INFO] roman_api.migrations: Göç: foreshadowings.novel_id ekleniyor
+2026-08-02 16:31:19,553 [INFO] roman_api.migrations: Göç: glossary_terms.novel_id ekleniyor
+2026-08-02 16:31:19,558 [INFO] roman_api.migrations: Göç: rules.novel_id ekleniyor
+2026-08-02 16:31:19,564 [INFO] roman_api.migrations: Göç: progressions.novel_id ekleniyor
+2026-08-02 16:31:19,572 [INFO] roman_api.migrations: Göç: characters.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:19,573 [INFO] roman_api.migrations: Göç: character_relationships.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:19,574 [INFO] roman_api.migrations: Göç: places.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:19,574 [INFO] roman_api.migrations: Göç: events.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:19,575 [INFO] roman_api.migrations: Göç: objects.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:19,576 [INFO] roman_api.migrations: Göç: foreshadowings.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:19,577 [INFO] roman_api.migrations: Göç: glossary_terms.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:19,577 [INFO] roman_api.migrations: Göç: rules.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:19,578 [INFO] roman_api.migrations: Göç: progressions.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:32,024 [INFO] roman_api.migrations: Göç: characters.novel_id ekleniyor
+2026-08-02 16:31:32,029 [INFO] roman_api.migrations: Göç: character_relationships.novel_id ekleniyor
+2026-08-02 16:31:32,033 [INFO] roman_api.migrations: Göç: places.novel_id ekleniyor
+2026-08-02 16:31:32,038 [INFO] roman_api.migrations: Göç: events.novel_id ekleniyor
+2026-08-02 16:31:32,042 [INFO] roman_api.migrations: Göç: objects.novel_id ekleniyor
+2026-08-02 16:31:32,046 [INFO] roman_api.migrations: Göç: foreshadowings.novel_id ekleniyor
+2026-08-02 16:31:32,050 [INFO] roman_api.migrations: Göç: glossary_terms.novel_id ekleniyor
+2026-08-02 16:31:32,054 [INFO] roman_api.migrations: Göç: rules.novel_id ekleniyor
+2026-08-02 16:31:32,058 [INFO] roman_api.migrations: Göç: progressions.novel_id ekleniyor
+2026-08-02 16:31:32,067 [INFO] roman_api.migrations: Göç: characters.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:32,067 [INFO] roman_api.migrations: Göç: character_relationships.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:32,068 [INFO] roman_api.migrations: Göç: places.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:32,068 [INFO] roman_api.migrations: Göç: events.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:32,069 [INFO] roman_api.migrations: Göç: objects.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:32,069 [INFO] roman_api.migrations: Göç: foreshadowings.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:32,070 [INFO] roman_api.migrations: Göç: glossary_terms.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:32,071 [INFO] roman_api.migrations: Göç: rules.universe_id, eski novel_id üzerinden dolduruldu
+2026-08-02 16:31:32,071 [INFO] roman_api.migrations: Göç: progressions.universe_id, eski novel_id üzerinden dolduruldu
