@@ -2358,7 +2358,7 @@ function getSelectedEntities() {
   }));
 }
 
-function renderChatMessages() {
+function renderChatMessages(scrollTo = 'last') {
   const el = document.getElementById('aiChatMessages');
   if (!el) return;
   if (!aiChatMessages.length) {
@@ -2383,7 +2383,16 @@ function renderChatMessages() {
     });
   });
   wireEntityUpdateProposalButtons();
-  el.scrollTop = el.scrollHeight;
+  // Kaydırma: yeni yanıt gelince mesajın SONUNA değil BAŞINA git - uzun bir
+  // cevapta kullanıcı en alta düşüp yukarı tırmanmak zorunda kalmasın.
+  // Son mesaj kutuya sığıyorsa zaten hepsi görünür.
+  const bubbles = el.querySelectorAll('.ai-chat-bubble, [data-msg-idx]');
+  const last = bubbles[bubbles.length - 1];
+  if (scrollTo === 'last' && last) {
+    el.scrollTop = Math.max(0, last.offsetTop - el.offsetTop - 8);
+  } else {
+    el.scrollTop = el.scrollHeight;
+  }
 }
 
 // AI'nın sohbet sırasında önerdiği ama HENÜZ KAYDEDİLMEMİŞ bir varlık
@@ -4452,7 +4461,12 @@ async function runParagraphAi(chapter, number, mode) {
       + '- aksiyon: güçlü fiiller, hız, uzun betimleme yok\n'
       + '- dramatik: iç ses, beden dili, duygunun dolaylı gösterimi\n'
       + '- atmosferik betimleme: duyuları çeşitlendir (koku, ses, sıcaklık, doku), mekanı canlandır\n'
-      + 'KURALLAR: (1) KISALTMA - gerekirse metni BÜYÜT, derinleştir; sadece gerçekten boş '
+      + 'KURALLAR: (0) EYLEM SIRASINI BOZMA - mevcut metinde tamamlanmış bir eylemi '
+      + 'yeniden başlatma. "Mendilini çıkardı" yazıyorsa artık mendil elindedir; onu '
+      + '"cebinden çekip" diye TEKRAR çıkarma. Detay eklemek istiyorsan eylemin ÖNCESİNE '
+      + '(hazırlık) ya da SONRASINA (sonuç) ekle, ortasına geri dönme. Zaman akışı tek '
+      + 'yönlüdür: geçmiş zamanda anlatılan bir eylem tamamlanmıştır. '
+      + '(1) KISALTMA - gerekirse metni BÜYÜT, derinleştir; sadece gerçekten boş '
       + 'tekrarları at. (2) Mevcut SOMUT detayları (rakam, ölçü, renk, özel isim) AYNEN KORU, '
       + 'asla düşürme. (3) Olay akışını ve anlamı değiştirme, yeni olay ekleme. '
       + '(4) Üslup uyarılarındaki kalıplardan kaçın.\n'
@@ -4478,10 +4492,36 @@ async function runParagraphAi(chapter, number, mode) {
         ${notes}
         <div class="form-actions">
           ${mode === 'suggest' ? `<button class="btn btn-primary btn-sm para-ai-replace" data-number="${number}">Paragrafı Değiştir</button>` : ''}
+          <button class="btn btn-sm para-ai-chat-toggle" data-number="${number}" title="Bu paragrafı AI ile konuş - sadece bu paragraf ve komşuları bağlamda">💬 Bu paragrafı konuş</button>
           <button class="btn btn-sm para-ai-close">Kapat</button>
+        </div>
+        <div class="para-chat-box" data-number="${number}" style="display:none;border-top:1px dashed var(--border);margin-top:8px;padding-top:8px;">
+          <div class="para-chat-log" data-number="${number}" style="max-height:200px;overflow-y:auto;font-size:12.5px;"></div>
+          <div style="display:flex;gap:6px;margin-top:6px;">
+            <textarea class="para-chat-input" data-number="${number}" placeholder="Ör: daha kısa olsun / sesi daha soğuk / mendil detayını çıkar" style="flex:1;min-height:38px;box-sizing:border-box;font-size:12.5px;"></textarea>
+            <button class="btn btn-sm btn-primary para-chat-send" data-number="${number}">Gönder</button>
+          </div>
         </div>
       </div>`;
     panel.querySelector('.para-ai-close').addEventListener('click', () => { panel.style.display = 'none'; panel.innerHTML = ''; });
+    // Paragraf sohbeti: öneriyi tartışarak iyileştirme. Bağlam SADECE bu
+    // paragraf + komşuları + son öneri - tüm bölüm sohbetine karışmaz,
+    // kendi geçmişi vardır (paragraf bazlı).
+    const chatToggle = panel.querySelector('.para-ai-chat-toggle');
+    if (chatToggle) chatToggle.addEventListener('click', () => {
+      const box = panel.querySelector('.para-chat-box');
+      box.style.display = box.style.display === 'none' ? '' : 'none';
+      if (box.style.display !== 'none') {
+        renderParaChatLog(number);
+        panel.querySelector('.para-chat-input').focus();
+      }
+    });
+    const sendBtn = panel.querySelector('.para-chat-send');
+    if (sendBtn) sendBtn.addEventListener('click', () => sendParagraphChat(chapter, number, neighborBlock, text));
+    const chatInput = panel.querySelector('.para-chat-input');
+    if (chatInput) chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendParagraphChat(chapter, number, neighborBlock, text); }
+    });
     const replaceBtn = panel.querySelector('.para-ai-replace');
     if (replaceBtn) replaceBtn.addEventListener('click', async () => {
       if (!confirm('Paragraf önerilen metinle DEĞİŞTİRİLECEK. Eski hali "Geçmiş"ten geri alınabilir. Devam?')) return;
@@ -4937,4 +4977,71 @@ function handleStarterKeydown(e) {
   if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); box._applyOption(active); return true; }
   if (e.key === 'Escape') { e.preventDefault(); box.remove(); return true; }
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// PARAGRAF SOHBETİ: öneri panelinin içinde, SADECE o paragrafa odaklı mini
+// sohbet. Kendi geçmişi vardır (paragraf bazlı) ve bağlamı dardır: hedef
+// paragraf + komşuları + son üretilen versiyon. Böylece "daha soğuk olsun",
+// "mendil detayını çıkar" gibi turlar, bölüm sohbetini kirletmeden döner.
+// ---------------------------------------------------------------------------
+const paraChatHistories = {};   // { "12": [ {role, content}, ... ] }
+
+function renderParaChatLog(number) {
+  const log = document.querySelector(`.para-chat-log[data-number="${number}"]`);
+  if (!log) return;
+  const msgs = paraChatHistories[number] || [];
+  if (!msgs.length) {
+    log.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">Bu paragraf hakkında ne değişsin? Yazdıkça yeni versiyonlar üretilir.</div>';
+    return;
+  }
+  log.innerHTML = msgs.map((m, i) => `
+    <div style="margin-bottom:6px;padding:5px 7px;border-radius:6px;background:${m.role === 'user' ? 'var(--paper-dim)' : '#fff'};border:1px solid var(--border);">
+      <div style="font-size:10px;color:var(--text-muted);">${m.role === 'user' ? 'Sen' : 'AI'}</div>
+      <div style="white-space:pre-wrap;">${escapeHtml(m.content)}</div>
+      ${m.role === 'assistant' ? `<button class="btn btn-sm para-chat-apply" data-number="${number}" data-idx="${i}" style="margin-top:4px;font-size:11px;">Bu metni paragrafa yaz</button>` : ''}
+    </div>`).join('');
+  log.scrollTop = log.scrollHeight;
+  log.querySelectorAll('.para-chat-apply').forEach(btn => btn.addEventListener('click', async () => {
+    const msg = paraChatHistories[number][parseInt(btn.dataset.idx, 10)];
+    if (!confirm('Paragraf bu metinle değiştirilecek. Eski hali "Geçmiş"ten geri alınabilir. Devam?')) return;
+    await replaceParagraphText(currentChapter.id, parseInt(number, 10), msg.content);
+  }));
+}
+
+async function sendParagraphChat(chapter, number, neighborBlock, originalText) {
+  const input = document.querySelector(`.para-chat-input[data-number="${number}"]`);
+  if (!input || !input.value.trim()) return;
+  const userMsg = input.value.trim();
+  input.value = '';
+  paraChatHistories[number] = paraChatHistories[number] || [];
+  paraChatHistories[number].push({ role: 'user', content: userMsg });
+  renderParaChatLog(number);
+
+  // Son üretilen versiyon (varsa) temel alınır; yoksa paragrafın kendisi
+  const history = paraChatHistories[number];
+  const lastAi = [...history].reverse().find(m => m.role === 'assistant');
+  const base = lastAi ? lastAi.content : originalText;
+  const selected = Array.from(document.querySelectorAll('.entity-check:checked')).map(cb => ({
+    entity_type: cb.dataset.type, entity_id: parseInt(cb.dataset.id, 10),
+  }));
+  const instruction =
+    `Bu bir TEK PARAGRAF üzerinde çalışma turudur (P${number}). Aşağıdaki isteği uygula ve `
+    + 'SADECE paragrafın yeni halini döndür - açıklama, başlık, tırnak ekleme.\n'
+    + 'EYLEM SIRASINI BOZMA: tamamlanmış bir eylemi yeniden başlatma, zaman akışı tek yönlü.\n'
+    + `İSTEK: ${userMsg}` + (neighborBlock || '');
+
+  const log = document.querySelector(`.para-chat-log[data-number="${number}"]`);
+  if (log) log.insertAdjacentHTML('beforeend', '<div class="para-chat-pending" style="color:var(--text-muted);font-size:12px;">yazılıyor…</div>');
+  try {
+    const result = await api.post('/ai/assist', {
+      chapter_number: chapter.number, instruction,
+      selected_entities: selected, existing_text: base,
+    });
+    paraChatHistories[number].push({ role: 'assistant', content: (result.generated_text || '').trim() });
+    renderParaChatLog(number);
+  } catch (err) {
+    document.querySelector('.para-chat-pending')?.remove();
+    if (log) log.insertAdjacentHTML('beforeend', `<div class="error-text" style="font-size:12px;">${escapeHtml(err.message)}</div>`);
+  }
 }

@@ -360,7 +360,7 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   /* @ öneri kutusu tam genişlik, ekrandan taşmasın */
   #mentionSuggestBox { width: 100%; box-sizing: border-box; }
   /* Sohbet balonları dar ekranda uzun kelimelerle taşmasın */
-  .ai-chat-messages { max-height: 260px; }
+  .ai-chat-messages { max-height: 300px;  min-height: 180px; }
   .ai-chat-bubble { overflow-wrap: anywhere; }
   /* "+ Yeni" araç çubuğunda sağa yaslı kalsın (dar ekranda ortalanmasın) */
   .toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
