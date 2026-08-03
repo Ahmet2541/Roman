@@ -1141,8 +1141,7 @@ function renderChapterListDOM() {
 function openChapterEditPrompt(id) {
   const c = lastLoadedChapters.find(x => String(x.id) === String(id));
   if (!c) return;
-  const overlay = document.getElementById('createItemModalOverlay');
-  if (!overlay) return;
+  const overlay = ensureModalOverlay();
   // Tür adları SEVİYE anlatımıyla: kullanıcının kendi başlık metinleri
   // ("BİRİNCİ BÖLÜM", "KISIM 2") sistemin tür adlarıyla çakışıyordu.
   // Artık soru "bu ne isimle anılıyor" değil, "hiyerarşide nerede duruyor".
@@ -1401,7 +1400,7 @@ function openCreateItemModal(kind) {
     </div>`;
   };
 
-  const overlay = document.getElementById('createItemModalOverlay');
+  const overlay = ensureModalOverlay();
   overlay.innerHTML = `
     <div class="panel" style="width:340px;max-width:92vw;">
       <strong style="font-size:13px;">Yeni ${kindLabel}</strong>
@@ -5256,9 +5255,23 @@ window.addEventListener('beforeunload', () => window.speechSynthesis?.cancel());
 // başlıklar geçici adlarla ("Tur 1", "Aşama 1") gelir, üstlerine tıklayıp
 // gerçek adlarını yazarsın.
 // ---------------------------------------------------------------------------
+// Modal kapsayıcısı yalnızca Roman görünümü çizilirken oluşturuluyordu;
+// Plan Matrisi gibi başka ekranlarda yoktu ve pencereyi açan fonksiyonlar
+// sessizce geri dönüyordu ("Yeni Matris" hiçbir şey yapmıyordu). Bu
+// yardımcı, kapsayıcı yoksa oluşturur - her ekranda çalışır.
+function ensureModalOverlay() {
+  let overlay = document.getElementById('createItemModalOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'createItemModalOverlay';
+    overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(10,12,20,0.45);z-index:50;align-items:center;justify-content:center;';
+    document.body.appendChild(overlay);
+  }
+  return overlay;
+}
+
 function openNewMatrixDialog() {
-  const overlay = document.getElementById('createItemModalOverlay');
-  if (!overlay) return;
+  const overlay = ensureModalOverlay();
   overlay.innerHTML = `
     <div class="panel" style="max-width:460px;width:92%;">
       <b>Yeni Plan Matrisi</b>
