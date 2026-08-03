@@ -3965,7 +3965,21 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
   const row = m.rows.find(r => r.id === rowId);
   const cell = cellMap[`${colId}:${rowId}`] || null;
   let chapters = [];
-  try { chapters = (await api.get('/chapters/')).filter(c => c.kind === 'chapter'); } catch (e) { /* seçici olmadan devam */ }
+  // Tür filtresi YOK: kullanıcının metni Kısım/Alt Başlık girdilerinde de
+  // durabiliyor; filtre yüzünden liste boş görünüyordu ("bağlı değil"den
+  // başka seçenek çıkmıyordu). Hiyerarşik numarayla listelenir.
+  try {
+    const tumu = await api.get('/chapters/');
+    const hiyerarsi = buildChapterHierarchy(tumu);
+    chapters = hiyerarsi.map(it => ({
+      id: it.chapter.id,
+      number: it.chapter.number,
+      kind: it.chapter.kind,
+      displayNumber: it.displayNumber,
+      title: it.chapter.title,
+      paragraphCount: it.chapter.paragraph_count || 0,
+    }));
+  } catch (e) { /* seçici olmadan devam */ }
 
   editor.innerHTML = `
     <div class="panel">
@@ -3979,7 +3993,11 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
         <label>Bağlı bölüm <span style="font-weight:400;color:var(--text-muted);">(plan SADECE bu bölüm yazılırken AI'ya gider)</span></label>
         <select id="mCellChapter">
           <option value="">(bağlı değil)</option>
-          ${chapters.map(c => `<option value="${c.id}" ${cell && cell.chapter_id === c.id ? 'selected' : ''}>${c.number} — ${escapeHtml(stripMarkdownArtifacts(c.title) || '(başlıksız)')}</option>`).join('')}
+          ${chapters.map(c => {
+            const tur = c.kind === 'part' ? 'ÜST' : (c.kind === 'subtitle' ? 'ARA' : 'metin');
+            const par = c.paragraphCount ? `, ${c.paragraphCount} par.` : '';
+            return `<option value="${c.id}" ${cell && cell.chapter_id === c.id ? 'selected' : ''}>#${c.displayNumber} [${tur}${par}] ${escapeHtml(stripMarkdownArtifacts(c.title) || '(başlıksız)')}</option>`;
+          }).join('')}
         </select>
       </div>
       <div class="form-actions">
