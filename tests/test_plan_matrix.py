@@ -435,3 +435,40 @@ def test_row_without_instructions_adds_nothing(client, headers):
         "selected_entities": [], "chapter_number": cell["chapter_number"],
     }, headers=headers).json()["context"]
     assert "BU AŞAMANIN YAZIM KISITLARI" not in ctx  # boşsa maliyet ödenmez
+
+
+def test_matrix_map_layer_in_context(client, headers):
+    """AI, hangi bölümün hangi kolon×satır kesişimi olduğunu bilmeli -
+    "3. bölüm hangi tura ait", "Sorgu aşaması diğer turlarda nerede"
+    soruları ancak bu haritayla cevaplanır."""
+    from app.qwen_client import build_matrix_map_layer, build_context
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+    from app import models
+
+    m = _make_matrix(client, headers, cols=("TUR 1: BAŞKAN", "TUR 2: JEOLOG"), rows=("Hologram", "Sorgu"))
+    client.post(f"/matrix/{m['id']}/generate-chapters", headers=headers)
+    full = client.get(f"/matrix/{m['id']}", headers=headers).json()
+    hedef = full["cells"][0]
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": hedef["column_id"], "row_id": hedef["row_id"],
+        "content": "Başkanın hologramı.", "chapter_id": hedef["chapter_id"],
+    }, headers=headers)
+
+    db = sessionmaker(bind=engine)()
+    novel_id = int(headers["X-Novel-Id"])
+    uid = db.query(models.Novel).filter(models.Novel.id == novel_id).first().universe_id
+
+    harita = build_matrix_map_layer(db, novel_id)
+    assert "MATRİS HARİTASI" in harita
+    assert "TUR 1: BAŞKAN" in harita and "TUR 2: JEOLOG" in harita
+    assert "Hologram → Bölüm" in harita and "Sorgu → Bölüm" in harita
+    assert "plan ✓" in harita and "plan boş" in harita   # doluluk da görünüyor
+    assert "Başkanın hologramı" not in harita            # İÇERİK gitmez (ucuz kalsın)
+
+    ctx = build_context(db, novel_id, uid, [])
+    assert "MATRİS HARİTASI" in ctx
+
+    # Matris yoksa katman hiç oluşmaz
+    client.delete(f"/matrix/{m['id']}", headers=headers)
+    assert build_matrix_map_layer(db, novel_id) == ""

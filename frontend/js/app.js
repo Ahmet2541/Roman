@@ -81,7 +81,7 @@ const ENTITY_TYPES = {
   foreshadowing: { endpoint: '/foreshadowings/', label: 'İpucu', plural: 'İpuçları', hasStatus: true, statusOptions: ['açık', 'kapandı'], isRule: false },
   term: { endpoint: '/glossary/', label: 'Terim', plural: 'Terimler', hasStatus: false, isRule: false },
   rule: { endpoint: '/rules/', label: 'Kural', plural: 'Roman Kuralları', hasStatus: false, isRule: true, hasTags: true },
-  faction: { endpoint: '/factions/', label: 'Faksiyon', plural: 'Faksiyonlar', hasStatus: false, isRule: false },
+  faction: { endpoint: '/factions/', label: 'Grup / Kurum', plural: 'Gruplar & Kurumlar', hasStatus: false, isRule: false },
 };
 
 const main = () => document.getElementById('mainContent');
@@ -134,6 +134,7 @@ async function switchView(view) {
   if (view === 'fullscan') return renderFullScanView();
   if (view === 'stylescan') return renderStyleScanView();
   if (view === 'matrix') return renderMatrixView();
+  if (view === 'faction') return renderFactionView();
   if (view === 'place') return renderPlacesView();
   return renderEntityView(view);
 }
@@ -236,7 +237,7 @@ function renderEntityList(type, items) {
       if (!confirm('Bu kaydı silmek istediğine emin misin?')) return;
       try {
         await api.del(`${cfg.endpoint}${btn.dataset.id}`);
-        renderEntityView(type);
+        if (type === 'faction') renderFactionView(); else renderEntityView(type);
       } catch (err) { alert(err.message); }
     });
   });
@@ -1522,7 +1523,7 @@ function renderReader(chapter) {
       </div>
       <div style="flex:1;">
         <div class="paragraph-text" contenteditable="true" data-number="${p.number}">${escapeHtml(p.text)}</div>
-        <div>${(p.mentions || []).map(m => `<span class="mention-chip">${escapeHtml(m.entity_name)}</span>`).join('')}${p.is_style_sample ? '<span class="mention-chip" style="background:#1b2230;color:#fff;">★ stil örneği</span>' : ''}</div>
+        <div>${(p.mentions || []).map(m => `<span class="mention-chip mention-goto" data-type="${m.entity_type}" data-id="${m.entity_id}" style="cursor:pointer;" title="${escapeHtml(m.entity_name)} kaydına git">${escapeHtml(m.entity_name)}</span>`).join('')}${p.is_style_sample ? '<span class="mention-chip" style="background:#1b2230;color:#fff;">★ stil örneği</span>' : ''}</div>
         <div class="paragraph-toolbar">
         <div class="paragraph-actions">
           <button class="btn btn-sm btn-primary save-para-btn" data-number="${p.number}" disabled title="Değişiklik yapılmadı - paragraf zaten kayıtlı">Kaydet</button>
@@ -1566,6 +1567,7 @@ function renderReader(chapter) {
     </div>
     <div id="chapterHealthStrip" style="margin-top:8px;"></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+      <button class="btn btn-sm" id="highlightNamesBtn" title="Metinde tanımlı kişi/mekan/nesne isimlerinin altını çizer ve tıklanabilir yapar. Bu moda geçince paragraflar okuma moduna alınır (metin bozulmasın diye) - kapatınca yazmaya devam edersin.">🔎 İsimleri Vurgula</button>
       <button class="btn btn-sm" id="ttsPlayBtn" title="Bölümü sesli okur (tarayıcının Türkçe sesi - ücretsiz, metin dışarı çıkmaz). Okunan paragraf vurgulanır; bir paragrafa tıklayıp oradan devam edebilirsin.">🔊 Sesli Oku</button>
 
       <button class="btn btn-sm" id="readerTestBtn" title="Metni okur gözüyle tarar: tempo ölümü, bilgi bocası, klişe, anlaşılmaz cümle, gerilim kırılması. Sadece uyarır, metne dokunmaz.">🎯 Okur Testi</button>
@@ -1725,6 +1727,10 @@ function renderReader(chapter) {
   });
 
   renderChapterHealthStrip(chapter);
+  document.getElementById('highlightNamesBtn').addEventListener('click', () => toggleNameHighlight(chapter));
+  readerPane.querySelectorAll('.mention-goto').forEach(el => el.addEventListener('click', () => {
+    openEntityFromMention(el.dataset.type, parseInt(el.dataset.id, 10));
+  }));
   document.getElementById('ttsPlayBtn').addEventListener('click', () => startChapterTts(chapter));
 
   document.getElementById('readerTestBtn').addEventListener('click', () => runReaderTest(chapter));
@@ -3808,16 +3814,7 @@ async function loadMatrixList() {
       loadMatrixList();
       loadMatrixGrid();
     }));
-    document.getElementById('newMatrixBtn').addEventListener('click', async () => {
-      const name = prompt('Matris adı (ör. "Tur Yapısı"):');
-      if (!name || !name.trim()) return;
-      try {
-        const m = await api.post('/matrix/', { name: name.trim(), columns: [], rows: [] });
-        currentMatrixId = m.id;
-        await loadMatrixList();
-        await loadMatrixGrid();
-      } catch (err) { alert(err.message); }
-    });
+    document.getElementById('newMatrixBtn').addEventListener('click', openNewMatrixDialog);
     if (currentMatrixId && list.some(m => m.id === currentMatrixId)) await loadMatrixGrid();
     else if (list.length === 1) { currentMatrixId = list[0].id; await loadMatrixList(); }
     else if (!list.length) document.getElementById('matrixGridArea').innerHTML = `<div class="empty-state">Henüz matris yok - "+ Yeni Matris" ile başla, sonra kolon ve satırları ekle.</div>`;
@@ -3839,8 +3836,9 @@ async function loadMatrixGrid() {
 
     area.innerHTML = `
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
-        <button class="btn btn-sm" id="mAddCol">+ Kolon (kişi/tur)</button>
-        <button class="btn btn-sm" id="mAddRow">+ Satır (aşama)</button>
+        <button class="btn btn-sm" id="mAddCol">+ Kolon</button>
+        <button class="btn btn-sm" id="mAddRow">+ Satır</button>
+        <button class="btn btn-sm" id="mBulkAdd" title="Tek seferde birden çok kolon/satır ekle">⊞ Toplu ekle</button>
         <button class="btn btn-sm btn-primary" id="mGenChapters" title="Her kolon bir Kısım, her hücre bir Bölüm olur - fihristin sonuna eklenir, hücreler otomatik bağlanır">⚡ Fihristi Oluştur</button>
         <button class="btn btn-sm" id="mAiFill" title="Üstte işaretlediğin kolonların BOŞ hücrelerini, dolu hücrelerdeki kalıbı izleyerek AI taslaklar - hiçbiri onaysız kaydedilmez">🤖 Seçili Kolonların Eksiklerini AI Doldursun</button>
         <button class="btn btn-sm" id="mImport" title="Satır satır 'Aşama adı: içerik' formatında yapıştırılan metni, seçtiğin kolonun hücrelerine dağıtır">📥 Metinden Doldur</button>
@@ -3904,6 +3902,7 @@ async function loadMatrixGrid() {
         renderAiFillReview(m, result);
       } catch (err) { editor.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; }
     });
+    document.getElementById('mBulkAdd').addEventListener('click', () => openBulkAddDialog(m));
     document.getElementById('mImport').addEventListener('click', () => openMatrixImporter(m));
     document.getElementById('mDelMatrix').addEventListener('click', async () => {
       if (!confirm('Matris ve TÜM hücre planları silinecek (bölümlere dokunulmaz). Emin misin?')) return;
@@ -5249,3 +5248,291 @@ if (window.speechSynthesis) {
 }
 // Bölüm/görünüm değişince okuma sürmesin
 window.addEventListener('beforeunload', () => window.speechSynthesis?.cancel());
+
+// ---------------------------------------------------------------------------
+// MATRİS KURULUMU: boyutu baştan ver, isimleri sonra yaz. Tek tek kolon/satır
+// eklemek 9x10'luk bir yapıda 19 ayrı diyalog demekti - hem yorucu hem kafa
+// karıştırıcı. Artık "9 kolon, 10 satır" deyip ızgarayı bir kerede kuruyorsun;
+// başlıklar geçici adlarla ("Tur 1", "Aşama 1") gelir, üstlerine tıklayıp
+// gerçek adlarını yazarsın.
+// ---------------------------------------------------------------------------
+function openNewMatrixDialog() {
+  const overlay = document.getElementById('createItemModalOverlay');
+  if (!overlay) return;
+  overlay.innerHTML = `
+    <div class="panel" style="max-width:460px;width:92%;">
+      <b>Yeni Plan Matrisi</b>
+      <div class="field" style="margin-top:8px;"><label>Matris adı</label>
+        <input type="text" id="nmName" placeholder="ör. Tur Yapısı" value="Tur Yapısı"></div>
+      <div style="display:flex;gap:12px;">
+        <div class="field" style="flex:1;"><label>Kolon sayısı <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(kişi/tur)</span></label>
+          <input type="number" id="nmCols" min="0" max="50" value="8"></div>
+        <div class="field" style="flex:1;"><label>Satır sayısı <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(aşama)</span></label>
+          <input type="number" id="nmRows" min="0" max="50" value="7"></div>
+      </div>
+      <div style="display:flex;gap:12px;">
+        <div class="field" style="flex:1;"><label>Kolon ön adı</label>
+          <input type="text" id="nmColPrefix" value="Tur"></div>
+        <div class="field" style="flex:1;"><label>Satır ön adı</label>
+          <input type="text" id="nmRowPrefix" value="Aşama"></div>
+      </div>
+      <div style="font-size:11.5px;color:var(--text-muted);">
+        Başlıklar geçici adlarla oluşur (ör. "Tur 1", "Aşama 1"); ızgarada
+        üstlerine tıklayıp gerçek adlarını yazarsın. Sonradan ⊞ ile de ekleyebilirsin.
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="nmCreate">Oluştur</button>
+        <button class="btn" id="nmCancel">Vazgeç</button>
+      </div>
+      <div id="nmError" class="error-text"></div>
+    </div>`;
+  overlay.style.display = 'flex';
+  const close = () => { overlay.style.display = 'none'; overlay.innerHTML = ''; };
+  document.getElementById('nmCancel').addEventListener('click', close);
+  document.getElementById('nmCreate').addEventListener('click', async () => {
+    const name = document.getElementById('nmName').value.trim();
+    if (!name) { document.getElementById('nmError').textContent = 'Matris adı gerekli.'; return; }
+    const nCols = Math.max(0, Math.min(50, parseInt(document.getElementById('nmCols').value, 10) || 0));
+    const nRows = Math.max(0, Math.min(50, parseInt(document.getElementById('nmRows').value, 10) || 0));
+    const cp = document.getElementById('nmColPrefix').value.trim() || 'Kolon';
+    const rp = document.getElementById('nmRowPrefix').value.trim() || 'Satır';
+    try {
+      const m = await api.post('/matrix/', {
+        name,
+        columns: Array.from({ length: nCols }, (_, i) => ({ label: `${cp} ${i + 1}` })),
+        rows: Array.from({ length: nRows }, (_, i) => ({ label: `${rp} ${i + 1}` })),
+      });
+      currentMatrixId = m.id;
+      close();
+      await loadMatrixList();
+      await loadMatrixGrid();
+    } catch (err) { document.getElementById('nmError').textContent = err.message; }
+  });
+}
+
+// Var olan matrise TOPLU kolon/satır ekleme (sona eklenir).
+function openBulkAddDialog(m) {
+  const editor = document.getElementById('matrixCellEditor');
+  editor.innerHTML = `
+    <div class="panel">
+      <b>⊞ Toplu Ekle</b>
+      <div style="display:flex;gap:12px;margin-top:8px;">
+        <div class="field" style="flex:1;"><label>Kaç kolon eklensin?</label>
+          <input type="number" id="baCols" min="0" max="50" value="0"></div>
+        <div class="field" style="flex:1;"><label>Kaç satır eklensin?</label>
+          <input type="number" id="baRows" min="0" max="50" value="0"></div>
+      </div>
+      <div style="display:flex;gap:12px;">
+        <div class="field" style="flex:1;"><label>Kolon ön adı</label><input type="text" id="baColPrefix" value="Tur"></div>
+        <div class="field" style="flex:1;"><label>Satır ön adı</label><input type="text" id="baRowPrefix" value="Aşama"></div>
+      </div>
+      <div style="font-size:11.5px;color:var(--text-muted);">Numaralandırma mevcut sayının ardından devam eder.</div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="baApply">Ekle</button>
+        <button class="btn" id="baCancel">Kapat</button>
+      </div>
+      <div id="baError" class="error-text"></div>
+    </div>`;
+  editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  document.getElementById('baCancel').addEventListener('click', () => { editor.innerHTML = ''; });
+  document.getElementById('baApply').addEventListener('click', async () => {
+    const nCols = Math.max(0, Math.min(50, parseInt(document.getElementById('baCols').value, 10) || 0));
+    const nRows = Math.max(0, Math.min(50, parseInt(document.getElementById('baRows').value, 10) || 0));
+    if (!nCols && !nRows) { document.getElementById('baError').textContent = 'En az bir sayı gir.'; return; }
+    const cp = document.getElementById('baColPrefix').value.trim() || 'Kolon';
+    const rp = document.getElementById('baRowPrefix').value.trim() || 'Satır';
+    const btn = document.getElementById('baApply');
+    btn.disabled = true; btn.textContent = 'Ekleniyor…';
+    try {
+      const baseCols = m.columns.length, baseRows = m.rows.length;
+      for (let i = 0; i < nCols; i++) {
+        await api.post(`/matrix/${m.id}/columns`, { label: `${cp} ${baseCols + i + 1}` });
+      }
+      for (let i = 0; i < nRows; i++) {
+        await api.post(`/matrix/${m.id}/rows`, { label: `${rp} ${baseRows + i + 1}` });
+      }
+      document.getElementById('matrixCellEditor').innerHTML = '';
+      await loadMatrixGrid();
+    } catch (err) {
+      document.getElementById('baError').textContent = err.message;
+      btn.disabled = false; btn.textContent = 'Ekle';
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// GRUPLAR & KURUMLAR (faksiyonlar): "şu 15 kişi aynı yapıya bağlı" bilgisi.
+// İkili ilişkiler bunu taşıyamaz (15 kişi = 105 ayrı bağ) ve karakterlerin
+// kendi 'iliskiler' kutusuna dağıldığında grup TERS SORGULANAMAZ ("LÜMEN'e
+// kimler bağlı?"). Bu ekran grubu tek yerde tutar ve üyeleri ROLLERİYLE
+// listeler; bilgi AI bağlamına da girer.
+// ---------------------------------------------------------------------------
+async function renderFactionView() {
+  main().innerHTML = `
+    <h1 class="view-title">Gruplar & Kurumlar</h1>
+    <p style="color:var(--text-muted);font-size:13.5px;max-width:680px;">
+      Bir kuruma, aileye, ekibe ya da gizli yapılanmaya bağlı karakterleri tek yerde
+      topla (LÜMEN yönetimi, sekiz sanık kurulu, hacker ekibi...). Üyeleri rolleriyle
+      eklersin; seçili bir karakter sahnedeyken bağlı olduğu gruplar AI'ya gider.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;">
+      <button class="btn btn-primary" id="newFactionBtn">+ Yeni Grup</button>
+    </div>
+    <div id="formContainer"></div>
+    <div id="factionList"></div>`;
+  document.getElementById('newFactionBtn').addEventListener('click', () => showEntityForm('faction', null));
+  await loadFactionList();
+}
+
+async function loadFactionList() {
+  const listEl = document.getElementById('factionList');
+  if (!listEl) return;
+  try {
+    const [factions, memberships, characters] = await Promise.all([
+      api.get('/factions/'), api.get('/faction-memberships/'), api.get('/characters/'),
+    ]);
+    if (!factions.length) {
+      listEl.innerHTML = '<div class="empty-state">Henüz grup yok. LÜMEN, sanıklar kurulu, hacker ekibi gibi yapıları buradan ekleyebilirsin.</div>';
+      return;
+    }
+    listEl.innerHTML = factions.map(f => {
+      const uyeler = memberships.filter(m => m.faction_id === f.id);
+      return `
+        <div class="entity-row" style="flex-wrap:wrap;">
+          <div style="flex:1;min-width:220px;">
+            <div class="name">${escapeHtml(f.name)} <span style="font-weight:400;color:var(--text-muted);font-size:12px;">${uyeler.length} üye</span></div>
+            <div class="desc">${escapeHtml(truncate(f.description, 120))}</div>
+            <div style="margin-top:4px;">
+              ${uyeler.map(m => `<span class="mention-chip" title="${escapeHtml(m.role || 'rol belirtilmemiş')}">${escapeHtml(m.character_name)}${m.role ? ' · ' + escapeHtml(m.role) : ''}
+                <span class="mem-del" data-id="${m.id}" style="cursor:pointer;opacity:0.6;" title="Üyeliği kaldır">✕</span></span>`).join('')
+                || '<span style="font-size:12px;color:var(--text-muted);">Henüz üye yok</span>'}
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-sm add-member-btn" data-id="${f.id}">+ Üye ekle</button>
+            <button class="btn btn-sm edit-faction-btn" data-id="${f.id}">Düzenle</button>
+            <button class="btn btn-sm btn-danger del-faction-btn" data-id="${f.id}">Sil</button>
+          </div>
+          <div class="member-form" data-id="${f.id}" style="display:none;width:100%;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);"></div>
+        </div>`;
+    }).join('');
+
+    listEl.querySelectorAll('.add-member-btn').forEach(btn => btn.addEventListener('click', () => {
+      const fid = parseInt(btn.dataset.id, 10);
+      const box = listEl.querySelector(`.member-form[data-id="${fid}"]`);
+      const mevcut = memberships.filter(m => m.faction_id === fid).map(m => m.character_id);
+      const secilebilir = characters.filter(c => !mevcut.includes(c.id));
+      if (!secilebilir.length) { box.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted);">Tüm kişiler zaten üye.</div>'; box.style.display = ''; return; }
+      box.style.display = '';
+      box.innerHTML = `
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+          <div class="field" style="flex:1;min-width:160px;margin:0;"><label>Kişi</label>
+            <select class="mem-char">${secilebilir.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select></div>
+          <div class="field" style="flex:1;min-width:160px;margin:0;"><label>Rol <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(Lider, Muhafız, Sanık...)</span></label>
+            <input type="text" class="mem-role" placeholder="ör. Baş Tabip"></div>
+          <button class="btn btn-sm btn-primary mem-save" data-id="${fid}">Ekle</button>
+        </div>`;
+      box.querySelector('.mem-save').addEventListener('click', async () => {
+        try {
+          await api.post('/faction-memberships/', {
+            faction_id: fid,
+            character_id: parseInt(box.querySelector('.mem-char').value, 10),
+            role: box.querySelector('.mem-role').value.trim(),
+          });
+          await loadFactionList();
+        } catch (err) { alert(err.message); }
+      });
+    }));
+    listEl.querySelectorAll('.mem-del').forEach(el => el.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('Bu üyelik kaldırılsın mı? (Karakter silinmez)')) return;
+      try { await api.del(`/faction-memberships/${el.dataset.id}`); await loadFactionList(); }
+      catch (err) { alert(err.message); }
+    }));
+    listEl.querySelectorAll('.edit-faction-btn').forEach(btn => btn.addEventListener('click', () => {
+      const f = factions.find(x => x.id === parseInt(btn.dataset.id, 10));
+      showEntityForm('faction', f);
+    }));
+    listEl.querySelectorAll('.del-faction-btn').forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('Grup silinsin mi? (Üyelikler de silinir, karakterler kalır)')) return;
+      try { await api.del(`/factions/${btn.dataset.id}`); await loadFactionList(); }
+      catch (err) { alert(err.message); }
+    }));
+  } catch (err) {
+    listEl.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// İSİM VURGULAMA: metinde tanımlı kişi/mekan/nesne isimlerinin altını çizer
+// ve tıklanabilir yapar. NEDEN AÇ/KAPA: paragraf metni contenteditable;
+// içine <span> gömmek yazarken metni bozar (kaydederken etiketler metne
+// karışabilir). Bu yüzden vurgu modunda paragraflar OKUMA moduna alınır,
+// mod kapanınca ham metin geri yüklenip düzenleme açılır - metin asla
+// HTML'den yeniden üretilmez, orijinali saklanır.
+// ---------------------------------------------------------------------------
+let nameHighlightOn = false;
+
+function openEntityFromMention(type, id) {
+  const cfg = ENTITY_TYPES[type];
+  if (!cfg) return;
+  // İlgili menüye geç ve kaydı düzenlemeye aç
+  switchView(type === 'character' ? 'character' : type);
+  setTimeout(async () => {
+    try {
+      const items = await api.get(cfg.endpoint);
+      const item = items.find(x => x.id === id);
+      if (item) showEntityForm(type, item);
+    } catch (e) { /* menü zaten açıldı, sessiz geç */ }
+  }, 250);
+}
+
+function toggleNameHighlight(chapter) {
+  const btn = document.getElementById('highlightNamesBtn');
+  nameHighlightOn = !nameHighlightOn;
+  const paras = document.querySelectorAll('.paragraph-text');
+
+  if (!nameHighlightOn) {
+    // Ham metni geri yükle - HTML'den değil, sakladığımız orijinalden
+    paras.forEach(el => {
+      if (el.dataset.raw !== undefined) el.textContent = el.dataset.raw;
+      el.setAttribute('contenteditable', 'true');
+      el.style.background = '';
+    });
+    btn.textContent = '🔎 İsimleri Vurgula';
+    btn.classList.remove('btn-primary');
+    return;
+  }
+
+  // Vurgu modu: okuma moduna al, isimleri işaretle
+  const mentionsByNumber = {};
+  (chapter.paragraphs || []).forEach(p => { mentionsByNumber[p.number] = p.mentions || []; });
+
+  paras.forEach(el => {
+    const raw = el.innerText;
+    el.dataset.raw = raw;                       // ham metin korunur
+    el.setAttribute('contenteditable', 'false');
+    const mentions = mentionsByNumber[el.dataset.number] || [];
+    if (!mentions.length) { el.textContent = raw; return; }
+
+    // Uzun isimler önce eşleşsin ("Şahin Göz" > "Şahin")
+    const uniq = [...new Map(mentions.map(m => [`${m.entity_type}:${m.entity_id}:${m.entity_name}`, m])).values()]
+      .sort((a, b) => b.entity_name.length - a.entity_name.length);
+    let html = escapeHtml(raw);
+    uniq.forEach(m => {
+      const safe = escapeHtml(m.entity_name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Zaten işaretlenmiş bölgeleri tekrar sarmamak için negatif kontrol
+      const re = new RegExp(`(?![^<]*>)(${safe})`, 'g');
+      html = html.replace(re, `<span class="name-mark" data-type="${m.entity_type}" data-id="${m.entity_id}" style="border-bottom:1.5px dotted var(--gold);cursor:pointer;" title="${escapeHtml(m.entity_name)} kaydına git">$1</span>`);
+    });
+    el.innerHTML = html;
+    el.style.background = 'rgba(176,141,63,0.04)';
+  });
+
+  document.querySelectorAll('.name-mark').forEach(el => el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openEntityFromMention(el.dataset.type, parseInt(el.dataset.id, 10));
+  }));
+  btn.textContent = '✓ Vurgu açık (kapat)';
+  btn.classList.add('btn-primary');
+}

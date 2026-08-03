@@ -231,6 +231,48 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
                     "sadece davranış tutarlılığı ve alt-metin için bil): " + hidden_val
                 )
 
+        # GRUP/KURUM ÜYELİKLERİ: karakterin hangi yapıya, hangi ROLLE bağlı
+        # olduğu. Bu bilgi karakterlerin 'iliskiler' kutusuna dağıldığında
+        # ters sorgulanamıyor ("LÜMEN'e kimler bağlı?") ve grubun kendi
+        # profili (kuralları, geçmişi) hiçbir yerde bütün durmuyordu.
+        if ref.entity_type == "character":
+            memberships = (
+                db.query(models.FactionMembership)
+                .filter(
+                    models.FactionMembership.universe_id == universe_id,
+                    models.FactionMembership.character_id == ref.entity_id,
+                )
+                .all()
+            )
+            for mem in memberships:
+                faction = db.query(models.Faction).filter(models.Faction.id == mem.faction_id).first()
+                if not faction:
+                    continue
+                satir = f"Bağlı olduğu grup: {faction.name}"
+                if mem.role:
+                    satir += f" (rolü: {mem.role})"
+                if (faction.description or "").strip():
+                    satir += f" - {faction.description.strip()}"
+                # Grubun DİĞER üyeleri de kısa listelenir: sahnede kimin
+                # kimden yana olduğu belli olsun.
+                digerleri = (
+                    db.query(models.FactionMembership)
+                    .filter(
+                        models.FactionMembership.faction_id == faction.id,
+                        models.FactionMembership.character_id != ref.entity_id,
+                    )
+                    .all()
+                )
+                if digerleri:
+                    isimler = []
+                    for d in digerleri[:12]:
+                        ch = db.query(models.Character).filter(models.Character.id == d.character_id).first()
+                        if ch:
+                            isimler.append(f"{ch.name}{f' ({d.role})' if d.role else ''}")
+                    if isimler:
+                        satir += f". Diğer üyeler: {', '.join(isimler)}"
+                blocks.append(satir)
+
         # Bu kayda ÖZEL kurallar: sabit katmandan bilerek dışlandılar -
         # sadece kayıt sahnedeyken (seçili varlıklardayken) buradan girerler.
         scoped_rules = (
@@ -417,6 +459,9 @@ def build_context(
     # Fihrist HARİTASI: kullanıcının gördüğü numaralar ("Kısım 1.1") -
     # atıfları çözebilmek için. Özetlerden bağımsız, ucuz bir liste.
     outline = build_outline_layer(db, universe_id, novel_id)
+    # Matris haritası: bölüm ↔ kolon×satır eşleşmesi (etiketler + bölüm no,
+    # hücre içerikleri DEĞİL - ucuz kalsın)
+    matrix_map = build_matrix_map_layer(db, novel_id)
     # Kısayol kodlarıyla ("1BLM", "1-2KSM") anılan girdilerin İÇERİĞİ
     referenced = build_referenced_entries_layer(db, universe_id, novel_id, instruction_text)
     # Sohbet modunda çalışılan bölümün METNİ de gider (include_chapter_text);
@@ -438,7 +483,7 @@ def build_context(
     style_warnings = build_style_warning_layer(db, universe_id)
     plan = build_plan_layer(db, novel_id, chapter_number, instruction_text=instruction_text)
     dynamic = build_dynamic_layer(db, universe_id, selected_entities, instruction_text=instruction_text, include_hidden=include_hidden)
-    return "\n\n".join(part for part in [fixed, index, outline, referenced, style, style_warnings, plan, chapter_text, dynamic] if part)
+    return "\n\n".join(part for part in [fixed, index, outline, matrix_map, referenced, style, style_warnings, plan, chapter_text, dynamic] if part)
 
 
 # ---------------------------------------------------------------------------
@@ -2729,3 +2774,52 @@ def estimate_context_size(context: str) -> tuple[int, int, list[dict]]:
     ]
     breakdown.sort(key=lambda x: -x["char_count"])
     return total_chars, total_tokens, breakdown
+
+
+# ---------------------------------------------------------------------------
+# MATRİS HARİTASI: hangi bölüm hangi kolon×satır kesişimine denk geliyor.
+# Plan katmanı yalnızca ÜZERİNDE ÇALIŞILAN bölümün hücresini veriyordu; AI
+# "3. bölüm hangi tura ait", "Sorgu aşamaları hangi bölümlerde" gibi yapısal
+# soruları cevaplayamıyor, turlar arası paralellik kuramıyordu. Bu katman
+# ucuzdur: sadece etiketler ve bölüm numaraları, hücre İÇERİKLERİ değil.
+# ---------------------------------------------------------------------------
+
+def build_matrix_map_layer(db: Session, novel_id: int, max_cells: int = 200) -> str:
+    matrices = db.query(models.PlanMatrix).filter(models.PlanMatrix.novel_id == novel_id).all()
+    if not matrices:
+        return ""
+    # Bölüm numaralarını tek sorguda al (hücre başına sorgu atmayalım)
+    chapter_numbers = {
+        c.id: c.number
+        for c in db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).all()
+    }
+    lines = []
+    for m in matrices:
+        cells = {(c.column_id, c.row_id): c for c in m.cells}
+        if not cells:
+            continue
+        lines.append(f"MATRİS: {m.name}")
+        for col in m.columns:
+            parcalar = []
+            for row in m.rows:
+                cell = cells.get((col.id, row.id))
+                if not cell:
+                    continue
+                num = chapter_numbers.get(cell.chapter_id)
+                dolu = "✓" if (cell.content or "").strip() else "boş"
+                if num:
+                    parcalar.append(f"{row.label} → Bölüm {num} ({cell.code or '-'}, plan {dolu})")
+                else:
+                    parcalar.append(f"{row.label} → (bölüme bağlı değil, plan {dolu})")
+                if len(parcalar) >= max_cells:
+                    break
+            if parcalar:
+                lines.append(f"- {col.label}: " + " | ".join(parcalar))
+    if not lines:
+        return ""
+    return (
+        "=== MATRİS HARİTASI (hangi bölüm hangi kolon×satır kesişimi) ===\n"
+        "Yapısal sorularda bunu kullan: bir bölümün hangi tura/aşamaya ait olduğu,\n"
+        "aynı aşamanın diğer turlarda hangi bölümlerde geçtiği buradan okunur.\n"
+        + "\n".join(lines)
+    )

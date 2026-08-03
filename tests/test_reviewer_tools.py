@@ -461,3 +461,34 @@ def test_single_chapter_entity_suggestion_endpoint(client, headers):
     assert r.json() == []
     # Olmayan bölüm 404
     assert client.post("/chapters/999999/suggest-entities", headers=headers).status_code == 404
+
+
+# ---- Gruplar & Kurumlar (faksiyonlar) --------------------------------------
+
+def test_faction_membership_reaches_context(client, headers, novel):
+    """Karakter seçiliyken bağlı olduğu GRUP, rolü ve diğer üyeler AI'ya
+    gitmeli - "LÜMEN'e kimler bağlı" bilgisi karakterlerin notlarına
+    dağıldığında ters sorgulanamıyordu."""
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+    from app.qwen_client import build_dynamic_layer
+    from app import schemas as sch
+
+    tabip = client.post("/characters/", json={"name": "Baş Tabip"}, headers=headers).json()
+    baskan = client.post("/characters/", json={"name": "Başkan"}, headers=headers).json()
+    f = client.post("/factions/", json={"name": "LÜMEN Yönetimi", "description": "Kâr için protokol dayatan kanat."}, headers=headers).json()
+    r = client.post("/faction-memberships/", json={"faction_id": f["id"], "character_id": tabip["id"], "role": "Baş Hekim"}, headers=headers)
+    assert r.status_code == 201, r.text
+    client.post("/faction-memberships/", json={"faction_id": f["id"], "character_id": baskan["id"], "role": "Kurul Üyesi"}, headers=headers)
+
+    db = sessionmaker(bind=engine)()
+    ref = sch.EntityRef(entity_type="character", entity_id=tabip["id"])
+    ctx = build_dynamic_layer(db, novel["universe_id"], [ref])
+    assert "LÜMEN Yönetimi" in ctx
+    assert "rolü: Baş Hekim" in ctx
+    assert "Kâr için protokol dayatan" in ctx      # grubun kendi profili
+    assert "Başkan (Kurul Üyesi)" in ctx           # diğer üyeler de görünür
+
+    # Aynı üyelik iki kez eklenemez
+    r = client.post("/faction-memberships/", json={"faction_id": f["id"], "character_id": tabip["id"]}, headers=headers)
+    assert r.status_code == 400
