@@ -824,6 +824,8 @@ function buildChapterHierarchy(chapters) {
     const c = chapters[idx];
     if (!c || c.kind !== 'chapter') return false;
     if ((c.paragraphs || []).length > 0) return false;
+    // Zaten bir başlığın ALTINDAYSA kapsayıcı olamaz - kardeşlerini yutmasın
+    if (currentPartId || currentSubtitleId) return false;
     const next = chapters[idx + 1];
     return !!next && (next.kind === 'part' || next.kind === 'subtitle');
   };
@@ -1569,6 +1571,7 @@ function renderReader(chapter) {
       <button class="btn btn-sm" id="highlightNamesBtn" title="Metinde tanımlı kişi/mekan/nesne isimlerinin altını çizer ve tıklanabilir yapar. Bu moda geçince paragraflar okuma moduna alınır (metin bozulmasın diye) - kapatınca yazmaya devam edersin.">🔎 İsimleri Vurgula</button>
       <button class="btn btn-sm" id="ttsPlayBtn" title="Bölümü sesli okur (tarayıcının Türkçe sesi - ücretsiz, metin dışarı çıkmaz). Okunan paragraf vurgulanır; bir paragrafa tıklayıp oradan devam edebilirsin.">🔊 Sesli Oku</button>
 
+      <button class="btn btn-sm" id="literaryReviewBtn" title="Bölümü 10 edebî ölçüte göre değerlendirir: betimleme, atmosfer, imgesellik, yapısal akış, alt metin, dil ekonomisi, ritim, sembolizm, karakterizasyon, üslup. En zayıf başlıklara somut düzeltme önerir.">📊 Edebî Değerlendirme</button>
       <button class="btn btn-sm" id="readerTestBtn" title="Metni okur gözüyle tarar: tempo ölümü, bilgi bocası, klişe, anlaşılmaz cümle, gerilim kırılması. Sadece uyarır, metne dokunmaz.">🎯 Okur Testi</button>
       <button class="btn btn-sm" id="timelineTopBtn" title="Özetteki ZAMAN satırından olayları çıkarıp Zaman Çizelgesi'ne öneri getirir">🕐 Zaman Çizelgesi</button>
       <button class="btn btn-sm" id="finishChapterBtn" title="Özet + Roman Haritası taramasını birlikte çalıştırır - bölümü AI'nın hafızasına işler">✅ Bölümü Kapat</button>
@@ -1732,6 +1735,7 @@ function renderReader(chapter) {
   }));
   document.getElementById('ttsPlayBtn').addEventListener('click', () => startChapterTts(chapter));
 
+  document.getElementById('literaryReviewBtn').addEventListener('click', () => runLiteraryReview(chapter));
   document.getElementById('readerTestBtn').addEventListener('click', () => runReaderTest(chapter));
   document.getElementById('timelineTopBtn').addEventListener('click', () => {
     if (!(currentChapter?.summary || chapter.summary || '').trim()) {
@@ -4233,6 +4237,16 @@ async function runReaderTest(chapter) {
       box.innerHTML = '<div class="panel" style="margin-top:8px;border-color:var(--border);"><span style="font-size:13px;">✓ Okuru düşürecek belirgin bir nokta bulunamadı.</span></div>';
       return;
     }
+    // Bulgular PARAGRAF SIRASINA göre gösterilir - AI'nın döndürdüğü
+    // rastgele sırayla metinde ileri geri zıplamak gerekiyordu. Numarası
+    // olmayanlar (model konumlayamadı) sona düşer.
+    result.findings.sort((a, b) => {
+      const x = a.paragraph_number, y = b.paragraph_number;
+      if (x === null && y === null) return 0;
+      if (x === null) return 1;
+      if (y === null) return -1;
+      return x - y;
+    });
     const sevColor = { yuksek: 'var(--danger)', orta: '#b08d3f', dusuk: 'var(--text-muted)' };
     box.innerHTML = `
       <div class="panel" style="margin-top:8px;">
@@ -4247,8 +4261,12 @@ async function runReaderTest(chapter) {
             ${f.quote ? `<div style="font-size:12px;font-style:italic;color:var(--text-muted);margin-top:2px;">"${escapeHtml(f.quote)}"</div>` : ''}
             <div style="font-size:12.5px;margin-top:3px;">${escapeHtml(f.reason)}</div>
             ${f.suggestion ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">→ ${escapeHtml(f.suggestion)}</div>` : ''}
+            ${f.paragraph_number ? `<button class="btn btn-sm rt-fix" data-num="${f.paragraph_number}" data-issue="${escapeHtml((f.reason || '') + ' ' + (f.suggestion || ''))}" style="margin-top:5px;font-size:11.5px;">✨ Bu uyarıya göre düzelt</button>` : ''}
+            <div class="rt-fix-result" data-num="${f.paragraph_number || 0}"></div>
           </div>`).join('')}
       </div>`;
+    box.querySelectorAll('.rt-fix').forEach(btn => btn.addEventListener('click', () =>
+      runInlineFix(chapter, parseInt(btn.dataset.num, 10), btn.dataset.issue, btn)));
     box.querySelectorAll('.rt-goto').forEach(a => a.addEventListener('click', (e) => {
       e.preventDefault();
       const target = document.querySelector(`.paragraph-text[data-number="${a.dataset.num}"]`);
@@ -4310,6 +4328,22 @@ async function openMatrixColumnEditor(m, colId) {
           <option value="">(bağlı değil)</option>
           ${characters.map(c => `<option value="${c.id}" ${col.character_id === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
         </select></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;">
+      <strong style="font-size:11.5px;letter-spacing:0.3px;">🔗 FİHRİSTLE EŞLEŞTİR</strong>
+      <div style="font-size:11.5px;color:var(--text-muted);margin:4px 0 6px;">
+        Bu kolonu fihristteki bir <b>bölüme</b> bağla; satırlar o bölümün
+        <b>alt girdileriyle SIRAYLA</b> eşleşsin (1. satır → 1. kısım, 2. → 2. ...).
+        Tek tek hücre bağlamak yerine tek işlem.
+      </div>
+      <div class="field">
+        <label>Üst girdi (bölüm)</label>
+        <select id="mColParent"><option value="">Yükleniyor…</option></select>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:6px;">
+        <input type="checkbox" id="mColOverwrite"> Zaten bağlı hücrelerin bağını da değiştir
+      </label>
+      <button class="btn btn-sm btn-primary" id="mColBind">Satırları sırayla eşleştir</button>
+      <div id="mColBindResult"></div>
       <div class="form-actions">
         <button class="btn btn-primary" id="mColSave">Kaydet</button>
         <button class="btn" id="mColCancel">Kapat</button>
@@ -4318,6 +4352,38 @@ async function openMatrixColumnEditor(m, colId) {
     </div>`;
   editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   document.getElementById('mColCancel').addEventListener('click', () => { editor.innerHTML = ''; });
+
+  // Fihrist ağacını yükle: alt girdisi olan girdiler öne çıkarılır
+  (async () => {
+    const sel = document.getElementById('mColParent');
+    try {
+      const tree = await api.get('/matrix/outline-tree');
+      const uygun = tree.filter(t => t.child_count > 0);
+      sel.innerHTML = '<option value="">(seç)</option>'
+        + (uygun.length
+          ? uygun.map(t => `<option value="${t.id}">${'—'.repeat(t.level)} #${t.display} ${escapeHtml(t.title || '(başlıksız)')} · ${t.child_count} alt girdi</option>`).join('')
+          : '<option value="" disabled>Alt girdisi olan bölüm yok - fihristte Kısım/Alt Başlık oluştur</option>');
+    } catch (err) { sel.innerHTML = `<option value="">Yüklenemedi: ${escapeHtml(err.message)}</option>`; }
+  })();
+
+  document.getElementById('mColBind').addEventListener('click', async () => {
+    const parentId = document.getElementById('mColParent').value;
+    const box = document.getElementById('mColBindResult');
+    if (!parentId) { box.innerHTML = '<div class="error-text">Önce bir üst girdi seç.</div>'; return; }
+    box.innerHTML = '<div class="empty-state">Eşleştiriliyor…</div>';
+    try {
+      const r = await api.post(`/matrix/${m.id}/columns/${colId}/bind-outline`, {
+        parent_chapter_id: parseInt(parentId, 10),
+        overwrite: document.getElementById('mColOverwrite').checked,
+      });
+      box.innerHTML = `
+        <div style="font-size:12.5px;margin-top:8px;">
+          ${r.linked.length ? `<div style="color:var(--text-ink);"><b>${r.linked.length} satır eşleşti:</b><br>${r.linked.map(escapeHtml).join('<br>')}</div>` : ''}
+          ${r.skipped.length ? `<div style="color:var(--text-muted);margin-top:6px;"><b>Atlananlar:</b><br>${r.skipped.map(escapeHtml).join('<br>')}</div>` : ''}
+        </div>`;
+      await loadMatrixGrid();
+    } catch (err) { box.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; }
+  });
   document.getElementById('mColSave').addEventListener('click', async () => {
     const label = document.getElementById('mColLabel').value.trim();
     if (!label) { document.getElementById('mColError').textContent = 'Ad boş olamaz.'; return; }
@@ -5566,4 +5632,118 @@ function toggleNameHighlight(chapter) {
   }));
   btn.textContent = '✓ Vurgu açık (kapat)';
   btn.classList.add('btn-primary');
+}
+
+// ---------------------------------------------------------------------------
+// EDEBÎ DEĞERLENDİRME: 10 ölçüt üzerinden bölüm karnesi. Puan tek başına
+// amaç değil - asıl çıktı EN ZAYIF başlıklara verilen somut düzeltmeler.
+// Okur Testi'nden farkı: o "okur nerede düşer", bu "edebî olarak nerede
+// zayıf" diye sorar.
+// ---------------------------------------------------------------------------
+async function runLiteraryReview(chapter) {
+  const box = document.getElementById('readerTestResult');
+  if (!(chapter.paragraphs || []).length) { box.innerHTML = '<div class="empty-state">Önce metin gerek.</div>'; return; }
+  box.innerHTML = '<div class="empty-state">Editör gözüyle 10 ölçüt değerlendiriliyor…</div>';
+  try {
+    const r = await api.post(`/ai/literary-review/${chapter.id}`, {});
+    if (!r.scores.length) { box.innerHTML = '<div class="error-text">Değerlendirme üretilemedi.</div>'; return; }
+    const renk = (p) => p <= 2 ? 'var(--danger)' : (p === 3 ? '#b08d3f' : '#3f7a4f');
+    const bar = (p) => '●'.repeat(p) + '○'.repeat(5 - p);
+    box.innerHTML = `
+      <div class="panel" style="margin-top:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;">
+          <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">📊 EDEBÎ DEĞERLENDİRME - metne dokunulmadı</strong>
+          <span style="font-size:12.5px;color:var(--text-muted);">ortalama <b style="color:${renk(Math.round(r.average))}">${r.average}</b>/5</span>
+        </div>
+        ${r.strongest ? `<div style="font-size:12.5px;margin:6px 0;padding:6px 8px;background:var(--paper-dim);border-radius:6px;">💪 <b>En güçlü yön:</b> ${escapeHtml(r.strongest)}</div>` : ''}
+        <div style="margin-top:6px;">
+          ${r.scores.slice().sort((a, b) => a.score - b.score).map(s => `
+            <div style="display:flex;gap:8px;align-items:baseline;font-size:12.5px;padding:3px 0;border-bottom:1px solid var(--border);">
+              <span style="color:${renk(s.score)};letter-spacing:1px;font-size:11px;">${bar(s.score)}</span>
+              <b style="min-width:150px;">${escapeHtml(s.label)}</b>
+              <span style="color:var(--text-muted);flex:1;">${escapeHtml(s.reason)}</span>
+            </div>`).join('')}
+        </div>
+        ${r.fixes.length ? `
+          <div style="margin-top:10px;">
+            <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">ÖNCELİKLİ DÜZELTMELER</strong>
+            ${r.fixes.map(f => `
+              <div style="border-left:3px solid var(--gold);padding-left:10px;margin-top:8px;font-size:12.5px;">
+                <b>${escapeHtml(f.criterion)}</b>${f.paragraph ? ` · <a href="#" class="lr-goto" data-num="${f.paragraph}" style="color:inherit;">P${f.paragraph}</a>` : ''}
+                <div style="color:var(--text-muted);margin-top:2px;">${escapeHtml(f.problem)}</div>
+                <div style="margin-top:2px;">→ ${escapeHtml(f.fix)}</div>
+                ${f.paragraph ? `<button class="btn btn-sm rt-fix" data-num="${f.paragraph}" data-issue="${escapeHtml(f.criterion + ': ' + f.problem + ' ' + f.fix)}" style="margin-top:5px;font-size:11.5px;">✨ Bu öneriye göre düzelt</button>` : ''}
+                <div class="rt-fix-result" data-num="${f.paragraph || 0}"></div>
+              </div>`).join('')}
+          </div>` : ''}
+      </div>`;
+    box.querySelectorAll('.rt-fix').forEach(btn => btn.addEventListener('click', () =>
+      runInlineFix(chapter, parseInt(btn.dataset.num, 10), btn.dataset.issue, btn)));
+    box.querySelectorAll('.lr-goto').forEach(a => a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const el = document.querySelector(`.paragraph-text[data-number="${a.dataset.num}"]`);
+      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
+    }));
+  } catch (err) {
+    box.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// UYARIDAN DOĞRUDAN DÜZELTME: Okur Testi ya da Edebî Değerlendirme bir
+// sorun gösterdiğinde, o uyarıyı TALİMAT olarak kullanıp yeni bir paragraf
+// versiyonu üretir - kullanıcı metne inip paragrafı bulup ayrıca öneri
+// istemek zorunda kalmasın. Sonuç uyarının hemen altında çıkar; onaylanırsa
+// paragraf değişir (eski hal Geçmiş'te).
+// ---------------------------------------------------------------------------
+async function runInlineFix(chapter, paragraphNumber, issue, btn) {
+  const box = document.querySelector(`.rt-fix-result[data-num="${paragraphNumber}"]`);
+  if (!box) return;
+  const paras = (chapter.paragraphs || []).slice().sort((a, b) => a.number - b.number);
+  const idx = paras.findIndex(p => p.number === paragraphNumber);
+  if (idx < 0) { box.innerHTML = '<div class="error-text">Paragraf bulunamadı.</div>'; return; }
+  const hedef = paras[idx];
+
+  // Komşular: düzeltme akışı ve tekrarları bozmasın
+  const clip = (t) => { const v = (t || '').trim(); return v.length > 400 ? v.slice(0, 400) + '…' : v; };
+  const once = paras.slice(Math.max(0, idx - 2), idx).map(p => `[P${p.number}] ${clip(p.text)}`).join('\n');
+  const sonra = paras.slice(idx + 1, idx + 3).map(p => `[P${p.number}] ${clip(p.text)}`).join('\n');
+
+  btn.disabled = true;
+  box.innerHTML = '<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Düzeltilmiş versiyon yazılıyor…</div>';
+  const selected = Array.from(document.querySelectorAll('.entity-check:checked')).map(cb => ({
+    entity_type: cb.dataset.type, entity_id: parseInt(cb.dataset.id, 10),
+  }));
+  const instruction =
+    `P${paragraphNumber} paragrafını, aşağıdaki EDİTÖR UYARISINI giderecek şekilde yeniden yaz.\n`
+    + `UYARI: ${issue}\n`
+    + 'KURALLAR: Sadece bu uyarıyı gider, sahnenin anlamını ve olay akışını DEĞİŞTİRME. '
+    + 'Eylem sırasını bozma (tamamlanmış eylemi yeniden başlatma). Somut detayları (rakam, '
+    + 'ölçü, özel isim) koru. Komşu paragraflarda geçen imge ve kalıpları tekrarlama. '
+    + 'SADECE paragraf metnini döndür - açıklama, başlık, tırnak ekleme.\n'
+    + (once ? `ÖNCEKİ:\n${once}\n` : '') + (sonra ? `SONRAKİ:\n${sonra}\n` : '');
+  try {
+    const result = await api.post('/ai/assist', {
+      chapter_number: chapter.number, instruction,
+      selected_entities: selected, existing_text: hedef.text,
+    });
+    const yeni = (result.generated_text || '').trim();
+    box.innerHTML = `
+      <div class="panel" style="margin-top:6px;border-left:3px solid var(--gold);">
+        <strong style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">DÜZELTİLMİŞ VERSİYON - onaysız değişmez</strong>
+        <div style="white-space:pre-wrap;font-size:12.5px;margin-top:4px;">${escapeHtml(yeni)}</div>
+        <div class="form-actions">
+          <button class="btn btn-sm btn-primary inline-fix-apply">Paragrafı Değiştir</button>
+          <button class="btn btn-sm inline-fix-close">Kapat</button>
+        </div>
+      </div>`;
+    box.querySelector('.inline-fix-close').addEventListener('click', () => { box.innerHTML = ''; btn.disabled = false; });
+    box.querySelector('.inline-fix-apply').addEventListener('click', async () => {
+      if (!confirm(`P${paragraphNumber} bu metinle değiştirilecek. Eski hali "Geçmiş"ten geri alınabilir. Devam?`)) return;
+      await replaceParagraphText(chapter.id, paragraphNumber, yeni);
+    });
+  } catch (err) {
+    box.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+    btn.disabled = false;
+  }
 }

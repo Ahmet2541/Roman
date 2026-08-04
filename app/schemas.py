@@ -907,3 +907,47 @@ class EventDateSuggestion(BaseModel):
     occurred_at: str = ""
     story_date: str = ""
     reasoning: str = ""
+
+
+class ColumnBindRequest(BaseModel):
+    """Bir kolonu fihristteki bir ÜST GİRDİYE bağlar; satırlar o girdinin
+    alt girdileriyle SIRAYLA eşleştirilir (1. satır -> 1. alt girdi ...)."""
+    parent_chapter_id: int
+    overwrite: bool = False   # zaten bağlı hücrelerin bağı değişsin mi
+
+
+class ColumnBindResult(BaseModel):
+    linked: List[str] = []      # "Aşama 1 → #4-1 KISIM ADI"
+    skipped: List[str] = []     # eşleşecek alt girdi kalmadı / zaten bağlı
+
+
+class OutlineNode(BaseModel):
+    id: int
+    display: str          # "1", "1-2", "1-2-3"
+    level: int
+    title: str
+    kind: str
+    child_count: int
+
+
+class LiteraryScore(BaseModel):
+    key: str
+    label: str
+    score: int
+    reason: str = ""
+
+
+class LiteraryFix(BaseModel):
+    criterion: str = ""
+    paragraph: Optional[int] = None
+    problem: str = ""
+    fix: str = ""
+
+
+class LiteraryReviewResponse(BaseModel):
+    """10 edebî ölçüt değerlendirmesi - kaydedilmez, rapor niteliğinde."""
+    chapter_number: int
+    scores: List[LiteraryScore] = []
+    strongest: str = ""
+    fixes: List[LiteraryFix] = []
+    average: float = 0

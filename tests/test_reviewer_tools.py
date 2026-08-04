@@ -492,3 +492,45 @@ def test_faction_membership_reaches_context(client, headers, novel):
     # Aynı üyelik iki kez eklenemez
     r = client.post("/faction-memberships/", json={"faction_id": f["id"], "character_id": tabip["id"]}, headers=headers)
     assert r.status_code == 400
+
+
+def test_literary_review_ten_criteria(client, headers):
+    """10 ölçütlü değerlendirme: geçersiz anahtarlar ayıklanır, puan 1-5
+    aralığına çekilir, ortalama hesaplanır, düzeltmeler sıralanır."""
+    ch = _chapter_with_text(client, headers, [
+        "Bir çeşme. Tarihi. Taş.",
+        "Suyu yeşilimsi, yosun tutmuş.",
+    ])
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "scores": [
+                {"key": "betimleme", "score": 4, "reason": "Somut detay var."},
+                {"key": "dil_ekonomisi", "score": 5, "reason": "Fazla kelime yok."},
+                {"key": "alt_metin", "score": 1, "reason": "Her şey açıkça söyleniyor."},
+                {"key": "uydurma_olcut", "score": 5, "reason": "geçersiz"},
+                {"key": "ritim", "score": 9, "reason": "aralık dışı"},
+            ],
+            "strongest": "Telgraf ritmi karakterin sesine uyuyor.",
+            "fixes": [
+                {"criterion": "Alt metin", "paragraph": 2, "problem": "Yosun doğrudan anlatılmış.", "fix": "Bakan karakterin tepkisiyle göster."},
+                {"criterion": "", "paragraph": None, "problem": "", "fix": ""},
+            ],
+        })
+        r = client.post(f"/ai/literary-review/{ch['id']}", headers=headers)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    keys = [s["key"] for s in d["scores"]]
+    assert "uydurma_olcut" not in keys           # geçersiz ölçüt ayıklandı
+    assert next(s for s in d["scores"] if s["key"] == "ritim")["score"] == 5   # 9 -> 5
+    assert next(s for s in d["scores"] if s["key"] == "alt_metin")["label"] == "Alt metin"
+    assert d["average"] == round((4 + 5 + 1 + 5) / 4, 2)
+    assert len(d["fixes"]) == 1 and d["fixes"][0]["paragraph"] == 2
+    assert "Telgraf ritmi" in d["strongest"]
+
+
+def test_literary_review_empty_chapter(client, headers):
+    bos = client.post("/chapters/", json={"number": 7, "kind": "chapter", "title": "Boş"}, headers=headers).json()
+    with patch("app.qwen_client.get_client") as mc:
+        r = client.post(f"/ai/literary-review/{bos['id']}", headers=headers)
+        mc.assert_not_called()
+    assert r.json()["scores"] == [] and r.json()["average"] == 0

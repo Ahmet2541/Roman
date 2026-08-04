@@ -7,7 +7,7 @@ from ..auth import get_current_user
 from .. import schemas, models
 from ..qwen_client import (
     build_context, ask_qwen, full_scan, chat_with_qwen, reader_test_chapter,
-    suggest_paragraph_entities, trim_chat_history, estimate_context_size,
+    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review,
 )
 from ..entities import ENTITY_MODELS
 from ..sections import SECTIONS_BY_ENTITY_TYPE, _tr_lower
@@ -301,4 +301,32 @@ def paragraph_entities(
         raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
     return schemas.ParagraphEntitiesResponse(
         suggestions=[schemas.AiSuggestion(**s) for s in suggestions]
+    )
+
+
+@router.post("/literary-review/{chapter_id}", response_model=schemas.LiteraryReviewResponse)
+def literary_review_endpoint(
+    chapter_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=6, window_seconds=60, label="edebî değerlendirme")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Bölümü 10 edebî ölçüte göre değerlendirir (betimleme, atmosfer,
+    imgesellik, yapısal akış, alt metin, dil ekonomisi, ritim, sembolizm,
+    karakterizasyon, üslup). Puanlar tek başına amaç değil - asıl çıktı en
+    zayıf başlıklar için verilen SOMUT düzeltmelerdir. Metne dokunmaz."""
+    chapter = db.query(models.Chapter).filter(
+        models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id
+    ).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
+    try:
+        result = literary_review(db, chapter)
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+    scores = [schemas.LiteraryScore(**s) for s in result["scores"]]
+    ortalama = round(sum(s.score for s in scores) / len(scores), 2) if scores else 0
+    return schemas.LiteraryReviewResponse(
+        chapter_number=chapter.number, scores=scores, strongest=result["strongest"],
+        fixes=[schemas.LiteraryFix(**f) for f in result["fixes"]], average=ortalama,
     )

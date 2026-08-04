@@ -210,6 +210,16 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   çok hızlı) anında uygulanır. Amaç güzel seslendirme değil, kendi metnini
   DİNLEYEREK tekrar ve ritim bozukluklarını yakalamak - üslup taramasının
   kulakla yapılan hâli. Bölüm değişince okuma otomatik durur.
+- **📊 Edebî Değerlendirme (10 ölçüt)**: bölümü yayınevi/editör bakışıyla
+  puanlar - betimleme, atmosfer, imgesellik, metnin matematiği (yapısal
+  akış), alt metin, dil ekonomisi, ritim, sembolizm, karakterizasyon,
+  üslup. Her ölçüte 1-5 puan ve METİNDEN kanıtla gerekçe; en zayıf üç
+  başlık için SOMUT düzeltme (hangi paragrafta, ne yapılacak - "daha edebi
+  olsun" gibi genel öğüt yasak) ve metnin EN GÜÇLÜ yönü (yazar neyi
+  korumalı). Puanlar zayıftan güçlüye sıralı gösterilir; düzeltmelerdeki
+  paragraf numarasına tıklayınca metne gidilir. Metne dokunmaz.
+  Okur Testi'nden farkı: o "okur nerede düşer", bu "edebî olarak nerede
+  zayıf" diye sorar.
 - **Okur Testi (denetçi katmanı)**: bölüm metnini okur gözüyle tarar -
   tempo ölümü, bilgi bocası, klişe, anlaşılmaz cümle, gerilim kırılması,
   inandırıcılık çatlağı. Bulguları paragraf numarası + kısa alıntı +

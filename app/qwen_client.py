@@ -2823,3 +2823,98 @@ def build_matrix_map_layer(db: Session, novel_id: int, max_cells: int = 200) -> 
         "aynı aşamanın diğer turlarda hangi bölümlerde geçtiği buradan okunur.\n"
         + "\n".join(lines)
     )
+
+
+# ---------------------------------------------------------------------------
+# EDEBÎ DEĞERLENDİRME (10 ölçüt). Okur Testi "okur nerede düşer" diye sorar;
+# bu ise "edebî olarak nerede zayıf" diye sorar - farklı iki soru. Ölçütler
+# yayınevi/editör bakışının yaygın on başlığı: betimleme, atmosfer,
+# imgesellik, yapısal akış, alt metin, dil ekonomisi, ritim, sembolizm,
+# karakterizasyon, üslup. Puan tek başına işe yaramaz; asıl değer EN ZAYIF
+# üç başlık için verilen SOMUT düzeltmelerdir.
+# ---------------------------------------------------------------------------
+
+LITERARY_CRITERIA = [
+    ("betimleme", "Betimleme", "Duyulara hitap eden, somut ve seçici tasvir. Genel görünüş → yakın plan → mikro detay sırası izleniyor mu?"),
+    ("atmosfer", "Atmosfer", "Sahnenin bıraktığı genel ruh hâli tutarlı mı, sahnenin işleviyle uyumlu mu?"),
+    ("imgesellik", "İmgesellik", "Zihinde güçlü görüntü/çağrışım kuruluyor mu? İmgeler taze mi, klişe mi?"),
+    ("yapi", "Metnin matematiği (yapısal akış)", "Bilgi doğru sırayla mı veriliyor? Sahne kurulumu, gelişim ve kapanış dengeli mi?"),
+    ("alt_metin", "Alt metin", "Yazılmayan ama sezdirilen anlam var mı, yoksa her şey açıkça söyleniyor mu?"),
+    ("dil_ekonomisi", "Dil ekonomisi", "Az kelimeyle çok şey. Gereksiz sıfat, tekrar, boş cümle var mı?"),
+    ("ritim", "Ritim", "Cümle uzunlukları ve tempo sahnenin gerilimiyle uyumlu mu?"),
+    ("sembolizm", "Sembolizm", "Nesne/detaylar görünenden fazlasını taşıyor mu? Semboller metni boğuyor mu?"),
+    ("karakterizasyon", "Karakterizasyon", "Karakter davranış, seçim ve konuşmayla mı inşa ediliyor, yoksa anlatılıyor mu?"),
+    ("uslup", "Üslup", "Yazarın kendine özgü sesi tutarlı mı? Ödünç/genel bir ton var mı?"),
+]
+
+LITERARY_REVIEW_PROMPT = """Sen deneyimli bir yayınevi editörüsün. Sana bir
+bölümün metni verilecek. Bu metni AŞAĞIDAKİ ON ÖLÇÜTE göre değerlendir.
+
+ÖLÇÜTLER:
+{criteria}
+
+Kurallar:
+1. Her ölçüte 1-5 arası puan ver (1 = ciddi sorun, 3 = iş görür, 5 = çok iyi).
+   Cömert davranma; 5 istisnadır. Puanı METİNDEN bir kanıtla gerekçelendir.
+2. EN ZAYIF ÜÇ ölçüt için birer SOMUT düzeltme öner: hangi paragrafta, ne
+   yapılacak. "Daha edebi olsun" gibi genel öğüt YASAK - uygulanabilir yaz.
+3. Metnin EN GÜÇLÜ tek yönünü de söyle (yazar neyi korumalı).
+4. Alıntı yaparken en fazla 10 kelime kullan ve paragraf numarasını (P3) ver.
+
+Yanıtın SADECE şu JSON olsun:
+{{"scores": [{{"key": "betimleme", "score": 3, "reason": "..."}}],
+  "strongest": "...", "fixes": [{{"criterion": "...", "paragraph": 3, "problem": "...", "fix": "..."}}]}}"""
+
+
+def literary_review(db: Session, chapter, max_chars: int = 14000) -> dict:
+    """Bölümü 10 edebî ölçüte göre değerlendirir. Kaydetmez - rapor döner."""
+    paragraphs = [p for p in chapter.paragraphs if (p.text or "").strip()]
+    if not paragraphs:
+        return {"scores": [], "strongest": "", "fixes": []}
+    body, used = [], 0
+    for p in paragraphs:
+        satir = f"[P{p.number}] {p.text.strip()}"
+        if used + len(satir) > max_chars:
+            body.append("[... metnin kalanı kırpıldı ...]")
+            break
+        body.append(satir)
+        used += len(satir)
+
+    criteria_text = "\n".join(f"- {key}: {ad} — {aciklama}" for key, ad, aciklama in LITERARY_CRITERIA)
+    system = LITERARY_REVIEW_PROMPT.format(criteria=criteria_text)
+    title_part = f" - {chapter.title}" if chapter.title else ""
+    ozet = (chapter.summary or "").strip()
+    user = (f"BÖLÜM ÖZETİ:\n{ozet}\n\n" if ozet else "") + f"BÖLÜM {chapter.number}{title_part}:\n" + "\n".join(body)
+
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+    )
+    data = _parse_json_lenient(response.choices[0].message.content)
+    if not isinstance(data, dict):
+        logger.warning("Edebî değerlendirme: yanıt ayrıştırılamadı (bölüm %s)", chapter.number)
+        return {"scores": [], "strongest": "", "fixes": []}
+
+    gecerli = {k for k, _, _ in LITERARY_CRITERIA}
+    adlar = {k: ad for k, ad, _ in LITERARY_CRITERIA}
+    scores = []
+    for s in data.get("scores", []):
+        key = (s.get("key") or "").strip()
+        if key not in gecerli:
+            continue
+        try:
+            puan = max(1, min(5, int(s.get("score", 3))))
+        except (TypeError, ValueError):
+            puan = 3
+        scores.append({"key": key, "label": adlar[key], "score": puan, "reason": (s.get("reason") or "")[:400]})
+    fixes = [
+        {
+            "criterion": (f.get("criterion") or "")[:60],
+            "paragraph": f.get("paragraph") if isinstance(f.get("paragraph"), int) else None,
+            "problem": (f.get("problem") or "")[:400],
+            "fix": (f.get("fix") or "")[:400],
+        }
+        for f in data.get("fixes", []) if (f.get("fix") or "").strip()
+    ][:5]
+    return {"scores": scores, "strongest": (data.get("strongest") or "")[:300], "fixes": fixes}

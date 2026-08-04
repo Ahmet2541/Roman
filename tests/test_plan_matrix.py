@@ -472,3 +472,58 @@ def test_matrix_map_layer_in_context(client, headers):
     # Matris yoksa katman hiç oluşmaz
     client.delete(f"/matrix/{m['id']}", headers=headers)
     assert build_matrix_map_layer(db, novel_id) == ""
+
+
+# ---- Kolonu fihriste bağlama (kolon=bölüm, satırlar=kısımlar) --------------
+
+def test_bind_column_to_outline_maps_rows_to_children(client, headers):
+    """Kullanıcının zihin modeli: kolon = fihristteki BÖLÜM, satırlar = o
+    bölümün altındaki KISIM'lar. Tek işlemde sırayla eşleşmeli."""
+    # Fihrist: BÖLÜM 4 (üst) altında 3 kısım; BÖLÜM 5 (üst) altında 2 kısım
+    b4 = client.post("/chapters/", json={"number": 1, "kind": "part", "title": "BÖLÜM 4 - Belediye Başkanı"}, headers=headers).json()
+    k1 = client.post("/chapters/", json={"number": 2, "kind": "chapter", "title": "Kısım 1"}, headers=headers).json()
+    k2 = client.post("/chapters/", json={"number": 3, "kind": "chapter", "title": "Kısım 2"}, headers=headers).json()
+    k3 = client.post("/chapters/", json={"number": 4, "kind": "chapter", "title": "Kısım 3"}, headers=headers).json()
+    b5 = client.post("/chapters/", json={"number": 5, "kind": "part", "title": "BÖLÜM 5 - Yargıç"}, headers=headers).json()
+    y1 = client.post("/chapters/", json={"number": 6, "kind": "chapter", "title": "Yargıç Kısım 1"}, headers=headers).json()
+
+    m = _make_matrix(client, headers, cols=("Belediye Başkanı", "Yargıç"), rows=("Aşama 1", "Aşama 2", "Aşama 3"))
+    col_bb, col_y = m["columns"]
+
+    r = client.post(f"/matrix/{m['id']}/columns/{col_bb['id']}/bind-outline",
+                    json={"parent_chapter_id": b4["id"]}, headers=headers)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert len(data["linked"]) == 3
+    assert "Aşama 1 → #1-1 Kısım 1" in data["linked"][0]
+    assert "Aşama 3 → #1-3 Kısım 3" in data["linked"][2]
+
+    # Hücreler gerçekten bağlandı
+    full = client.get(f"/matrix/{m['id']}", headers=headers).json()
+    bagli = {c["row_id"]: c["chapter_id"] for c in full["cells"] if c["column_id"] == col_bb["id"]}
+    assert set(bagli.values()) == {k1["id"], k2["id"], k3["id"]}
+
+    # İkinci kolon: alt girdisi 1 tane, kalan satırlar atlanır ve NEDENİ söylenir
+    r = client.post(f"/matrix/{m['id']}/columns/{col_y['id']}/bind-outline",
+                    json={"parent_chapter_id": b5["id"]}, headers=headers)
+    data = r.json()
+    assert len(data["linked"]) == 1 and y1["title"] in data["linked"][0]
+    assert len(data["skipped"]) == 2 and "alt girdi yok" in data["skipped"][0]
+
+    # Zaten bağlıyken tekrar bağlama: overwrite olmadan korunur
+    r = client.post(f"/matrix/{m['id']}/columns/{col_bb['id']}/bind-outline",
+                    json={"parent_chapter_id": b5["id"]}, headers=headers)
+    assert all("zaten" in x for x in r.json()["skipped"][:1])
+
+
+def test_outline_tree_endpoint(client, headers):
+    """Eşleştirme ekranı için fihrist ağacı: numara, seviye, alt girdi sayısı."""
+    client.post("/chapters/", json={"number": 1, "kind": "part", "title": "BÖLÜM 4"}, headers=headers)
+    client.post("/chapters/", json={"number": 2, "kind": "chapter", "title": "Kısım 1"}, headers=headers)
+    client.post("/chapters/", json={"number": 3, "kind": "chapter", "title": "Kısım 2"}, headers=headers)
+
+    tree = client.get("/matrix/outline-tree", headers=headers).json()
+    ust = next(t for t in tree if t["title"] == "BÖLÜM 4")
+    assert ust["display"] == "1" and ust["level"] == 0 and ust["child_count"] == 2
+    alt = next(t for t in tree if t["title"] == "Kısım 2")
+    assert alt["display"] == "1-2" and alt["level"] == 1
