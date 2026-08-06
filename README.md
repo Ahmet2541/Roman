@@ -3,6 +3,12 @@
 FastAPI + SQLite (kolayca PostgreSQL'e taşınabilir) + Qwen (DashScope) tabanlı
 roman yazım destek uygulaması - backend + frontend.
 
+**Temel fikir:** AI'ya romanın TAMAMINI değil, o an İLGİLİ olanı vermek.
+Bağlam katman katman kurulur (kurallar, fihrist, plan, seçili varlıkların
+ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
+"Bağlamı Önizle" ile denetlenebilir. AI hiçbir yerde onaysız yazmaz -
+öneriler her zaman kullanıcı onayından geçer.
+
 ## Özellikler
 
 - **Çoklu roman desteği**: aynı hesapla birden fazla roman yönetilebilir,
@@ -151,6 +157,17 @@ roman yazım destek uygulaması - backend + frontend.
   belirir - tıklayınca yanıt metni o paragrafın yerine yazılır, eski hal
   Geçmiş'ten geri alınabilir, sohbet geçmişi korunur (konuşmaya kaldığın
   yerden devam edersin), balonda "✓ P55 paragrafı değiştirildi" izi kalır.
+- **Gruplar & Kurumlar**: "şu 15 kişi aynı yapıya bağlı" bilgisi. İkili
+  ilişkiler bunu taşıyamaz (15 kişi = 105 bağ) ve karakterlerin kendi
+  `iliskiler` kutusuna dağıldığında TERS SORGULANAMAZ ("LÜMEN'e kimler
+  bağlı?"). Grup kendi profiline sahiptir (açıklama/notlar), üyeler ROLLE
+  eklenir ("Baş Hekim", "Kurul Üyesi"). Bir karakter seçiliyken bağlı
+  olduğu gruplar, rolü, grubun profili ve DİĞER üyeleri AI bağlamına girer.
+- **Matris haritası (bağlam katmanı)**: AI, hangi bölümün hangi kolon×satır
+  kesişimi olduğunu bilir - "3. bölüm hangi tura ait", "Sorgu aşaması diğer
+  turlarda hangi bölümlerde" gibi yapısal sorular ve turlar arası paralellik
+  bununla kurulur. Sadece etiketler + bölüm numarası + plan doluluğu gider,
+  hücre İÇERİKLERİ değil (ucuz katman). Matris yoksa hiç oluşmaz.
 - **📌 Talimat Kasası**: Plan Matrisi'nde her SATIRA (aşamaya) kalıcı yazım
   kısıtları yazılır ("Duyguyu ADLANDIRMA - beden/ses/nesneyle göster",
   "Sanık tek cümle konuşur"). O satıra bağlı HER bölümün AI isteğine plan
@@ -193,6 +210,26 @@ roman yazım destek uygulaması - backend + frontend.
   çok hızlı) anında uygulanır. Amaç güzel seslendirme değil, kendi metnini
   DİNLEYEREK tekrar ve ritim bozukluklarını yakalamak - üslup taramasının
   kulakla yapılan hâli. Bölüm değişince okuma otomatik durur.
+- **🔍 Bölüm İncelemesi (birleşik denetim)**: iki aşama tek akışta.
+  (1) EDİTÖR gözü - 10 edebî ölçüt karnesi, (2) OKUR gözü - düşürücü
+  noktalar. Sonra bulgular PARAGRAF PARAGRAF birleştirilir: bir paragraf
+  hakkında iki farklı bakış (📊 editör, 🎯 okur) aynı satırda görünür,
+  paragraf numarasına göre sıralı. Her paragraf için iki eylem:
+  "✨ Bulgulara göre düzelt" (tüm uyarıları talimat yapıp yeni versiyon
+  üretir, onaysız değişmez) ve "💬 AI ile konuşarak karar ver" (bulgularla
+  başlayan bir tartışma - hangi eleştiri haklı, ne yapmalı; anlaşınca
+  "✍️ yeni versiyonu yaz"). Paragrafa bağlanamayan bulgular ayrı bir
+  "genel" bölümde toplanır.
+- **📊 Edebî Değerlendirme (10 ölçüt)**: bölümü yayınevi/editör bakışıyla
+  puanlar - betimleme, atmosfer, imgesellik, metnin matematiği (yapısal
+  akış), alt metin, dil ekonomisi, ritim, sembolizm, karakterizasyon,
+  üslup. Her ölçüte 1-5 puan ve METİNDEN kanıtla gerekçe; en zayıf üç
+  başlık için SOMUT düzeltme (hangi paragrafta, ne yapılacak - "daha edebi
+  olsun" gibi genel öğüt yasak) ve metnin EN GÜÇLÜ yönü (yazar neyi
+  korumalı). Puanlar zayıftan güçlüye sıralı gösterilir; düzeltmelerdeki
+  paragraf numarasına tıklayınca metne gidilir. Metne dokunmaz.
+  Okur Testi'nden farkı: o "okur nerede düşer", bu "edebî olarak nerede
+  zayıf" diye sorar.
 - **Okur Testi (denetçi katmanı)**: bölüm metnini okur gözüyle tarar -
   tempo ölümü, bilgi bocası, klişe, anlaşılmaz cümle, gerilim kırılması,
   inandırıcılık çatlağı. Bulguları paragraf numarası + kısa alıntı +
@@ -292,9 +329,22 @@ app/
   migrations.py       - açılışta çalışan, idempotent hafif şema göçleri
   import_parser.py    - .txt bir el yazmasını Bölüm/Paragraf'a ayrıştırır
   ratelimit.py        - AI uçları için bellek-içi rate limiter
-  qwen_client.py      - DashScope bağlantısı + context katmanları (fixed/index/dynamic/style)
-                        + tek seferlik ask_qwen + çok turlu chat_with_qwen (tool-calling)
-                        + full_scan + entity/progression öneri çıkarımı
+  style_scan.py       - üslup taraması motoru: yapısal kalıp sayımı, çift eşik,
+                        önbellek ve AI context'ine giren "bütçeli kaçın" uyarıları
+  qwen_client.py      - DashScope bağlantısı + TÜM context katmanları:
+                        fixed (kurallar) / index (fihrist özetleri) /
+                        outline (fihrist haritası + atıf numaraları) /
+                        referenced (atıf yapılan girdi ve paragraflar) /
+                        style (örnekler) / style_warnings (üslup tikleri) /
+                        plan (bölüm planı + Talimat Kasası) /
+                        chapter_text veya whole_novel (kapsam seçimine göre) /
+                        dynamic (seçili varlıklar, ilgili derin profil,
+                        kayda özel kurallar, gizli katman).
+                        Ayrıca: ask_qwen, chat_with_qwen (tool-calling),
+                        full_scan, reader_test_chapter (Okur Testi),
+                        suggest_paragraph_entities (K/M/N balonları),
+                        suggest_style_patterns, infer_event_date,
+                        trim_chat_history, estimate_context_size
   routers/
     auth_router.py    - POST /auth/token (login)
     novels.py         - roman oluşturma/listeleme/yeniden adlandırma/silme
@@ -306,8 +356,14 @@ app/
     relationships.py  - Karakter ilişki haritası
     progressions.py   - Gelişim çizelgesi (varlıkların bölüm bazlı kronolojik notları)
     chapters.py       - Bölüm/Paragraf CRUD + arama + içe aktarma
-    ai.py             - /ai/assist, /ai/chat, /ai/context-preview,
-                        /ai/approve-suggestions, /ai/approve-entity-update, /ai/full-scan
+    ai.py             - /ai/assist, /ai/chat (kapsam + geçmiş budama),
+                        /ai/context-preview (boyut dökümüyle),
+                        /ai/approve-suggestions, /ai/approve-entity-update,
+                        /ai/full-scan, /ai/reader-test/{id} (Okur Testi),
+                        /ai/paragraph-entities (K/M/N balonları)
+    universes.py      - Evren (seri) yönetimi - kitaplar arası paylaşılan dünya
+    entity_history.py - Varlık değişiklik geçmişi + anlık görüntüden geri yükleme
+    factions.py       - Gruplar & Kurumlar: üyelik + rol yönetimi
     admin.py          - /admin/export, /admin/import (aktif romanı JSON olarak yedekle/geri yükle)
 frontend/
   index.html          - ana ekran iskeleti (hover ile açılan sol menü + sağ içerik alanı)
@@ -315,7 +371,10 @@ frontend/
   css/style.css       - tüm stiller
   js/api.js           - JWT token yönetimi + X-Novel-Id header'lı ortak fetch sarmalayıcı
   js/login.js         - giriş sayfası mantığı
-  js/app.js           - menüler, roman okuma/yazma, AI paneli (sohbet + talimat), arama
+  js/app.js           - menüler, roman okuma/yazma, AI paneli (5 oda + sohbet/talimat),
+                        Plan Matrisi ızgarası, üslup ekranı, zaman çizelgesi,
+                        sesli okuma, paragraf AI paneli (öneri + paragraf sohbeti),
+                        @isim ve numara/paragraf atıf kodları
 ```
 
 ## Temel akış
@@ -385,7 +444,7 @@ frontend/
    `mode="append"` (varsayılan) mevcut metnin SONUNA ekler, hiçbir zaman
    sessizce üzerine yazmaz.
 
-## Karakter/Mekan Derin Profili (`sections`)
+## Karakter/Mekan/Nesne Derin Profili (`sections`)
 
 Kişi/Mekan kayıtlarının `description`/`notes` alanlarının yanında, konuya
 göre bölünmüş bir `sections` (JSON, şifreli) alanı var - amaç, "bir
@@ -393,15 +452,29 @@ karakterin ruh yapısıyla ilgili yaz" dendiğinde AI'ya o karakterin TÜM
 bilgisini değil sadece ilgili bölümü göndermek (token tasarrufu + alakasız
 bilgiyle context'i kirletmemek).
 
-**Kişi anahtarları:** `duygusal_yapi`, `fiziksel_yapi`, `gecmis`, `kariyer`,
-`iliskiler`, `konusma_tarzi`, `meta`
-**Mekan anahtarları:** `fiziksel_yapi`, `atmosfer`, `gecmis`, `kurallar`,
-`baglantilar`, `zamansal_degisim`, `meta`
+**Kişi (5 + gizli + meta):** `fiziksel_yapi`, `duygusal_yapi` (kişilik +
+karakter arc'ı), `gecmis` (köken + kariyer + sırlar), `iliskiler`,
+`konusma_tarzi`, `gizli`, `meta`
+**Mekan (5 + gizli + meta):** `fiziksel_yapi`, `atmosfer` (+ zamansal
+değişim), `gecmis` (+ gizli alanlar), `kurallar`, `baglantilar`, `gizli`,
+`meta`
+**Nesne (4 + gizli + meta):** `fiziksel_yapi`, `gecmis` (köken/efsane),
+`islev` (güçler/sınırlar/bedel), `sahiplik` (kimde/nerede), `gizli`, `meta`
+
+Eski 7 başlıklı yapıdan gelen veriler açılışta otomatik ve kayıpsız taşınır
+(`kariyer` → `gecmis`, `zamansal_degisim` → `atmosfer`).
 
 Kurallar:
 - `meta` bölümü (sembolizm, okuyucu etkisi, yazar notu) yazar tarafından
   kaydedilebilir ama **AI'ya asla gönderilmez** - ne context'e ne de
   `get_entity_section`/`propose_entity_update` araçlarına.
+- `gizli` bölümü (sonraki kitapların sırları) varsayılan olarak AI'ya
+  GİTMEZ - ne içeriği, ne adı, ne de anahtar kelimeyle seçilebilir. Farkı:
+  AI panelindeki "🔒 Gizli katmanı alt-metin olarak ver" anahtarı açıldığında
+  "SIR - romanda ASLA açıkça yazma, sadece davranış tutarlılığı için bil"
+  direktifiyle gider (dramatik ironi).
+- Talimatla İLGİLİ bölüm otomatik seçilir: "görünüşünü betimle" →
+  `fiziksel_yapi` içeriği gider, diğerleri sadece isim olarak listelenir.
 - Bilinmeyen bir anahtar göndermek (`sections.py`'deki listede yoksa) 422
   ile reddedilir - yazım hatası sessizce kaybolmaz.
 - `PUT /characters/{id}` ya da `PUT /places/{id}` ile `sections` gönderdiğinde
@@ -414,11 +487,17 @@ Kurallar:
 
 ## Testler
 
-Kritik iş mantığı (evren/kitap paylaşımı, migration, sections merge,
-alias tespiti, mekan hiyerarşisi, kural filtreleme, AI keşif fonksiyonları)
-için otomatik bir pytest paketi var - AI çağrıları gerektiren testler
-`unittest.mock` ile sahte Qwen yanıtlarıyla çalışır, gerçek bir
-`DASHSCOPE_API_KEY` gerekmez.
+**139 test** (17 dosya) - AI çağrıları `unittest.mock` ile sahte Qwen
+yanıtlarıyla çalışır, gerçek bir `DASHSCOPE_API_KEY` gerekmez.
+
+Kapsam: evren/kitap paylaşımı, migration'lar, sections merge ve seçici
+gönderim, alias tespiti (Türkçe İ/ı dahil), mekan hiyerarşisi, kural
+filtreleme ve kayda özel kurallar, gizli katman sızdırmazlığı, üslup
+taraması (çift eşik, nakarat koruması, yapısal kalıplar), Plan Matrisi
+(araya ekleme, MP kodları, Talimat Kasası, fihrist üretimi), zaman
+çizelgesi (kronolojik sıralama, AI ile tarih çıkarımı), bağlam kapsamı ve
+geçmiş budama, atıf numaraları ve paragraf kodları, Okur Testi, paragraf
+balonları, başlıktan metin taşıma.
 
 ```bash
 pip install -r requirements-dev.txt
@@ -430,15 +509,31 @@ Bir şey değiştirirken (özellikle `migrations.py`, `qwen_client.py`,
 türden sessiz regresyonları (ör. Set'te string/number karışıklığı,
 progression'da yanlış chapter_number) otomatik yakalar.
 
-## Sonraki adımlar
+## Bilinen eksikler ve sonraki adımlar
 
-Geriye gerçekten sadece senin yapabileceğin tek şey kaldı:
+**Yapılmamış olanlar (bilinçli sırada bekliyor):**
 
-- Kendi DashScope hesabından bir API anahtarı al, `.env`'deki
-  `DASHSCOPE_API_KEY`'e yapıştır, `/ai/assist` ve `/ai/full-scan`'i canlı test et.
+- **El yazması dışa aktarımı**: romanı okunabilir tek belge (docx/markdown)
+  olarak dışarı verecek bir uç YOK. `/admin/export` bir VERİ dökümüdür
+  (JSON), el yazması değil. Bir roman aracının en temel çıktısı bu -
+  listenin başında.
+- **Cümle Kasası**: aklına gelen ama henüz yeri olmayan replikleri
+  ("koca bir şehri süslü tabut olarak sundun") sahibiyle birlikte saklayan
+  kutu; sahibi sahnedeyken kullanılmamış replikler context'e "uygun ana
+  denk gelirse işle" diye girer, metne girince emekli olur.
+- **Açılış karşılaması**: "Kaldığın yer: 1-2 (planlı, metin yok)" gibi tek
+  satırlık, AI'sız bir durum özeti.
+- **Denetçi katmanı (üretim sonrası)**: üretilen metni plana, haritaya ve
+  kurallara karşı otomatik hesaba çeken kontrol. Okur Testi bunun ilk
+  parçası; plan-kapsama denetimi henüz yok.
 
-Her şeyin geri kalanı (PostgreSQL, Docker, Nginx/HTTPS, systemd, güvenli
-anahtar üretimi) hazır ve test edildi - bkz. `DEPLOY.md`.
+**Teknik borç:**
+
+- `qwen_client.py` ve `frontend/js/app.js` çok büyüdü - bölünmeleri gerekiyor.
+- Frontend'in otomatik testi yok (yalnızca `node --check` sözdizimi kontrolü).
+- CORS deploy'da `*` bırakılmamalı; rate limiter bellek-içi (tek worker
+  varsayar); `logs/app.log` rotasyonsuz; `datetime.utcnow()` uyarıları.
+- Railway'de SQLite kalıcı DEĞİLDİR - PostgreSQL'e geçilmeli (bkz. DEPLOY.md).
 
 ## Loglama ve yedekleme
 

@@ -231,6 +231,48 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
                     "sadece davranış tutarlılığı ve alt-metin için bil): " + hidden_val
                 )
 
+        # GRUP/KURUM ÜYELİKLERİ: karakterin hangi yapıya, hangi ROLLE bağlı
+        # olduğu. Bu bilgi karakterlerin 'iliskiler' kutusuna dağıldığında
+        # ters sorgulanamıyor ("LÜMEN'e kimler bağlı?") ve grubun kendi
+        # profili (kuralları, geçmişi) hiçbir yerde bütün durmuyordu.
+        if ref.entity_type == "character":
+            memberships = (
+                db.query(models.FactionMembership)
+                .filter(
+                    models.FactionMembership.universe_id == universe_id,
+                    models.FactionMembership.character_id == ref.entity_id,
+                )
+                .all()
+            )
+            for mem in memberships:
+                faction = db.query(models.Faction).filter(models.Faction.id == mem.faction_id).first()
+                if not faction:
+                    continue
+                satir = f"Bağlı olduğu grup: {faction.name}"
+                if mem.role:
+                    satir += f" (rolü: {mem.role})"
+                if (faction.description or "").strip():
+                    satir += f" - {faction.description.strip()}"
+                # Grubun DİĞER üyeleri de kısa listelenir: sahnede kimin
+                # kimden yana olduğu belli olsun.
+                digerleri = (
+                    db.query(models.FactionMembership)
+                    .filter(
+                        models.FactionMembership.faction_id == faction.id,
+                        models.FactionMembership.character_id != ref.entity_id,
+                    )
+                    .all()
+                )
+                if digerleri:
+                    isimler = []
+                    for d in digerleri[:12]:
+                        ch = db.query(models.Character).filter(models.Character.id == d.character_id).first()
+                        if ch:
+                            isimler.append(f"{ch.name}{f' ({d.role})' if d.role else ''}")
+                    if isimler:
+                        satir += f". Diğer üyeler: {', '.join(isimler)}"
+                blocks.append(satir)
+
         # Bu kayda ÖZEL kurallar: sabit katmandan bilerek dışlandılar -
         # sadece kayıt sahnedeyken (seçili varlıklardayken) buradan girerler.
         scoped_rules = (
@@ -417,6 +459,9 @@ def build_context(
     # Fihrist HARİTASI: kullanıcının gördüğü numaralar ("Kısım 1.1") -
     # atıfları çözebilmek için. Özetlerden bağımsız, ucuz bir liste.
     outline = build_outline_layer(db, universe_id, novel_id)
+    # Matris haritası: bölüm ↔ kolon×satır eşleşmesi (etiketler + bölüm no,
+    # hücre içerikleri DEĞİL - ucuz kalsın)
+    matrix_map = build_matrix_map_layer(db, novel_id)
     # Kısayol kodlarıyla ("1BLM", "1-2KSM") anılan girdilerin İÇERİĞİ
     referenced = build_referenced_entries_layer(db, universe_id, novel_id, instruction_text)
     # Sohbet modunda çalışılan bölümün METNİ de gider (include_chapter_text);
@@ -438,7 +483,7 @@ def build_context(
     style_warnings = build_style_warning_layer(db, universe_id)
     plan = build_plan_layer(db, novel_id, chapter_number, instruction_text=instruction_text)
     dynamic = build_dynamic_layer(db, universe_id, selected_entities, instruction_text=instruction_text, include_hidden=include_hidden)
-    return "\n\n".join(part for part in [fixed, index, outline, referenced, style, style_warnings, plan, chapter_text, dynamic] if part)
+    return "\n\n".join(part for part in [fixed, index, outline, matrix_map, referenced, style, style_warnings, plan, chapter_text, dynamic] if part)
 
 
 # ---------------------------------------------------------------------------
@@ -2729,3 +2774,147 @@ def estimate_context_size(context: str) -> tuple[int, int, list[dict]]:
     ]
     breakdown.sort(key=lambda x: -x["char_count"])
     return total_chars, total_tokens, breakdown
+
+
+# ---------------------------------------------------------------------------
+# MATRİS HARİTASI: hangi bölüm hangi kolon×satır kesişimine denk geliyor.
+# Plan katmanı yalnızca ÜZERİNDE ÇALIŞILAN bölümün hücresini veriyordu; AI
+# "3. bölüm hangi tura ait", "Sorgu aşamaları hangi bölümlerde" gibi yapısal
+# soruları cevaplayamıyor, turlar arası paralellik kuramıyordu. Bu katman
+# ucuzdur: sadece etiketler ve bölüm numaraları, hücre İÇERİKLERİ değil.
+# ---------------------------------------------------------------------------
+
+def build_matrix_map_layer(db: Session, novel_id: int, max_cells: int = 200) -> str:
+    matrices = db.query(models.PlanMatrix).filter(models.PlanMatrix.novel_id == novel_id).all()
+    if not matrices:
+        return ""
+    # Bölüm numaralarını tek sorguda al (hücre başına sorgu atmayalım)
+    chapter_numbers = {
+        c.id: c.number
+        for c in db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).all()
+    }
+    lines = []
+    for m in matrices:
+        cells = {(c.column_id, c.row_id): c for c in m.cells}
+        if not cells:
+            continue
+        lines.append(f"MATRİS: {m.name}")
+        for col in m.columns:
+            parcalar = []
+            for row in m.rows:
+                cell = cells.get((col.id, row.id))
+                if not cell:
+                    continue
+                num = chapter_numbers.get(cell.chapter_id)
+                dolu = "✓" if (cell.content or "").strip() else "boş"
+                if num:
+                    parcalar.append(f"{row.label} → Bölüm {num} ({cell.code or '-'}, plan {dolu})")
+                else:
+                    parcalar.append(f"{row.label} → (bölüme bağlı değil, plan {dolu})")
+                if len(parcalar) >= max_cells:
+                    break
+            if parcalar:
+                lines.append(f"- {col.label}: " + " | ".join(parcalar))
+    if not lines:
+        return ""
+    return (
+        "=== MATRİS HARİTASI (hangi bölüm hangi kolon×satır kesişimi) ===\n"
+        "Yapısal sorularda bunu kullan: bir bölümün hangi tura/aşamaya ait olduğu,\n"
+        "aynı aşamanın diğer turlarda hangi bölümlerde geçtiği buradan okunur.\n"
+        + "\n".join(lines)
+    )
+
+
+# ---------------------------------------------------------------------------
+# EDEBÎ DEĞERLENDİRME (10 ölçüt). Okur Testi "okur nerede düşer" diye sorar;
+# bu ise "edebî olarak nerede zayıf" diye sorar - farklı iki soru. Ölçütler
+# yayınevi/editör bakışının yaygın on başlığı: betimleme, atmosfer,
+# imgesellik, yapısal akış, alt metin, dil ekonomisi, ritim, sembolizm,
+# karakterizasyon, üslup. Puan tek başına işe yaramaz; asıl değer EN ZAYIF
+# üç başlık için verilen SOMUT düzeltmelerdir.
+# ---------------------------------------------------------------------------
+
+LITERARY_CRITERIA = [
+    ("betimleme", "Betimleme", "Duyulara hitap eden, somut ve seçici tasvir. Genel görünüş → yakın plan → mikro detay sırası izleniyor mu?"),
+    ("atmosfer", "Atmosfer", "Sahnenin bıraktığı genel ruh hâli tutarlı mı, sahnenin işleviyle uyumlu mu?"),
+    ("imgesellik", "İmgesellik", "Zihinde güçlü görüntü/çağrışım kuruluyor mu? İmgeler taze mi, klişe mi?"),
+    ("yapi", "Metnin matematiği (yapısal akış)", "Bilgi doğru sırayla mı veriliyor? Sahne kurulumu, gelişim ve kapanış dengeli mi?"),
+    ("alt_metin", "Alt metin", "Yazılmayan ama sezdirilen anlam var mı, yoksa her şey açıkça söyleniyor mu?"),
+    ("dil_ekonomisi", "Dil ekonomisi", "Az kelimeyle çok şey. Gereksiz sıfat, tekrar, boş cümle var mı?"),
+    ("ritim", "Ritim", "Cümle uzunlukları ve tempo sahnenin gerilimiyle uyumlu mu?"),
+    ("sembolizm", "Sembolizm", "Nesne/detaylar görünenden fazlasını taşıyor mu? Semboller metni boğuyor mu?"),
+    ("karakterizasyon", "Karakterizasyon", "Karakter davranış, seçim ve konuşmayla mı inşa ediliyor, yoksa anlatılıyor mu?"),
+    ("uslup", "Üslup", "Yazarın kendine özgü sesi tutarlı mı? Ödünç/genel bir ton var mı?"),
+]
+
+LITERARY_REVIEW_PROMPT = """Sen deneyimli bir yayınevi editörüsün. Sana bir
+bölümün metni verilecek. Bu metni AŞAĞIDAKİ ON ÖLÇÜTE göre değerlendir.
+
+ÖLÇÜTLER:
+{criteria}
+
+Kurallar:
+1. Her ölçüte 1-5 arası puan ver (1 = ciddi sorun, 3 = iş görür, 5 = çok iyi).
+   Cömert davranma; 5 istisnadır. Puanı METİNDEN bir kanıtla gerekçelendir.
+2. EN ZAYIF ÜÇ ölçüt için birer SOMUT düzeltme öner: hangi paragrafta, ne
+   yapılacak. "Daha edebi olsun" gibi genel öğüt YASAK - uygulanabilir yaz.
+3. Metnin EN GÜÇLÜ tek yönünü de söyle (yazar neyi korumalı).
+4. Alıntı yaparken en fazla 10 kelime kullan ve paragraf numarasını (P3) ver.
+
+Yanıtın SADECE şu JSON olsun:
+{{"scores": [{{"key": "betimleme", "score": 3, "reason": "..."}}],
+  "strongest": "...", "fixes": [{{"criterion": "...", "paragraph": 3, "problem": "...", "fix": "..."}}]}}"""
+
+
+def literary_review(db: Session, chapter, max_chars: int = 14000) -> dict:
+    """Bölümü 10 edebî ölçüte göre değerlendirir. Kaydetmez - rapor döner."""
+    paragraphs = [p for p in chapter.paragraphs if (p.text or "").strip()]
+    if not paragraphs:
+        return {"scores": [], "strongest": "", "fixes": []}
+    body, used = [], 0
+    for p in paragraphs:
+        satir = f"[P{p.number}] {p.text.strip()}"
+        if used + len(satir) > max_chars:
+            body.append("[... metnin kalanı kırpıldı ...]")
+            break
+        body.append(satir)
+        used += len(satir)
+
+    criteria_text = "\n".join(f"- {key}: {ad} — {aciklama}" for key, ad, aciklama in LITERARY_CRITERIA)
+    system = LITERARY_REVIEW_PROMPT.format(criteria=criteria_text)
+    title_part = f" - {chapter.title}" if chapter.title else ""
+    ozet = (chapter.summary or "").strip()
+    user = (f"BÖLÜM ÖZETİ:\n{ozet}\n\n" if ozet else "") + f"BÖLÜM {chapter.number}{title_part}:\n" + "\n".join(body)
+
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+    )
+    data = _parse_json_lenient(response.choices[0].message.content)
+    if not isinstance(data, dict):
+        logger.warning("Edebî değerlendirme: yanıt ayrıştırılamadı (bölüm %s)", chapter.number)
+        return {"scores": [], "strongest": "", "fixes": []}
+
+    gecerli = {k for k, _, _ in LITERARY_CRITERIA}
+    adlar = {k: ad for k, ad, _ in LITERARY_CRITERIA}
+    scores = []
+    for s in data.get("scores", []):
+        key = (s.get("key") or "").strip()
+        if key not in gecerli:
+            continue
+        try:
+            puan = max(1, min(5, int(s.get("score", 3))))
+        except (TypeError, ValueError):
+            puan = 3
+        scores.append({"key": key, "label": adlar[key], "score": puan, "reason": (s.get("reason") or "")[:400]})
+    fixes = [
+        {
+            "criterion": (f.get("criterion") or "")[:60],
+            "paragraph": f.get("paragraph") if isinstance(f.get("paragraph"), int) else None,
+            "problem": (f.get("problem") or "")[:400],
+            "fix": (f.get("fix") or "")[:400],
+        }
+        for f in data.get("fixes", []) if (f.get("fix") or "").strip()
+    ][:5]
+    return {"scores": scores, "strongest": (data.get("strongest") or "")[:300], "fixes": fixes}

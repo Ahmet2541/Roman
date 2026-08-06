@@ -461,3 +461,76 @@ def test_single_chapter_entity_suggestion_endpoint(client, headers):
     assert r.json() == []
     # Olmayan bölüm 404
     assert client.post("/chapters/999999/suggest-entities", headers=headers).status_code == 404
+
+
+# ---- Gruplar & Kurumlar (faksiyonlar) --------------------------------------
+
+def test_faction_membership_reaches_context(client, headers, novel):
+    """Karakter seçiliyken bağlı olduğu GRUP, rolü ve diğer üyeler AI'ya
+    gitmeli - "LÜMEN'e kimler bağlı" bilgisi karakterlerin notlarına
+    dağıldığında ters sorgulanamıyordu."""
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+    from app.qwen_client import build_dynamic_layer
+    from app import schemas as sch
+
+    tabip = client.post("/characters/", json={"name": "Baş Tabip"}, headers=headers).json()
+    baskan = client.post("/characters/", json={"name": "Başkan"}, headers=headers).json()
+    f = client.post("/factions/", json={"name": "LÜMEN Yönetimi", "description": "Kâr için protokol dayatan kanat."}, headers=headers).json()
+    r = client.post("/faction-memberships/", json={"faction_id": f["id"], "character_id": tabip["id"], "role": "Baş Hekim"}, headers=headers)
+    assert r.status_code == 201, r.text
+    client.post("/faction-memberships/", json={"faction_id": f["id"], "character_id": baskan["id"], "role": "Kurul Üyesi"}, headers=headers)
+
+    db = sessionmaker(bind=engine)()
+    ref = sch.EntityRef(entity_type="character", entity_id=tabip["id"])
+    ctx = build_dynamic_layer(db, novel["universe_id"], [ref])
+    assert "LÜMEN Yönetimi" in ctx
+    assert "rolü: Baş Hekim" in ctx
+    assert "Kâr için protokol dayatan" in ctx      # grubun kendi profili
+    assert "Başkan (Kurul Üyesi)" in ctx           # diğer üyeler de görünür
+
+    # Aynı üyelik iki kez eklenemez
+    r = client.post("/faction-memberships/", json={"faction_id": f["id"], "character_id": tabip["id"]}, headers=headers)
+    assert r.status_code == 400
+
+
+def test_literary_review_ten_criteria(client, headers):
+    """10 ölçütlü değerlendirme: geçersiz anahtarlar ayıklanır, puan 1-5
+    aralığına çekilir, ortalama hesaplanır, düzeltmeler sıralanır."""
+    ch = _chapter_with_text(client, headers, [
+        "Bir çeşme. Tarihi. Taş.",
+        "Suyu yeşilimsi, yosun tutmuş.",
+    ])
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "scores": [
+                {"key": "betimleme", "score": 4, "reason": "Somut detay var."},
+                {"key": "dil_ekonomisi", "score": 5, "reason": "Fazla kelime yok."},
+                {"key": "alt_metin", "score": 1, "reason": "Her şey açıkça söyleniyor."},
+                {"key": "uydurma_olcut", "score": 5, "reason": "geçersiz"},
+                {"key": "ritim", "score": 9, "reason": "aralık dışı"},
+            ],
+            "strongest": "Telgraf ritmi karakterin sesine uyuyor.",
+            "fixes": [
+                {"criterion": "Alt metin", "paragraph": 2, "problem": "Yosun doğrudan anlatılmış.", "fix": "Bakan karakterin tepkisiyle göster."},
+                {"criterion": "", "paragraph": None, "problem": "", "fix": ""},
+            ],
+        })
+        r = client.post(f"/ai/literary-review/{ch['id']}", headers=headers)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    keys = [s["key"] for s in d["scores"]]
+    assert "uydurma_olcut" not in keys           # geçersiz ölçüt ayıklandı
+    assert next(s for s in d["scores"] if s["key"] == "ritim")["score"] == 5   # 9 -> 5
+    assert next(s for s in d["scores"] if s["key"] == "alt_metin")["label"] == "Alt metin"
+    assert d["average"] == round((4 + 5 + 1 + 5) / 4, 2)
+    assert len(d["fixes"]) == 1 and d["fixes"][0]["paragraph"] == 2
+    assert "Telgraf ritmi" in d["strongest"]
+
+
+def test_literary_review_empty_chapter(client, headers):
+    bos = client.post("/chapters/", json={"number": 7, "kind": "chapter", "title": "Boş"}, headers=headers).json()
+    with patch("app.qwen_client.get_client") as mc:
+        r = client.post(f"/ai/literary-review/{bos['id']}", headers=headers)
+        mc.assert_not_called()
+    assert r.json()["scores"] == [] and r.json()["average"] == 0

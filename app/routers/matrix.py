@@ -22,6 +22,7 @@ from ..novel_context import get_novel_id
 from ..migrations import _next_matrix_code
 from ..ratelimit import rate_limit
 from .. import qwen_client
+from ..outline import build_hierarchy, children_of
 
 router = APIRouter(prefix="/matrix", tags=["Plan Matrisi"])
 
@@ -89,6 +90,29 @@ def create_matrix(
     db.commit()
     db.refresh(m)
     return _matrix_out(db, m)
+
+
+@router.get("/outline-tree", response_model=List[schemas.OutlineNode])
+def outline_tree(
+    db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Fihrist ağacı: matris eşleştirme ekranında üst girdi seçmek için.
+    Her düğümde numara, başlık, seviye ve alt girdi sayısı var."""
+    chapters = db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).all()
+    items = build_hierarchy(chapters)
+    cocuk_sayisi = {}
+    for it in items:
+        if it["parent_id"]:
+            cocuk_sayisi[it["parent_id"]] = cocuk_sayisi.get(it["parent_id"], 0) + 1
+    return [
+        schemas.OutlineNode(
+            id=it["chapter"].id, display=it["display"], level=it["level"],
+            title=it["chapter"].title or "", kind=it["chapter"].kind,
+            child_count=cocuk_sayisi.get(it["chapter"].id, 0),
+        )
+        for it in items
+    ]
 
 
 @router.get("/{matrix_id}", response_model=schemas.MatrixOut)
@@ -496,3 +520,55 @@ def quick_plan(
     db.add(cell)
     db.commit()
     return schemas.QuickPlanResponse(code=cell.code, matrix_name=matrix.name, content=cell.content)
+
+
+@router.post("/{matrix_id}/columns/{column_id}/bind-outline", response_model=schemas.ColumnBindResult)
+def bind_column_to_outline(
+    matrix_id: int, column_id: int, payload: schemas.ColumnBindRequest,
+    db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
+):
+    """KOLONU FİHRİSTE BAĞLA: kolon = fihristteki bir BÖLÜM, satırlar = o
+    bölümün altındaki KISIM'lar. Hücreleri tek tek bağlamak yerine tek
+    işlemde sırayla eşleştirir (1. satır -> 1. alt girdi, 2. -> 2. ...).
+
+    Kullanıcının zihin modeli bu: "4. bölüm Belediye Başkanı, 7 kısmı var;
+    5. bölüm Yargıç, onun da 7 kısmı" - matris bu yapının aynası olmalı.
+    """
+    m = _get_matrix(db, matrix_id, novel_id)
+    column = next((c for c in m.columns if c.id == column_id), None)
+    if not column:
+        raise HTTPException(404, "Kolon bu matriste yok")
+
+    chapters = db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).all()
+    parent = next((c for c in chapters if c.id == payload.parent_chapter_id), None)
+    if not parent:
+        raise HTTPException(404, "Üst girdi bu romanda bulunamadı")
+
+    alt_girdiler = children_of(chapters, parent.id)
+    hiyerarsi = {it["chapter"].id: it["display"] for it in build_hierarchy(chapters)}
+    mevcut = {(c.column_id, c.row_id): c for c in m.cells}
+
+    linked, skipped = [], []
+    for i, row in enumerate(m.rows):
+        if i >= len(alt_girdiler):
+            skipped.append(f"{row.label} → (bu bölümde {i + 1}. alt girdi yok)")
+            continue
+        hedef = alt_girdiler[i]
+        cell = mevcut.get((column.id, row.id))
+        if cell and cell.chapter_id and not payload.overwrite:
+            skipped.append(f"{row.label} → zaten #{hiyerarsi.get(cell.chapter_id, '?')} ile bağlı")
+            continue
+        if cell:
+            cell.chapter_id = hedef.id
+            if not cell.code:
+                cell.code = _next_matrix_code(db, novel_id)
+        else:
+            db.add(models.MatrixCell(
+                matrix_id=m.id, column_id=column.id, row_id=row.id,
+                content="", chapter_id=hedef.id, code=_next_matrix_code(db, novel_id),
+            ))
+            db.flush()
+        linked.append(f"{row.label} → #{hiyerarsi.get(hedef.id, '?')} {hedef.title or '(başlıksız)'}")
+    db.commit()
+    return schemas.ColumnBindResult(linked=linked, skipped=skipped)
