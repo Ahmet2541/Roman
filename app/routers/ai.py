@@ -7,7 +7,7 @@ from ..auth import get_current_user
 from .. import schemas, models
 from ..qwen_client import (
     build_context, ask_qwen, full_scan, chat_with_qwen, reader_test_chapter,
-    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review,
+    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite,
 )
 from ..entities import ENTITY_MODELS
 from ..sections import SECTIONS_BY_ENTITY_TYPE, _tr_lower
@@ -329,4 +329,51 @@ def literary_review_endpoint(
     return schemas.LiteraryReviewResponse(
         chapter_number=chapter.number, scores=scores, strongest=result["strongest"],
         fixes=[schemas.LiteraryFix(**f) for f in result["fixes"]], average=ortalama,
+        scanned=result.get("scanned", 0), total=result.get("total", 0),
+        chunks=result.get("chunks", 1),
     )
+
+
+@router.post("/structure-scan", response_model=schemas.StructureScanResponse)
+def structure_scan_endpoint(
+    db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=4, window_seconds=120, label="yapısal tarama")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Bölümler ARASI yapısal akış denetimi: nedensellik ("bu yüzden" mi
+    "ve sonra" mı), tekrar eden çatışma, bahis eğrisi, ölü bölgeler, bölüm
+    kapanışları. Özetlerle çalışır - bölüm metinlerini göndermez (ucuz)."""
+    try:
+        result = structure_scan(db, novel_id)
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+    return schemas.StructureScanResponse(
+        summary=result.get("summary", ""),
+        causality=[schemas.CausalityLink(**c) for c in result.get("causality", []) if isinstance(c, dict) and "from" in c and "to" in c],
+        repetition=[schemas.RepetitionFinding(**r) for r in result.get("repetition", []) if isinstance(r, dict)],
+        stakes=schemas.StakesTrend(**(result.get("stakes") or {})),
+        dead_zones=[schemas.ChapterNote(**d) for d in result.get("dead_zones", []) if isinstance(d, dict)],
+        endings=[schemas.ChapterNote(**e) for e in result.get("endings", []) if isinstance(e, dict)],
+        missing_summaries=result.get("missing_summaries", []),
+    )
+
+
+@router.post("/verify-rewrite", response_model=schemas.VerifyRewriteResponse)
+def verify_rewrite(
+    payload: schemas.VerifyRewriteRequest,
+    db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=30, window_seconds=60, label="kabul kontrolü")),
+    universe_id: int = Depends(get_universe_id),
+):
+    """Yeni paragraf versiyonunu KABUL ETMEDEN ÖNCE denetler: işlevini
+    yerine getiriyor mu, somut detay düştü mü, komşularla çelişiyor mu,
+    yasak üslup kalıbı girdi mi. Sayı/isim kaybı ve yasak kalıp kontrolü
+    deterministiktir (AI'ya sorulmaz)."""
+    try:
+        result = verify_paragraph_rewrite(
+            db, universe_id, payload.old_text, payload.new_text,
+            purpose=payload.purpose, neighbors=payload.neighbors,
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+    return schemas.VerifyRewriteResponse(**result)

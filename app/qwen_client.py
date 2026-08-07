@@ -2031,35 +2031,55 @@ def reader_test_chapter(db: Session, chapter) -> list[dict]:
     paragraphs = [p for p in chapter.paragraphs if (p.text or "").strip()]
     if not paragraphs:
         return []
-    body = "\n\n".join(f"P{p.number}: {p.text}" for p in paragraphs)
-    client = get_client()
-    response = client.chat.completions.create(
-        model=settings.qwen_model,
-        messages=[
-            {"role": "system", "content": READER_TEST_SYSTEM_PROMPT},
-            {"role": "user", "content": f"BÖLÜM {chapter.number}{' — ' + chapter.title if chapter.title else ''}\n\n{body}"},
-        ],
-    )
-    raw = response.choices[0].message.content
-    cleaned = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
-    try:
-        data = json.loads(cleaned)
-    except json.JSONDecodeError:
-        return []
+
+    # UZUN BÖLÜM DİLİMLENİR: 100 paragraflık bir bölüm tek istekte
+    # gönderildiğinde model sonlara doğru savsaklıyor ya da JSON kesiliyordu -
+    # ve hiçbir uyarı görünmüyordu. Her dilim ayrı taranıp bulgular birleşir.
+    max_chars = 14000
+    dilimler, mevcut, used = [], [], 0
+    for p in paragraphs:
+        satir = f"P{p.number}: {p.text}"
+        if mevcut and used + len(satir) > max_chars:
+            dilimler.append(mevcut)
+            mevcut, used = [], 0
+        mevcut.append(satir)
+        used += len(satir)
+    if mevcut:
+        dilimler.append(mevcut)
+
     valid_numbers = {p.number for p in paragraphs}
+    client = get_client()
     out = []
-    for f in data.get("findings", []):
-        if not (f.get("reason") or "").strip():
+    for i, dilim in enumerate(dilimler, start=1):
+        parca_notu = f" - PARÇA {i}/{len(dilimler)}" if len(dilimler) > 1 else ""
+        try:
+            response = client.chat.completions.create(
+                model=settings.qwen_model,
+                messages=[
+                    {"role": "system", "content": READER_TEST_SYSTEM_PROMPT},
+                    {"role": "user", "content": f"BÖLÜM {chapter.number}{' — ' + chapter.title if chapter.title else ''}{parca_notu}\n\n" + "\n\n".join(dilim)},
+                ],
+            )
+        except Exception:
+            logger.exception("Okur Testi: parça %s başarısız", i)
             continue
-        num = f.get("paragraph_number")
-        out.append({
-            "paragraph_number": num if num in valid_numbers else None,
-            "quote": (f.get("quote") or "")[:200],
-            "type": f.get("type") or "diger",
-            "severity": f.get("severity") if f.get("severity") in ("yuksek", "orta", "dusuk") else "orta",
-            "reason": f.get("reason"),
-            "suggestion": f.get("suggestion") or "",
-        })
+        data = _parse_json_lenient(response.choices[0].message.content)
+        if not isinstance(data, dict):
+            logger.warning("Okur Testi: parça %s ayrıştırılamadı", i)
+            continue
+        for f in data.get("findings", []):
+            if not (f.get("reason") or "").strip():
+                continue
+            num = f.get("paragraph_number")
+            out.append({
+                "paragraph_number": num if num in valid_numbers else None,
+                "quote": (f.get("quote") or "")[:200],
+                "type": f.get("type") or "diger",
+                "severity": f.get("severity") if f.get("severity") in ("yuksek", "orta", "dusuk") else "orta",
+                "reason": f.get("reason"),
+                "suggestion": f.get("suggestion") or "",
+            })
+    out.sort(key=lambda f: (f["paragraph_number"] is None, f["paragraph_number"] or 0))
     return out
 
 
@@ -2867,18 +2887,34 @@ Yanıtın SADECE şu JSON olsun:
 
 
 def literary_review(db: Session, chapter, max_chars: int = 14000) -> dict:
-    """Bölümü 10 edebî ölçüte göre değerlendirir. Kaydetmez - rapor döner."""
+    """Bölümü 10 edebî ölçüte göre değerlendirir. Kaydetmez - rapor döner.
+
+    UZUN BÖLÜMLER PARÇA PARÇA taranır: eskiden metin 14.000 karakterde
+    kesiliyordu ve 100 paragraflık bir bölümün ancak ilk üçte biri
+    inceleniyordu - üstelik rapor bunu SÖYLEMİYORDU ("sessiz eksik
+    denetim"). Artık bölüm dilimlere ayrılıp her dilim ayrı taranır,
+    puanlar ortalanır, bulgular birleştirilir ve kaç paragrafın tarandığı
+    raporda döner.
+    """
     paragraphs = [p for p in chapter.paragraphs if (p.text or "").strip()]
     if not paragraphs:
-        return {"scores": [], "strongest": "", "fixes": []}
-    body, used = [], 0
+        return {"scores": [], "strongest": "", "fixes": [], "scanned": 0, "total": 0, "chunks": 0}
+
+    # Dilimle: her dilim max_chars sınırını aşmasın
+    dilimler, mevcut, used = [], [], 0
     for p in paragraphs:
         satir = f"[P{p.number}] {p.text.strip()}"
-        if used + len(satir) > max_chars:
-            body.append("[... metnin kalanı kırpıldı ...]")
-            break
-        body.append(satir)
+        if mevcut and used + len(satir) > max_chars:
+            dilimler.append(mevcut)
+            mevcut, used = [], 0
+        mevcut.append(satir)
         used += len(satir)
+    if mevcut:
+        dilimler.append(mevcut)
+
+    if len(dilimler) > 1:
+        return _literary_review_chunked(db, chapter, dilimler, len(paragraphs))
+    body = dilimler[0]
 
     criteria_text = "\n".join(f"- {key}: {ad} — {aciklama}" for key, ad, aciklama in LITERARY_CRITERIA)
     system = LITERARY_REVIEW_PROMPT.format(criteria=criteria_text)
@@ -2917,4 +2953,256 @@ def literary_review(db: Session, chapter, max_chars: int = 14000) -> dict:
         }
         for f in data.get("fixes", []) if (f.get("fix") or "").strip()
     ][:5]
-    return {"scores": scores, "strongest": (data.get("strongest") or "")[:300], "fixes": fixes}
+    return {
+        "scores": scores, "strongest": (data.get("strongest") or "")[:300], "fixes": fixes,
+        "scanned": len(paragraphs), "total": len(paragraphs), "chunks": 1,
+    }
+
+
+def _literary_review_chunked(db: Session, chapter, dilimler: list, toplam: int) -> dict:
+    """Uzun bölüm: her dilim ayrı taranır, sonuçlar birleştirilir.
+    Puanlar dilimler arası ORTALANIR (bir dilimin zayıflığı tüm bölümü
+    mahkûm etmesin), düzeltmeler paragraf sırasına göre toplanır."""
+    criteria_text = "\n".join(f"- {key}: {ad} — {aciklama}" for key, ad, aciklama in LITERARY_CRITERIA)
+    system = LITERARY_REVIEW_PROMPT.format(criteria=criteria_text)
+    title_part = f" - {chapter.title}" if chapter.title else ""
+    ozet = (chapter.summary or "").strip()
+    gecerli = {k for k, _, _ in LITERARY_CRITERIA}
+    adlar = {k: ad for k, ad, _ in LITERARY_CRITERIA}
+
+    puan_toplam, puan_sayi, gerekce = {}, {}, {}
+    tum_fixes, guclu = [], []
+    client = get_client()
+    for i, dilim in enumerate(dilimler, start=1):
+        user = (
+            (f"BÖLÜM ÖZETİ:\n{ozet}\n\n" if ozet else "")
+            + f"BÖLÜM {chapter.number}{title_part} - PARÇA {i}/{len(dilimler)}:\n"
+            + "\n".join(dilim)
+        )
+        try:
+            response = client.chat.completions.create(
+                model=settings.qwen_model,
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            )
+        except Exception:
+            logger.exception("Edebî değerlendirme: parça %s başarısız", i)
+            continue
+        data = _parse_json_lenient(response.choices[0].message.content)
+        if not isinstance(data, dict):
+            continue
+        for sc in data.get("scores", []):
+            key = (sc.get("key") or "").strip()
+            if key not in gecerli:
+                continue
+            try:
+                puan = max(1, min(5, int(sc.get("score", 3))))
+            except (TypeError, ValueError):
+                puan = 3
+            puan_toplam[key] = puan_toplam.get(key, 0) + puan
+            puan_sayi[key] = puan_sayi.get(key, 0) + 1
+            # En DÜŞÜK puanın gerekçesini sakla - sorunun kaynağı orası
+            if key not in gerekce or puan <= gerekce[key][0]:
+                gerekce[key] = (puan, (sc.get("reason") or "")[:400])
+        for f in data.get("fixes", []):
+            if (f.get("fix") or "").strip():
+                tum_fixes.append({
+                    "criterion": (f.get("criterion") or "")[:60],
+                    "paragraph": f.get("paragraph") if isinstance(f.get("paragraph"), int) else None,
+                    "problem": (f.get("problem") or "")[:400],
+                    "fix": (f.get("fix") or "")[:400],
+                })
+        if (data.get("strongest") or "").strip():
+            guclu.append(data["strongest"].strip())
+
+    scores = [
+        {"key": k, "label": adlar[k], "score": round(puan_toplam[k] / puan_sayi[k]),
+         "reason": gerekce.get(k, (0, ""))[1]}
+        for k in puan_toplam
+    ]
+    tum_fixes.sort(key=lambda f: (f["paragraph"] is None, f["paragraph"] or 0))
+    return {
+        "scores": scores, "strongest": guclu[0] if guclu else "",
+        "fixes": tum_fixes[:12], "scanned": toplam, "total": toplam, "chunks": len(dilimler),
+    }
+
+
+# ---------------------------------------------------------------------------
+# YAPISAL AKIŞ TARAMASI (bölümler arası). Editörlerin klasik testleri:
+#  - "bu yüzden / ve sonra": bir bölümün SONUCU, sonrakinin HEDEFİNİ
+#    doğuruyor mu? "Ve sonra" zinciri momentum kaybıdır.
+#  - Tekrar eden çatışma: her bölüm tek başına iyi olabilir; tekrar ancak
+#    bölümler ARASI okununca görünür (aynı engel, aynı sonuç, yükselmeyen bahis).
+#  - Ölü bölge: çıkarılsa kimsenin fark etmeyeceği bölümler.
+#  - Bahis eğrisi: bedel/tehdit yükseliyor mu, sabit mi?
+# Bu tarama ÖZETLERLE çalışır (ucuz) - bölüm metinlerini göndermez.
+# ---------------------------------------------------------------------------
+
+STRUCTURE_SCAN_PROMPT = """Sen deneyimli bir gelişim editörüsün. Sana bir
+romanın bölüm özetleri SIRAYLA verilecek. Yapısal akışı denetle.
+
+Uygulayacağın testler:
+1. NEDENSELLİK ("bu yüzden" testi): Her bölümün sonucu, bir SONRAKİNİN
+   hedefini doğuruyor mu? Bağ "bu yüzden / bu nedenle" ise sağlam;
+   "ve sonra" ise momentum kopuyor demektir. Kopuk halkaları göster.
+2. TEKRAR EDEN ÇATIŞMA: Aynı engel/çatışma, durumu değiştirmeden
+   tekrarlanıyor mu? (A dener-başarısız, B dener-başarısız...) Yükselen
+   komplikasyon mu var, yoksa sıfırlanan tekrar mı?
+3. BAHİS EĞRİSİ: Bedel/tehdit yükseliyor mu, sabit mi, düşüyor mu?
+4. ÖLÜ BÖLGE: Çıkarılsa okurun fark etmeyeceği bölüm(ler) hangileri?
+5. AÇILIŞ-KAPANIŞ: Bölüm sonları bir soru/eşik bırakıyor mu, yoksa
+   çözülüp bitiyor mu?
+
+Kurallar: Bölüm numaralarıyla konuş. Her bulgu için SOMUT düzeltme öner
+("şu bölümde şu sonucu değiştir" gibi) - genel öğüt yasak. Sağlamsa
+sağlam de, sorun uydurma.
+
+Yanıtın SADECE şu JSON olsun:
+{"causality": [{"from": 3, "to": 4, "link": "ve sonra", "problem": "...", "fix": "..."}],
+ "repetition": [{"chapters": [5,7,9], "problem": "...", "fix": "..."}],
+ "stakes": {"trend": "yükseliyor|sabit|düşüyor", "comment": "..."},
+ "dead_zones": [{"chapter": 12, "reason": "...", "fix": "..."}],
+ "endings": [{"chapter": 6, "problem": "...", "fix": "..."}],
+ "summary": "iki cümlelik genel değerlendirme"}"""
+
+
+def structure_scan(db: Session, novel_id: int, max_chars: int = 24000) -> dict:
+    """Bölüm özetlerinden yapısal akış denetimi. Özeti olmayan bölümler
+    atlanır ve raporda belirtilir - onlar zaten zincirde kör nokta."""
+    chapters = (
+        db.query(models.Chapter)
+        .filter(models.Chapter.novel_id == novel_id)
+        .order_by(models.Chapter.number)
+        .all()
+    )
+    ozetli = [c for c in chapters if (c.summary or "").strip()]
+    ozetsiz = [c.number for c in chapters if not (c.summary or "").strip()
+               and any((p.text or "").strip() for p in c.paragraphs)]
+    if len(ozetli) < 2:
+        return {
+            "summary": "Yapısal tarama için en az 2 özetli bölüm gerekir. "
+                       "Bölümleri yazıp 'AI ile özet oluştur' ile özetle.",
+            "causality": [], "repetition": [], "stakes": {}, "dead_zones": [],
+            "endings": [], "missing_summaries": ozetsiz,
+        }
+
+    bloklar, used = [], 0
+    for c in ozetli:
+        parca = f"--- Bölüm {c.number}{' - ' + c.title if c.title else ''} ---\n{c.summary.strip()}"
+        if used + len(parca) > max_chars:
+            bloklar.append("[... kalan bölümler kırpıldı ...]")
+            break
+        bloklar.append(parca)
+        used += len(parca)
+
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": STRUCTURE_SCAN_PROMPT},
+            {"role": "user", "content": "BÖLÜM ÖZETLERİ (sırayla):\n\n" + "\n\n".join(bloklar)},
+        ],
+    )
+    data = _parse_json_lenient(response.choices[0].message.content)
+    if not isinstance(data, dict):
+        logger.warning("Yapısal tarama: yanıt ayrıştırılamadı")
+        return {"summary": "Değerlendirme üretilemedi.", "causality": [], "repetition": [],
+                "stakes": {}, "dead_zones": [], "endings": [], "missing_summaries": ozetsiz}
+    data["missing_summaries"] = ozetsiz
+    return data
+
+
+# ---------------------------------------------------------------------------
+# YAZIM SONRASI DOĞRULAMA (kabul kontrolü). Zincirin son halkası: yeni bir
+# paragraf versiyonu üretildikten SONRA kimse "işini yapıyor mu" diye
+# sormuyordu. Bu fonksiyon dört soruyu deterministik + AI karışımıyla
+# cevaplar:
+#   1. İŞLEV: paragrafın işi tanımlıysa yerine getiriliyor mu?
+#   2. SOMUT DETAY: rakam/ölçü/özel isim düştü mü? (deterministik kontrol)
+#   3. SÜREKLİLİK: komşularla çelişki ya da tekrar var mı?
+#   4. ÜSLUP: yasak kalıplar (üslup taraması eşiği aşanlar) girdi mi?
+#      (deterministik - regex ile)
+# Deterministik kısımlar AI'ya sorulmaz: ucuz ve kesin.
+# ---------------------------------------------------------------------------
+
+NUMBER_TOKEN_RE = re.compile(r"\b\d+(?:[.,]\d+)?\b")
+PROPER_NOUN_RE = re.compile(r"\b[A-ZÇĞİÖŞÜ][a-zçğıöşü]{2,}\b")
+
+
+def _extract_facts(text: str) -> tuple[set, set]:
+    """Metindeki sayılar ve özel isim adayları (cümle başı hariç değil -
+    kaba ama işe yarar: kaybolan detayı yakalamak için yeterli)."""
+    return set(NUMBER_TOKEN_RE.findall(text or "")), set(PROPER_NOUN_RE.findall(text or ""))
+
+
+VERIFY_PROMPT = """Sen titiz bir redaktörsün. Sana bir paragrafın ESKİ ve
+YENİ hâli, (varsa) paragrafın İŞLEVİ ve komşu paragraflar verilecek.
+Yeni hâli KABUL EDİLEBİLİR mi, karar ver.
+
+Kontrol et:
+1. İŞLEV: Paragrafın işi tanımlıysa yeni hâli bunu yerine getiriyor mu?
+2. ANLAM: Olay akışı, zaman ve mekân korunmuş mu? Yeni bir olay uydurulmuş mu?
+3. SÜREKLİLİK: Önceki/sonraki paragraflarla çelişki ya da gereksiz tekrar var mı?
+4. EYLEM SIRASI: Tamamlanmış bir eylem yeniden başlatılmış mı?
+
+Yanıtın SADECE şu JSON olsun:
+{"verdict": "kabul|duzelt|red", "issues": ["..."], "note": "tek cümle gerekçe"}
+Sorun yoksa issues boş liste, verdict "kabul" olsun. Uydurma sorun çıkarma."""
+
+
+def verify_paragraph_rewrite(db: Session, universe_id: int, old_text: str, new_text: str,
+                             purpose: str = "", neighbors: str = "") -> dict:
+    """Yeni versiyonu denetler. Deterministik bulgular + AI kararı döner."""
+    hard_issues = []
+
+    # 1) Somut detay kaybı (deterministik)
+    eski_sayilar, eski_isimler = _extract_facts(old_text)
+    yeni_sayilar, yeni_isimler = _extract_facts(new_text)
+    kayip_sayi = sorted(eski_sayilar - yeni_sayilar)
+    kayip_isim = sorted(eski_isimler - yeni_isimler)
+    if kayip_sayi:
+        hard_issues.append(f"Somut detay düştü - eski metindeki sayılar yeni metinde yok: {', '.join(kayip_sayi)}")
+    if kayip_isim:
+        hard_issues.append(f"Özel isim düştü: {', '.join(kayip_isim)}")
+
+    # 2) Yasak üslup kalıpları (deterministik - eşiği aşan kalıplar)
+    rapor = None
+    try:
+        from .style_scan import load_scan_result, _tr_lower as style_lower
+        rapor = load_scan_result(db, universe_id)
+    except Exception:
+        rapor = None
+    if rapor:
+        norm = new_text.replace("İ", "i").replace("I", "ı").lower()
+        for p in rapor.get("patterns", []):
+            if not p.get("exceeded"):
+                continue
+            try:
+                hits = len(re.findall(p["pattern"], norm))
+            except re.error:
+                continue
+            if hits:
+                hard_issues.append(f"Aşırı kullanılan kalıp yeni metinde {hits} kez geçiyor: {p['name']}")
+
+    # 3) AI kararı (işlev, anlam, süreklilik, eylem sırası)
+    user = (
+        (f"PARAGRAFIN İŞLEVİ: {purpose}\n\n" if purpose.strip() else "")
+        + f"ESKİ HÂLİ:\n{old_text}\n\nYENİ HÂLİ:\n{new_text}\n"
+        + (f"\nKOMŞULAR:\n{neighbors}" if neighbors else "")
+    )
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[{"role": "system", "content": VERIFY_PROMPT}, {"role": "user", "content": user}],
+    )
+    data = _parse_json_lenient(response.choices[0].message.content) or {}
+    ai_issues = [str(x)[:300] for x in (data.get("issues") or []) if str(x).strip()]
+    verdict = data.get("verdict") if data.get("verdict") in ("kabul", "duzelt", "red") else "kabul"
+    # Deterministik bulgu varsa karar en az "duzelt" olur - AI kabul dese bile
+    if hard_issues and verdict == "kabul":
+        verdict = "duzelt"
+    return {
+        "verdict": verdict,
+        "hard_issues": hard_issues,
+        "issues": ai_issues,
+        "note": (data.get("note") or "")[:300],
+    }

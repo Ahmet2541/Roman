@@ -534,3 +534,105 @@ def test_literary_review_empty_chapter(client, headers):
         r = client.post(f"/ai/literary-review/{bos['id']}", headers=headers)
         mc.assert_not_called()
     assert r.json()["scores"] == [] and r.json()["average"] == 0
+
+
+def test_structure_scan_chain_analysis(client, headers):
+    """Bölümler arası yapısal denetim: özetlerle çalışır, özetsiz bölümleri
+    kör nokta olarak bildirir, 2'den az özet varsa Qwen'e hiç gitmez."""
+    from app.qwen_client import structure_scan
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+
+    db_maker = sessionmaker(bind=engine)
+    novel_id = int(headers["X-Novel-Id"])
+
+    # Tek özet: tarama çalışmaz, Qwen'e gidilmez
+    ch1 = _chapter_with_text(client, headers, ["Metin bir."], number=1)
+    client.put(f"/chapters/{ch1['id']}", json={"summary": "OLAY: Vicdan uyanır."}, headers=headers)
+    with patch("app.qwen_client.get_client") as mc:
+        r = client.post("/ai/structure-scan", headers=headers)
+        mc.assert_not_called()
+    assert "en az 2 özetli bölüm" in r.json()["summary"]
+
+    # İki özet + özetsiz bir bölüm
+    ch2 = _chapter_with_text(client, headers, ["Metin iki."], number=2)
+    client.put(f"/chapters/{ch2['id']}", json={"summary": "OLAY: Başkan sorgulanır."}, headers=headers)
+    _chapter_with_text(client, headers, ["Özetsiz metin."], number=3)
+
+    captured = {}
+    def fake_create(**kwargs):
+        captured["user"] = kwargs["messages"][1]["content"]
+        return _fake_qwen({
+            "causality": [{"from": 1, "to": 2, "link": "ve sonra", "problem": "Bağ zayıf.", "fix": "1. bölümün sonucu 2'nin hedefini doğursun."}],
+            "repetition": [{"chapters": [1, 2], "problem": "Aynı sorgu tekrarı.", "fix": "İkincide bahsi yükselt."}],
+            "stakes": {"trend": "sabit", "comment": "Tehdit artmıyor."},
+            "dead_zones": [{"chapter": 2, "reason": "Çıkarılsa fark edilmez.", "fix": "Sonuç ekle."}],
+            "endings": [{"chapter": 1, "problem": "Soru bırakmıyor.", "fix": "Eşikte kapat."}],
+            "summary": "Zincir zayıf.",
+        })
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.side_effect = fake_create
+        r = client.post("/ai/structure-scan", headers=headers)
+    d = r.json()
+    assert d["causality"][0]["from"] == 1 and d["causality"][0]["link"] == "ve sonra"
+    assert d["repetition"][0]["chapters"] == [1, 2]
+    assert d["stakes"]["trend"] == "sabit"
+    assert d["missing_summaries"] == [3]          # özetsiz bölüm bildirildi
+    assert "Vicdan uyanır" in captured["user"]    # özetler prompt'a girdi
+    assert "Özetsiz metin" not in captured["user"]  # METİN gönderilmedi (ucuz)
+
+
+def test_verify_rewrite_catches_lost_facts(client, headers):
+    """Kabul kontrolü: somut detay kaybı DETERMİNİSTİK yakalanır (AI'ya
+    sorulmaz) ve AI 'kabul' dese bile karar 'duzelt'e çekilir."""
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen(
+            {"verdict": "kabul", "issues": [], "note": "Akış korunmuş."})
+        r = client.post("/ai/verify-rewrite", json={
+            "old_text": "On santimetrelik cam. Vicdan 47. blokta bekliyordu.",
+            "new_text": "Kalın bir cam vardı. Sistem blokta bekliyordu.",
+            "purpose": "Mekanı tehditkâr göstermek",
+        }, headers=headers)
+    d = r.json()
+    assert d["verdict"] == "duzelt"                      # AI kabul dedi ama sert bulgu var
+    metin = " ".join(d["hard_issues"])
+    assert "47" in metin                                  # düşen sayı yakalandı
+    assert "Vicdan" in metin                              # düşen özel isim yakalandı
+
+
+def test_verify_rewrite_passes_clean_rewrite(client, headers):
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen(
+            {"verdict": "kabul", "issues": [], "note": "İşlevini yerine getiriyor."})
+        r = client.post("/ai/verify-rewrite", json={
+            "old_text": "On santimetrelik cam. Vicdan bekliyordu.",
+            "new_text": "On santimetrelik cam, ışığı kırıyordu. Vicdan bekliyordu.",
+        }, headers=headers)
+    d = r.json()
+    assert d["verdict"] == "kabul" and not d["hard_issues"]
+
+
+def test_long_chapter_scanned_in_chunks(client, headers):
+    """KAPSAMA: uzun bölüm parça parça taranır ve kaç paragrafın
+    incelendiği raporlanır. Eskiden metin sessizce kırpılıyor, 100
+    paragraflık bölümün ancak ilk üçte biri değerlendiriliyordu."""
+    # 30 paragraf x ~1100 karakter = ~33k karakter -> en az 3 dilim
+    uzun = ["Bu bir dolgu paragrafıdır. " * 40 for _ in range(30)]
+    ch = _chapter_with_text(client, headers, uzun)
+
+    cagri = {"n": 0}
+    def fake_create(**kwargs):
+        cagri["n"] += 1
+        return _fake_qwen({
+            "scores": [{"key": "ritim", "score": 3 if cagri["n"] == 1 else 5, "reason": f"parça {cagri['n']}"}],
+            "strongest": "Tempo", "fixes": [{"criterion": "Ritim", "paragraph": cagri["n"], "problem": "x", "fix": "y"}],
+        })
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.side_effect = fake_create
+        r = client.post(f"/ai/literary-review/{ch['id']}", headers=headers)
+    d = r.json()
+    assert cagri["n"] > 1, "uzun bölüm tek istekte gönderilmemeli"
+    assert d["chunks"] == cagri["n"]
+    assert d["scanned"] == 30 and d["total"] == 30      # TAMAMI tarandı
+    assert next(s for s in d["scores"] if s["key"] == "ritim")["score"] == 4   # ortalama
+    assert len(d["fixes"]) == cagri["n"]                # her parçanın bulgusu korundu

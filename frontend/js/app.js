@@ -131,8 +131,7 @@ async function switchView(view) {
   if (view === 'import') return renderImportView();
   if (view === 'event') return renderEventsView();
   if (view === 'relationships') return renderRelationshipsView();
-  if (view === 'fullscan') return renderFullScanView();
-  if (view === 'stylescan') return renderStyleScanView();
+  if (view === 'fullscan' || view === 'stylescan' || view === 'denetim') return renderDenetimView(view);
   if (view === 'matrix') return renderMatrixView();
   if (view === 'faction') return renderFactionView();
   if (view === 'place') return renderPlacesView();
@@ -1514,6 +1513,11 @@ function renderReader(chapter) {
   const readerPane = document.getElementById('readerPane');
   // Bu bölümün fihristteki numarası ("1-2") - paragraf atıf kodunun ön eki.
   // Böylece "1-2P3" gibi tam atıf kodu kullanıcıya gösterilebiliyor.
+  loadParaState(chapter.id);           // önceki oturumun işlev/karar kayıtları
+  // Bölüm planı, paragraf işlevinin MİRAS kaynağıdır (bkz. effectiveParaPurpose)
+  api.get(`/matrix/plan-for-chapter/${chapter.id}`)
+    .then(r => { window.__currentChapterPlan = (r && r.content) || ''; })
+    .catch(() => { window.__currentChapterPlan = ''; });
   const chapterEntryNumber = (buildChapterHierarchy(lastLoadedChapters)
     .find(it => String(it.chapter.id) === String(chapter.id)) || {}).displayNumber || '';
   const paragraphsHtml = chapter.paragraphs.map(p => `
@@ -1963,6 +1967,12 @@ async function autoSaveParagraph(chapter, number, el, state, saveBtn) {
       setTimeout(() => { if (state.textContent === '✓ kaydedildi') state.textContent = ''; }, 2500);
     }
     dirtyChapterId = chapter.id;
+    // Elle düzenleyip kaydettiğin paragraf da "çözüldü" sayılır - incelemede
+    // tekrar önerilmesin (kullanıcı zaten kendi eliyle halletti).
+    if (typeof resolvedParas !== 'undefined' && !resolvedParas.has(String(number))) {
+      resolvedParas.add(String(number));
+      saveParaState();
+    }
     // Mention rozetlerini YERİNDE güncelle (tam çizim yok - imleç korunur)
     const chipRow = el.nextElementSibling;
     if (chipRow && saved.mentions) {
@@ -3297,9 +3307,8 @@ async function showRelationshipForm() {
 // Tüm Roman Tutarlılık Taraması
 // ---------------------------------------------------------------------
 
-function renderFullScanView() {
-  main().innerHTML = `
-    <h1 class="view-title">Tutarlılık Taraması</h1>
+function renderFullScanView(container) {
+  (container || main()).innerHTML = `
     <p style="color:var(--text-muted);font-size:13.5px;max-width:600px;">Yazılmış tüm bölümleri tek seferde Qwen'e gönderip roman geneli tutarsızlıkları arar (karakter bilgisi çelişkileri, zaman çizelgesi hataları, kural ihlalleri). Uzun romanlarda biraz sürebilir.</p>
     <button class="btn btn-primary" id="startScanBtn">Taramayı Başlat</button>
     <div id="scanResult" style="margin-top:20px;"></div>`;
@@ -3603,9 +3612,8 @@ initApp();
 // önbelleklenir; eşiği aşan kalıplar her AI isteğinin context'ine otomatik
 // "bundan kaçın" uyarısı olarak girer. Kalıplar buradan eklenip düzenlenir.
 // ---------------------------------------------------------------------------
-function renderStyleScanView() {
-  main().innerHTML = `
-    <h1 class="view-title">Üslup Taraması</h1>
+function renderStyleScanView(container) {
+  (container || main()).innerHTML = `
     <p style="color:var(--text-muted);font-size:13.5px;max-width:640px;">
       Serinin tüm metnini tarayıp "gibi / sanki / X yerine Y" tarzı aşırı kullanılan
       yazım tiklerini sayar. Eşiği aşan kalıplar, bir sonraki taramaya kadar her AI
@@ -4550,7 +4558,8 @@ async function runParagraphAi(chapter, number, mode) {
   // Ayrıca somut detaylar (rakam, ölçü, isim) korunmak ZORUNDA - sohbetin
   // başında yaşanan "10 santimetre sessizce kayboldu" hatasının önlemi.
   const instruction = mode === 'suggest'
-    ? 'MEVCUT METİN olarak verilen paragrafı GÜÇLENDİRİLMİŞ haliyle yeniden yaz.\n'
+    ? (effectiveParaPurpose(number).text ? `BU PARAGRAFIN İŞİ (öncelikli ölçüt - yeni hâli bunu yerine getirmeli, kaynak: ${effectiveParaPurpose(number).source}): ${effectiveParaPurpose(number).text}\n` : '')
+      + 'MEVCUT METİN olarak verilen paragrafı GÜÇLENDİRİLMİŞ haliyle yeniden yaz.\n'
       + 'ÖNCE bölümün özetine/planına ve çevresindeki akışa bak, bu sahnenin TÜRÜNÜ belirle '
       + '(polisiye/soruşturma, gerilim, aksiyon, dramatik/duygusal, atmosferik betimleme, diyalog) '
       + 've ona uygun tekniği kullan:\n'
@@ -4590,6 +4599,10 @@ async function runParagraphAi(chapter, number, mode) {
     panel.innerHTML = `
       <div class="panel para-ai-grid" style="border-left:3px solid ${mode === 'suggest' ? 'var(--gold)' : 'var(--border)'};">
         <div class="para-ai-col-left">
+          <div class="field" style="margin:0 0 8px;">
+            <label style="font-size:10.5px;letter-spacing:0.4px;color:var(--text-muted);">🎯 BU PARAGRAFIN İŞİ <span style="font-weight:400;text-transform:none;letter-spacing:0;">(bir cümle - yeniden yazımın ölçüsü olur)</span></label>
+            <input type="text" class="para-purpose" data-number="${number}" value="${escapeHtml(paraPurposes[number] || '')}" placeholder="ör. Yangın yerini masum göstermek - okur sonradan anlamalı" style="font-size:12.5px;">
+          </div>
           <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">${mode === 'suggest' ? '✨ ÖNERİLEN VERSİYON - onaysız değişmez' : '🔍 EDİTÖR ELEŞTİRİSİ - metne dokunulmadı'}</strong>
           <div style="white-space:pre-wrap;font-size:13px;margin-top:6px;">${escapeHtml(result.generated_text || '')}</div>
           ${notes}
@@ -4612,6 +4625,15 @@ async function runParagraphAi(chapter, number, mode) {
       </div>`;
     renderParaChatLog(number);
     panel.querySelector('.para-ai-close').addEventListener('click', () => { panel.style.display = 'none'; panel.innerHTML = ''; });
+    // İŞLEV: yazıldıkça saklanır ve TÜM yeniden yazım talimatlarının EN
+    // BAŞINA konur. Eksik olan buydu - "ne anlatılıyor" ve "ne bozuk"
+    // biliniyordu ama "bu paragraf ne YAPMAK zorunda" hiçbir yerde tanımlı
+    // değildi; AI da estetiği optimize edip işlevi ıskalıyordu.
+    const purposeInput = panel.querySelector('.para-purpose');
+    if (purposeInput) purposeInput.addEventListener('input', () => {
+      paraPurposes[number] = purposeInput.value;
+      saveParaState();
+    });
     // Paragraf sohbeti: öneriyi tartışarak iyileştirme. Bağlam SADECE bu
     // paragraf + komşuları + son öneri - tüm bölüm sohbetine karışmaz,
     // kendi geçmişi vardır (paragraf bazlı).
@@ -4626,8 +4648,17 @@ async function runParagraphAi(chapter, number, mode) {
     });
     const replaceBtn = panel.querySelector('.para-ai-replace');
     if (replaceBtn) replaceBtn.addEventListener('click', async () => {
-      if (!confirm('Paragraf önerilen metinle DEĞİŞTİRİLECEK. Eski hali "Geçmiş"ten geri alınabilir. Devam?')) return;
-      await replaceParagraphText(chapter.id, parseInt(number, 10), result.generated_text);
+      // KABUL KONTROLÜ önce çalışır: işlev, somut detay kaybı, süreklilik,
+      // yasak kalıp. Karar yine kullanıcının - "yine de yaz" seçeneği var.
+      const yeniMetin = (result.generated_text || '').trim();
+      replaceBtn.closest('.form-actions').insertAdjacentElement('afterend', renderQuickCheck(
+        text, yeniMetin,
+        async () => {
+          await replaceParagraphText(chapter.id, parseInt(number, 10), yeniMetin);
+          markParagraphResolved(number);
+        },
+        () => verifyBeforeApply(chapter.id, parseInt(number, 10), text, yeniMetin),
+      ));
     });
   } catch (err) {
     panel.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
@@ -5101,13 +5132,32 @@ function renderParaChatLog(number) {
     <div style="margin-bottom:6px;padding:5px 7px;border-radius:6px;background:${m.role === 'user' ? 'var(--paper-dim)' : '#fff'};border:1px solid ${m.isVersion ? 'var(--gold)' : 'var(--border)'};">
       <div style="font-size:10px;color:var(--text-muted);">${m.role === 'user' ? 'Sen' : (m.isVersion ? '✍️ AI - YENİ VERSİYON' : 'AI')}</div>
       <div style="white-space:pre-wrap;">${escapeHtml(m.content)}</div>
-      ${m.role === 'assistant' && m.isVersion ? `<button class="btn btn-sm btn-primary para-chat-apply" data-number="${number}" data-idx="${i}" style="margin-top:4px;font-size:11px;">✓ Bu versiyonu paragrafa yaz</button>` : ''}
+      ${m.role === 'assistant' && m.isVersion ? `
+        <div style="display:flex;gap:6px;margin-top:5px;flex-wrap:wrap;">
+          <button class="btn btn-sm btn-primary para-chat-apply" data-number="${number}" data-idx="${i}" style="font-size:11px;">✓ Bu versiyonu paragrafa yaz</button>
+          <button class="btn btn-sm para-chat-copy" data-idx="${i}" data-number="${number}" style="font-size:11px;" title="Panoya kopyala">⧉ Kopyala</button>
+        </div>` : ''}
     </div>`).join('');
   log.scrollTop = log.scrollHeight;
+  log.querySelectorAll('.para-chat-copy').forEach(btn => btn.addEventListener('click', () => {
+    const msg = paraChatHistories[btn.dataset.number][parseInt(btn.dataset.idx, 10)];
+    navigator.clipboard?.writeText(msg.content);
+    const prev = btn.textContent;
+    btn.textContent = '✓ kopyalandı';
+    setTimeout(() => { btn.textContent = prev; }, 1200);
+  }));
   log.querySelectorAll('.para-chat-apply').forEach(btn => btn.addEventListener('click', async () => {
     const msg = paraChatHistories[number][parseInt(btn.dataset.idx, 10)];
-    if (!confirm('Paragraf bu metinle değiştirilecek. Eski hali "Geçmiş"ten geri alınabilir. Devam?')) return;
-    await replaceParagraphText(currentChapter.id, parseInt(number, 10), msg.content);
+    const mevcut = (currentChapter?.paragraphs || []).find(p => p.number === parseInt(number, 10));
+    const eski = mevcut ? mevcut.text : '';
+    btn.parentElement.insertAdjacentElement('afterend', renderQuickCheck(
+      eski, msg.content,
+      async () => {
+        await replaceParagraphText(currentChapter.id, parseInt(number, 10), msg.content);
+        markParagraphResolved(number);
+      },
+      () => verifyBeforeApply(currentChapter.id, parseInt(number, 10), eski, msg.content),
+    ));
   }));
 }
 
@@ -5129,8 +5179,15 @@ async function sendParagraphChat(chapter, number, neighborBlock, originalText) {
   const frame =
     `P${number} adlı TEK BİR PARAGRAF üzerinde konuşuyoruz. Şu anki hali:\n"${base}"\n`
     + (neighborBlock || '')
-    + '\nBu bir TARTIŞMA: fikrini söyle, sorun varsa göster, alternatif öner, gerekirse soru sor. '
-    + 'Paragrafı YENİDEN YAZMA - kullanıcı hazır olduğunda ayrıca isteyecek. Kısa ve somut konuş.';
+    + '\nBu bir TARTIŞMA: fikrini söyle, sorun varsa göster, alternatif öner, gerekirse TEK soru sor. '
+    + 'Paragrafı YENİDEN YAZMA - kullanıcı hazır olduğunda ayrıca isteyecek.\n'
+    + 'UZUNLUK SINIRI (kesin): en fazla 6 CÜMLE. Madde işareti kullanma, başlık atma, '
+    + 'aynı fikri farklı kelimelerle tekrarlama. Üç ayrı alternatif sıralama - EN İYİ bir ya da '
+    + 'iki yolu söyle. Övgüyle başlama, doğrudan konuya gir.\n'
+    + 'ÖNEMLİ - VERSİYON ÜRETİMİ: Kullanıcı bir yeniden yazım isterse ("şöyle yaz", '
+    + '"dıştan içe ilerlet" gibi), paragrafın yeni halini MUTLAKA set_draft_result aracıyla ver. '
+    + 'Metni sohbet cevabının içine gömme, "hazırlayabilirim / eklerim" diye sorma - '
+    + 'doğrudan üret. write_paragraph gibi araçlarla paragrafa YAZMA; kullanıcı onaylayacak.';
 
   const log = document.querySelector(`.para-chat-log[data-number="${number}"]`);
   if (log) log.insertAdjacentHTML('beforeend', '<div class="para-chat-pending" style="color:var(--text-muted);font-size:12px;">düşünüyor…</div>');
@@ -5143,7 +5200,13 @@ async function sendParagraphChat(chapter, number, neighborBlock, originalText) {
       messages: [{ role: 'user', content: frame }, ...paraChatHistories[number]],
       text_scope: 'none',   // bölüm metni yerine paragraf + komşular yeter
     });
-    paraChatHistories[number].push({ role: 'assistant', content: (result.reply || '').trim(), isVersion: false });
+    // Model set_draft_result ile bir VERSİYON ürettiyse onu da kaydet:
+    // eskiden yalnızca sohbet metni alınıyordu ve "Güncelledim" denip
+    // üretilen taslak yolda kayboluyordu - kullanıcı metni hiç görmüyordu.
+    const yorum = (result.reply || '').trim();
+    if (yorum) paraChatHistories[number].push({ role: 'assistant', content: yorum, isVersion: false });
+    const taslak = (result.draft_result || '').trim();
+    if (taslak) paraChatHistories[number].push({ role: 'assistant', content: taslak, isVersion: true });
     renderParaChatLog(number);
   } catch (err) {
     document.querySelector('.para-chat-pending')?.remove();
@@ -5157,8 +5220,10 @@ async function writeParagraphVersion(chapter, number, neighborBlock, originalTex
   const history = paraChatHistories[number] || [];
   const base = currentParagraphBase(number, originalText);
   const konusma = history.map(m => `${m.role === 'user' ? 'Yazar' : 'AI'}: ${m.content}`).join('\n');
+  const isTanimi = effectiveParaPurpose(number).text;
   const instruction =
-    `P${number} paragrafının YENİ VERSİYONUNU yaz. Aşağıdaki konuşmada varılan kararları uygula.\n`
+    (isTanimi ? `BU PARAGRAFIN İŞİ (öncelikli ölçüt): ${isTanimi}\n` : '')
+    + `P${number} paragrafının YENİ VERSİYONUNU yaz. Aşağıdaki konuşmada varılan kararları uygula.\n`
     + 'KURALLAR: Eylem sırasını bozma (tamamlanmış eylemi yeniden başlatma, zaman tek yönlü). '
     + 'Somut detayları koru. SADECE paragraf metnini döndür - açıklama, başlık, tırnak ekleme.\n'
     + (konusma ? `KONUŞMA:\n${konusma}\n` : '')
@@ -5712,8 +5777,10 @@ async function runInlineFix(chapter, paragraphNumber, issue, btn) {
   const selected = Array.from(document.querySelectorAll('.entity-check:checked')).map(cb => ({
     entity_type: cb.dataset.type, entity_id: parseInt(cb.dataset.id, 10),
   }));
+  const isBilgi = effectiveParaPurpose(paragraphNumber).text;
   const instruction =
-    `P${paragraphNumber} paragrafını, aşağıdaki EDİTÖR UYARISINI giderecek şekilde yeniden yaz.\n`
+    (isBilgi ? `BU PARAGRAFIN İŞİ (öncelikli ölçüt): ${isBilgi}\n` : '')
+    + `P${paragraphNumber} paragrafını, aşağıdaki EDİTÖR UYARISINI giderecek şekilde yeniden yaz.\n`
     + `UYARI: ${issue}\n`
     + 'KURALLAR: Sadece bu uyarıyı gider, sahnenin anlamını ve olay akışını DEĞİŞTİRME. '
     + 'Eylem sırasını bozma (tamamlanmış eylemi yeniden başlatma). Somut detayları (rakam, '
@@ -5736,9 +5803,15 @@ async function runInlineFix(chapter, paragraphNumber, issue, btn) {
         </div>
       </div>`;
     box.querySelector('.inline-fix-close').addEventListener('click', () => { box.innerHTML = ''; btn.disabled = false; });
-    box.querySelector('.inline-fix-apply').addEventListener('click', async () => {
-      if (!confirm(`P${paragraphNumber} bu metinle değiştirilecek. Eski hali "Geçmiş"ten geri alınabilir. Devam?`)) return;
-      await replaceParagraphText(chapter.id, paragraphNumber, yeni);
+    box.querySelector('.inline-fix-apply').addEventListener('click', async (e) => {
+      e.target.closest('.form-actions').insertAdjacentElement('afterend', renderQuickCheck(
+        hedef.text, yeni,
+        async () => {
+          await replaceParagraphText(chapter.id, paragraphNumber, yeni);
+          markParagraphResolved(paragraphNumber);
+        },
+        () => verifyBeforeApply(chapter.id, paragraphNumber, hedef.text, yeni),
+      ));
     });
   } catch (err) {
     box.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
@@ -5803,6 +5876,10 @@ async function runChapterReview(chapter) {
         <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">🔍 BÖLÜM İNCELEMESİ - metne dokunulmadı</strong>
         <span style="font-size:12.5px;color:var(--text-muted);">edebî ortalama <b style="color:${renk(Math.round(literary.average))}">${literary.average}</b>/5 · ${paraNumaralari.length} paragrafta bulgu</span>
       </div>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">
+        Kapsama: ${literary.total || 0} paragrafın <b>${literary.scanned || 0}</b>'i tarandı${literary.chunks > 1 ? ` (${literary.chunks} parça hâlinde)` : ''}.
+        Bulgu çıkmayan paragraflar "sorunsuz" değil, sadece <b>işaretlenmemiş</b> demektir.
+      </div>
       ${literary.strongest ? `<div style="font-size:12.5px;margin:6px 0;padding:6px 8px;background:var(--paper-dim);border-radius:6px;">💪 <b>En güçlü yön:</b> ${escapeHtml(literary.strongest)}</div>` : ''}
 
       <details style="margin-top:6px;">
@@ -5818,14 +5895,23 @@ async function runChapterReview(chapter) {
       </details>
 
       <div style="margin-top:10px;">
-        <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">PARAGRAF PARAGRAF BULGULAR</strong>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+          <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">PARAGRAF PARAGRAF BULGULAR</strong>
+          ${paraNumaralari.length > 1 ? `<div style="display:flex;gap:4px;align-items:center;">
+            <button class="btn btn-sm" id="findingPrev" title="Önceki bulgu (Alt+←)" style="font-size:11px;padding:2px 8px;">◀</button>
+            <span id="findingCounter" style="font-size:11.5px;color:var(--text-muted);">1/${paraNumaralari.length}</span>
+            <button class="btn btn-sm" id="findingNext" title="Sonraki bulgu (Alt+→)" style="font-size:11px;padding:2px 8px;">▶</button>
+          </div>` : ''}
+        </div>
         ${paraNumaralari.length ? paraNumaralari.map(num => {
           const kayitlar = byPara[num];
           const issue = kayitlar.map(k => `${k.baslik}: ${k.sorun} ${k.oneri || ''}`).join(' | ');
           return `
-          <div style="border-left:3px solid var(--gold);padding-left:10px;margin-top:10px;">
+          <div class="finding-card" data-num="${num}" data-resolved="${resolvedParas.has(String(num)) ? '1' : '0'}"
+               style="border-left:3px solid ${resolvedParas.has(String(num)) ? '#3f7a4f' : 'var(--gold)'};padding-left:10px;margin-top:10px;opacity:${resolvedParas.has(String(num)) ? '0.5' : '1'};">
             <div style="font-size:12.5px;"><a href="#" class="rt-goto" data-num="${num}" style="color:inherit;"><b>P${num}</b></a>
-              <span style="color:var(--text-muted);">· ${kayitlar.length} bulgu</span></div>
+              <span style="color:var(--text-muted);">· ${kayitlar.length} bulgu</span>
+              <span class="finding-status">${resolvedParas.has(String(num)) ? '<span style="color:#3f7a4f;font-weight:600;">✓ düzeltildi</span>' : ''}</span></div>
             ${kayitlar.map(k => `
               <div style="font-size:12.5px;margin-top:4px;">
                 <span title="${k.kaynak === 'editor' ? 'Editör gözü (edebî ölçüt)' : 'Okur gözü'}">${k.kaynak === 'editor' ? '📊' : '🎯'}</span>
@@ -5835,8 +5921,9 @@ async function runChapterReview(chapter) {
                 ${k.oneri ? `<div>→ ${escapeHtml(k.oneri)}</div>` : ''}
               </div>`).join('')}
             <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
-              <button class="btn btn-sm rt-fix" data-num="${num}" data-issue="${escapeHtml(issue)}" style="font-size:11.5px;">✨ Bulgulara göre düzelt</button>
-              <button class="btn btn-sm review-chat" data-num="${num}" data-issue="${escapeHtml(issue)}" style="font-size:11.5px;">💬 AI ile konuşarak karar ver</button>
+              ${resolvedParas.has(String(num)) ? '' : `
+                <button class="btn btn-sm rt-fix" data-num="${num}" data-issue="${escapeHtml(issue)}" style="font-size:11.5px;">✨ Bulgulara göre düzelt</button>
+                <button class="btn btn-sm review-chat" data-num="${num}" data-issue="${escapeHtml(issue)}" style="font-size:11.5px;">💬 AI ile konuşarak karar ver</button>`}
             </div>
             <div class="rt-fix-result" data-num="${num}"></div>
             <div class="review-chat-box" data-num="${num}"></div>
@@ -5851,6 +5938,54 @@ async function runChapterReview(chapter) {
             <div style="color:var(--text-muted);">${escapeHtml(k.sorun || '')}</div>${k.oneri ? `<div>→ ${escapeHtml(k.oneri)}</div>` : ''}</div>`).join('')}
         </div>` : ''}
     </div>`;
+
+  // BULGULAR ARASI GEZİNME: 100 paragraflık bölümde 12 bulgu arasında elle
+  // kaydırmak yerine ileri/geri. Alt+ok tuşlarıyla da çalışır.
+  let bulguIdx = -1;
+  const bulguyaGit = (yon) => {
+    if (!paraNumaralari.length) return;
+    // ÇÖZÜLMÜŞ bulguları ATLA: düzeltip kaydettiğin paragraf tekrar
+    // karşına çıkmasın. Hepsi çözülmüşse haber ver ve dur.
+    let deneme = 0;
+    do {
+      bulguIdx = (bulguIdx + yon + paraNumaralari.length) % paraNumaralari.length;
+      deneme += 1;
+    } while (resolvedParas.has(String(paraNumaralari[bulguIdx])) && deneme <= paraNumaralari.length);
+    if (deneme > paraNumaralari.length) {
+      const sayac = document.getElementById('findingCounter');
+      if (sayac) sayac.innerHTML = '<span style="color:#3f7a4f;">tümü ✓</span>';
+      return;
+    }
+    const num = paraNumaralari[bulguIdx];
+    const kalan = paraNumaralari.filter(n => !resolvedParas.has(String(n))).length;
+    const sayac = document.getElementById('findingCounter');
+    if (sayac) sayac.textContent = `${bulguIdx + 1}/${paraNumaralari.length} · ${kalan} kaldı`;
+    const hedefBulgu = box.querySelector(`.rt-fix[data-num="${num}"]`);
+    if (hedefBulgu) hedefBulgu.closest('div[style*="border-left"]').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const paraEl = document.querySelector(`.paragraph-text[data-number="${num}"]`);
+    if (paraEl) {
+      paraEl.style.background = 'var(--paper-dim)';
+      setTimeout(() => { paraEl.style.background = ''; }, 1800);
+    }
+  };
+  window.__gotoNextFinding = () => bulguyaGit(1);   // kaydettikten sonra otomatik ilerleme
+  // Açılışta ilk ÇÖZÜLMEMİŞ bulguya konumlan, sayaç doğru başlasın
+  const kalanIlk = paraNumaralari.findIndex(n => !resolvedParas.has(String(n)));
+  if (kalanIlk >= 0) {
+    bulguIdx = kalanIlk - 1;
+    const s0 = document.getElementById('findingCounter');
+    if (s0) s0.textContent = `${kalanIlk + 1}/${paraNumaralari.length} · ${paraNumaralari.filter(n => !resolvedParas.has(String(n))).length} kaldı`;
+  }
+  document.getElementById('findingNext')?.addEventListener('click', () => bulguyaGit(1));
+  document.getElementById('findingPrev')?.addEventListener('click', () => bulguyaGit(-1));
+  if (!window.__findingNavBound) {
+    window.__findingNavBound = true;
+    document.addEventListener('keydown', (e) => {
+      if (!e.altKey) return;
+      if (e.key === 'ArrowRight') { e.preventDefault(); document.getElementById('findingNext')?.click(); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); document.getElementById('findingPrev')?.click(); }
+    });
+  }
 
   box.querySelectorAll('.rt-fix').forEach(b => b.addEventListener('click', () =>
     runInlineFix(chapter, parseInt(b.dataset.num, 10), b.dataset.issue, b)));
@@ -5906,4 +6041,293 @@ function openReviewChat(chapter, number, issue) {
     paraChatHistories[number] = [];
     sendParagraphChat(chapter, number, komsu, para.text);
   }
+}
+
+// ---------------------------------------------------------------------------
+// DENETİM: tüm kontrol araçları TEK menüde, sekmeli. Eskiden Tutarlılık ve
+// Üslup sol menüde ayrı ayrı duruyor, Bölüm İncelemesi ise bölümün üstünde
+// kalıyordu - aynı aileden üç araç üç farklı yerdeydi ve hangisinin nerede
+// olduğu ezberlenmek zorundaydı. Artık "roman geneli" denetimler burada,
+// "bu bölüm" denetimi ise doğal yerinde (bölümün üstünde) kalır; buradan
+// da nasıl çalıştırılacağı anlatılır.
+// ---------------------------------------------------------------------------
+const DENETIM_SEKMELERI = {
+  fullscan: {
+    label: '🧩 Tutarlılık',
+    hint: 'Roman geneli çelişkiler: karakter bilgisi, zaman çizelgesi, kural ihlalleri.',
+    render: (el) => renderFullScanView(el),
+  },
+  stylescan: {
+    label: '✍️ Üslup',
+    hint: 'Aşırı kullanılan kalıplar ve yazım tikleri; eşiği aşanlar AI\'ya "kaçın" uyarısı olarak gider.',
+    render: (el) => renderStyleScanView(el),
+  },
+  structure: {
+    label: '🏗️ Yapısal Akış',
+    hint: 'Bölümler ARASI denetim: nedensellik ("bu yüzden" mi "ve sonra" mı), tekrar eden çatışma, bahis eğrisi, ölü bölgeler, bölüm kapanışları. Özetlerle çalışır.',
+    render: (el) => renderStructureScan(el),
+  },
+  chapter: {
+    label: '🔍 Bölüm İncelemesi',
+    hint: 'Tek bir bölümün edebî karnesi + okur gözü bulguları. Bölümün kendi ekranından çalışır.',
+    render: (el) => {
+      el.innerHTML = `
+        <div class="panel">
+          <p style="font-size:13.5px;color:var(--text-muted);margin-top:0;">
+            Bölüm İncelemesi <b>bölüme özel</b> bir denetimdir - bu yüzden bölümün kendi ekranında durur.
+            Önce editör gözüyle 10 edebî ölçüt (betimleme, atmosfer, imgesellik, yapısal akış, alt metin,
+            dil ekonomisi, ritim, sembolizm, karakterizasyon, üslup), sonra okur gözüyle düşürücü noktalar
+            taranır; bulgular paragraf paragraf birleştirilir ve her paragrafı düzeltebilir ya da AI ile
+            konuşarak karara bağlayabilirsin.
+          </p>
+          <div style="font-size:13px;">Nasıl çalıştırılır: <b>Roman</b> menüsü → bir bölüm seç → üstteki
+            <b>🔍 Bölüm İncelemesi</b> düğmesi.</div>
+          <button class="btn btn-primary" id="gotoRomanForReview" style="margin-top:10px;">Roman menüsüne git</button>
+        </div>`;
+      el.querySelector('#gotoRomanForReview').addEventListener('click', () => switchView('roman'));
+    },
+  },
+};
+let currentDenetimTab = 'fullscan';
+
+function renderDenetimView(view) {
+  // Eski menü yolları (fullscan/stylescan) doğrudan ilgili sekmeyi açar
+  if (view === 'fullscan' || view === 'stylescan') currentDenetimTab = view;
+  main().innerHTML = `
+    <h1 class="view-title">Denetim</h1>
+    <p style="color:var(--text-muted);font-size:13.5px;max-width:680px;">
+      Metni kontrol eden tüm araçlar burada. <b>Tutarlılık</b> ve <b>Üslup</b> roman genelini tarar;
+      <b>Bölüm İncelemesi</b> tek bir bölüme odaklanır.
+    </p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0;">
+      ${Object.entries(DENETIM_SEKMELERI).map(([key, t]) => `
+        <button class="btn btn-sm denetim-tab${key === currentDenetimTab ? ' btn-primary' : ''}" data-tab="${key}">${t.label}</button>`).join('')}
+    </div>
+    <div id="denetimHint" style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px;"></div>
+    <div id="denetimBody"></div>`;
+
+  const goster = (key) => {
+    currentDenetimTab = key;
+    document.querySelectorAll('.denetim-tab').forEach(b => b.classList.toggle('btn-primary', b.dataset.tab === key));
+    document.getElementById('denetimHint').textContent = DENETIM_SEKMELERI[key].hint;
+    DENETIM_SEKMELERI[key].render(document.getElementById('denetimBody'));
+  };
+  document.querySelectorAll('.denetim-tab').forEach(b =>
+    b.addEventListener('click', () => goster(b.dataset.tab)));
+  goster(currentDenetimTab);
+}
+
+// ---------------------------------------------------------------------------
+// YAPISAL AKIŞ TARAMASI (bölümler arası). Diğer denetimler TEK bölüme ya da
+// cümlelere bakar; buradaki sorunlar ancak bölümler ARASI okununca görünür:
+// nedensellik kopukluğu ("ve sonra" zinciri), tekrar eden çatışma, sabit
+// kalan bahis, ölü bölgeler. Özetlerle çalışır - ucuzdur.
+// ---------------------------------------------------------------------------
+async function renderStructureScan(el) {
+  el.innerHTML = `
+    <p style="font-size:13.5px;color:var(--text-muted);max-width:680px;margin-top:0;">
+      Editörlerin klasik testleri: her bölümün sonucu bir sonrakinin hedefini doğuruyor mu
+      (<b>"bu yüzden"</b> mi, yoksa <b>"ve sonra"</b> mı), aynı çatışma tekrarlanıyor mu,
+      bahis yükseliyor mu, çıkarılsa fark edilmeyecek bölüm var mı. Bölüm ÖZETLERİ kullanılır.
+    </p>
+    <button class="btn btn-primary" id="startStructureScan">Yapısal Taramayı Başlat</button>
+    <div id="structureResult" style="margin-top:14px;"></div>`;
+
+  el.querySelector('#startStructureScan').addEventListener('click', async () => {
+    const box = el.querySelector('#structureResult');
+    box.innerHTML = '<div class="empty-state">Bölüm zinciri inceleniyor…</div>';
+    try {
+      const r = await api.post('/ai/structure-scan', {});
+      const trendRenk = { 'yükseliyor': '#3f7a4f', 'sabit': '#b08d3f', 'düşüyor': 'var(--danger)' }[r.stakes?.trend] || 'var(--text-muted)';
+      const blok = (baslik, icerik) => icerik ? `<div style="margin-top:12px;"><strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">${baslik}</strong>${icerik}</div>` : '';
+      box.innerHTML = `
+        <div class="panel">
+          ${r.summary ? `<div style="font-size:13px;">${escapeHtml(r.summary)}</div>` : ''}
+          ${r.missing_summaries.length ? `<div style="font-size:12px;color:var(--danger);margin-top:6px;">⚠ Özeti olmayan ${r.missing_summaries.length} bölüm taramaya girmedi (Bölüm ${r.missing_summaries.join(', ')}). Zincirde kör nokta oluşturur - önce özetle.</div>` : ''}
+
+          ${r.stakes?.trend ? `<div style="margin-top:10px;font-size:13px;">📈 <b>Bahis eğrisi:</b> <span style="color:${trendRenk};font-weight:600;">${escapeHtml(r.stakes.trend)}</span> — ${escapeHtml(r.stakes.comment || '')}</div>` : ''}
+
+          ${blok('NEDENSELLİK ZİNCİRİ ("bu yüzden" testi)', r.causality.map(c => `
+            <div style="border-left:3px solid ${c.link && c.link.includes('sonra') ? 'var(--danger)' : 'var(--border)'};padding-left:10px;margin-top:8px;font-size:12.5px;">
+              <b>Bölüm ${c.from} → ${c.to}</b> <span style="color:var(--text-muted);">bağ: "${escapeHtml(c.link || '?')}"</span>
+              <div style="color:var(--text-muted);">${escapeHtml(c.problem || '')}</div>
+              ${c.fix ? `<div>→ ${escapeHtml(c.fix)}</div>` : ''}
+            </div>`).join(''))}
+
+          ${blok('TEKRAR EDEN ÇATIŞMA', r.repetition.map(x => `
+            <div style="border-left:3px solid var(--gold);padding-left:10px;margin-top:8px;font-size:12.5px;">
+              <b>Bölüm ${x.chapters.join(', ')}</b>
+              <div style="color:var(--text-muted);">${escapeHtml(x.problem || '')}</div>
+              ${x.fix ? `<div>→ ${escapeHtml(x.fix)}</div>` : ''}
+            </div>`).join(''))}
+
+          ${blok('ÖLÜ BÖLGELER', r.dead_zones.map(d => `
+            <div style="border-left:3px solid var(--danger);padding-left:10px;margin-top:8px;font-size:12.5px;">
+              <b>Bölüm ${d.chapter ?? '?'}</b>
+              <div style="color:var(--text-muted);">${escapeHtml(d.reason || d.problem || '')}</div>
+              ${d.fix ? `<div>→ ${escapeHtml(d.fix)}</div>` : ''}
+            </div>`).join(''))}
+
+          ${blok('BÖLÜM KAPANIŞLARI', r.endings.map(e => `
+            <div style="border-left:3px solid var(--border);padding-left:10px;margin-top:8px;font-size:12.5px;">
+              <b>Bölüm ${e.chapter ?? '?'}</b>
+              <div style="color:var(--text-muted);">${escapeHtml(e.problem || e.reason || '')}</div>
+              ${e.fix ? `<div>→ ${escapeHtml(e.fix)}</div>` : ''}
+            </div>`).join(''))}
+        </div>`;
+    } catch (err) {
+      box.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+    }
+  });
+}
+
+// Paragraf işlevleri (oturum boyunca bellekte): { "7": "Yangın yerini masum
+// göstermek..." }. Yeniden yazımın ÖLÇÜSÜ budur - talimatların en başına
+// konur ve kabul kontrolünde "işini yapıyor mu" sorusuna kaynak olur.
+const paraPurposes = {};
+
+// İŞLEV MİRASI: 100 paragraflık bölümde her paragrafa elle işlev yazmak
+// gerçekçi değil. Paragrafın kendi işlevi boşsa SAHNENİN işlevi (bölüm
+// planı) kullanılır - plan zaten "bu bölümde ne olacak" diyor. Sadece
+// istisna paragraflarda elle yazılır.
+function effectiveParaPurpose(number) {
+  const kendi = (paraPurposes[number] || '').trim();
+  if (kendi) return { text: kendi, source: 'paragraf' };
+  const plan = (window.__currentChapterPlan || '').trim();
+  if (plan) return { text: plan, source: 'bölüm planı' };
+  return { text: '', source: '' };
+}
+
+// Kalıcılık: işlevler ve paragraf kararları tarayıcıda saklanır - sayfa
+// yenilenince ya da ertesi gün dönünce kaybolmasın.
+// Çözülmüş bulgular: düzeltilip KAYDEDİLEN paragraflar. İncelemede tekrar
+// önerilmez, gezinmede atlanır - "bir ileri bir geri" dönmeyi bitirir.
+const resolvedParas = new Set();
+
+function markParagraphResolved(number) {
+  resolvedParas.add(String(number));
+  saveParaState();
+  const kart = document.querySelector(`.finding-card[data-num="${number}"]`);
+  if (kart) {
+    kart.dataset.resolved = '1';
+    kart.style.opacity = '0.5';
+    kart.style.borderLeftColor = '#3f7a4f';
+    const rozet = kart.querySelector('.finding-status');
+    if (rozet) rozet.innerHTML = '<span style="color:#3f7a4f;font-weight:600;">✓ düzeltildi</span>';
+    kart.querySelectorAll('.rt-fix, .review-chat').forEach(b => b.remove());
+  }
+  // Sıradaki ÇÖZÜLMEMİŞ bulguya otomatik ilerle
+  if (typeof window.__gotoNextFinding === 'function') window.__gotoNextFinding();
+}
+
+function saveParaState() {
+  try {
+    localStorage.setItem(`roman_para_state_${currentChapter?.id || 0}`,
+      JSON.stringify({ purposes: paraPurposes, chats: paraChatHistories, resolved: [...resolvedParas] }));
+  } catch (e) { /* depolama dolu olabilir - sessiz geç */ }
+}
+function loadParaState(chapterId) {
+  Object.keys(paraPurposes).forEach(k => delete paraPurposes[k]);
+  Object.keys(paraChatHistories).forEach(k => delete paraChatHistories[k]);
+  resolvedParas.clear();
+  try {
+    const raw = localStorage.getItem(`roman_para_state_${chapterId}`);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    Object.assign(paraPurposes, data.purposes || {});
+    Object.assign(paraChatHistories, data.chats || {});
+    (data.resolved || []).forEach(x => resolvedParas.add(String(x)));
+  } catch (e) { /* bozuk kayıt - yoksay */ }
+}
+
+// ---------------------------------------------------------------------------
+// KABUL KONTROLÜ: yeni versiyon paragrafa YAZILMADAN ÖNCE denetlenir.
+// Zincirin son halkasıydı ve yoktu: metin üretiliyor, onaylanıyor, bitiyordu -
+// işini yapıyor mu, somut detay düştü mü, komşuyla çelişti mi, yasak kalıp
+// girdi mi kimse sormuyordu. Sayı/isim kaybı ve kalıp kontrolü
+// deterministiktir (AI'ya sorulmaz).
+// ---------------------------------------------------------------------------
+// Deterministik ön kontrol (AI'sız, anlık): sayı ve özel isim kaybı.
+// 100 paragraflık bölümde her uygulamada AI çağırmak hem pahalı hem yavaş;
+// çoğu sorun zaten buradan yakalanıyor. AI kontrolü ancak burada bulgu
+// çıkarsa ya da kullanıcı isterse çalışır.
+function quickFactCheck(oldText, newText) {
+  const sayilar = (t) => new Set((t || '').match(/\b\d+(?:[.,]\d+)?\b/g) || []);
+  const isimler = (t) => new Set((t || '').match(/\b[A-ZÇĞİÖŞÜ][a-zçğıöşü]{2,}\b/g) || []);
+  const kayipSayi = [...sayilar(oldText)].filter(x => !sayilar(newText).has(x));
+  const kayipIsim = [...isimler(oldText)].filter(x => !isimler(newText).has(x));
+  const bulgular = [];
+  if (kayipSayi.length) bulgular.push(`Somut sayı düştü: ${kayipSayi.join(', ')}`);
+  if (kayipIsim.length) bulgular.push(`Özel isim düştü: ${kayipIsim.join(', ')}`);
+  return bulgular;
+}
+
+async function verifyBeforeApply(chapterId, number, oldText, newText) {
+  const paras = (currentChapter?.paragraphs || []).slice().sort((a, b) => a.number - b.number);
+  const idx = paras.findIndex(p => p.number === number);
+  const clip = (t) => { const v = (t || '').trim(); return v.length > 300 ? v.slice(0, 300) + '…' : v; };
+  const komsular = idx >= 0
+    ? [...paras.slice(Math.max(0, idx - 1), idx), ...paras.slice(idx + 1, idx + 2)]
+        .map(p => `[P${p.number}] ${clip(p.text)}`).join('\n')
+    : '';
+  try {
+    return await api.post('/ai/verify-rewrite', {
+      old_text: oldText, new_text: newText,
+      purpose: paraPurposes[number] || '', neighbors: komsular,
+    });
+  } catch (err) {
+    return { verdict: 'kabul', hard_issues: [], issues: [], note: 'Kontrol yapılamadı: ' + err.message };
+  }
+}
+
+// Kontrol sonucunu gösterir; kullanıcı yine de yazdırabilir (karar onun).
+// Kademeli akış: önce ÜCRETSİZ deterministik kontrol gösterilir; temizse
+// tek tıkla yazılır. Kullanıcı isterse (ya da bulgu varsa) AI'lı derin
+// kontrol çalıştırılır.
+function renderQuickCheck(oldText, newText, onApply, onDeep) {
+  const bulgular = quickFactCheck(oldText, newText);
+  const temiz = !bulgular.length;
+  const div = document.createElement('div');
+  div.style.cssText = 'margin-top:8px;border:1px solid var(--border);border-left:3px solid '
+    + (temiz ? '#3f7a4f' : 'var(--danger)') + ';border-radius:6px;padding:8px;';
+  div.innerHTML = `
+    <div style="font-size:12.5px;color:${temiz ? '#3f7a4f' : 'var(--danger)'};font-weight:600;">
+      ${temiz ? '✓ Hızlı kontrol temiz (sayı/isim kaybı yok)' : '⚠ Hızlı kontrol uyarıyor'}
+    </div>
+    ${bulgular.length ? `<ul style="margin:6px 0 0 16px;padding:0;font-size:12px;">${bulgular.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : ''}
+    <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+      <button class="btn btn-sm ${temiz ? 'btn-primary' : ''} qc-apply" style="font-size:11.5px;">${temiz ? 'Paragrafa yaz' : 'Yine de yaz'}</button>
+      <button class="btn btn-sm qc-deep" style="font-size:11.5px;" title="İşlev, süreklilik ve eylem sırası için AI kontrolü (ek istek)">🔎 Derin kontrol</button>
+      <button class="btn btn-sm qc-cancel" style="font-size:11.5px;">Vazgeç</button>
+    </div>`;
+  div.querySelector('.qc-apply').addEventListener('click', () => { div.remove(); onApply(); });
+  div.querySelector('.qc-cancel').addEventListener('click', () => div.remove());
+  div.querySelector('.qc-deep').addEventListener('click', async (e) => {
+    const b = e.target;
+    b.disabled = true; b.textContent = 'Kontrol ediliyor…';
+    const v = await onDeep();
+    b.disabled = false; b.textContent = '🔎 Derin kontrol';
+    div.insertAdjacentElement('afterend', renderVerifyResult(v, () => { div.remove(); onApply(); }));
+    div.querySelector('.qc-deep').remove();
+  });
+  return div;
+}
+
+function renderVerifyResult(v, onApply) {
+  const renk = { kabul: '#3f7a4f', duzelt: '#b08d3f', red: 'var(--danger)' }[v.verdict] || 'var(--text-muted)';
+  const etiket = { kabul: '✓ Kabul edilebilir', duzelt: '⚠ Düzeltilmeli', red: '✕ Reddedildi' }[v.verdict] || v.verdict;
+  const tumBulgular = [...(v.hard_issues || []), ...(v.issues || [])];
+  const div = document.createElement('div');
+  div.style.cssText = 'margin-top:8px;border:1px solid var(--border);border-left:3px solid ' + renk + ';border-radius:6px;padding:8px;';
+  div.innerHTML = `
+    <div style="font-size:12.5px;color:${renk};font-weight:600;">${etiket}</div>
+    ${v.note ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${escapeHtml(v.note)}</div>` : ''}
+    ${tumBulgular.length ? `<ul style="margin:6px 0 0 16px;padding:0;font-size:12px;">${tumBulgular.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : ''}
+    <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+      <button class="btn btn-sm ${v.verdict === 'kabul' ? 'btn-primary' : ''} verify-apply" style="font-size:11.5px;">${v.verdict === 'kabul' ? 'Paragrafa yaz' : 'Yine de yaz'}</button>
+      <button class="btn btn-sm verify-cancel" style="font-size:11.5px;">Vazgeç</button>
+    </div>`;
+  div.querySelector('.verify-apply').addEventListener('click', () => { div.remove(); onApply(); });
+  div.querySelector('.verify-cancel').addEventListener('click', () => div.remove());
+  return div;
 }

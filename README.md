@@ -210,6 +210,34 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   çok hızlı) anında uygulanır. Amaç güzel seslendirme değil, kendi metnini
   DİNLEYEREK tekrar ve ritim bozukluklarını yakalamak - üslup taramasının
   kulakla yapılan hâli. Bölüm değişince okuma otomatik durur.
+- **🎯 Paragrafın işlevi + kabul kontrolü (zincirin kapanması)**: Paragraf
+  AI panelinde "BU PARAGRAFIN İŞİ" alanı var (bir cümle: "Yangın yerini
+  masum göstermek - okur sonradan anlamalı"). Bu cümle TÜM yeniden yazım
+  talimatlarının EN BAŞINA konur ve yeniden yazımın ölçüsü olur - eksik
+  olan buydu: sistem "ne anlatılıyor" ve "ne bozuk" biliyordu ama "bu
+  paragraf ne YAPMAK zorunda" hiçbir yerde tanımlı değildi, AI da estetiği
+  optimize edip işlevi ıskalıyordu. Yeni versiyon paragrafa YAZILMADAN
+  ÖNCE kabul kontrolünden geçer: işlevini yerine getiriyor mu, ANLAM ve
+  eylem sırası korunmuş mu, komşularla çelişki/tekrar var mı (AI); ayrıca
+  DETERMİNİSTİK olarak sayı/özel isim kaybı ve üslup taramasında eşiği
+  aşmış kalıpların yeni metne girip girmediği (AI'ya sorulmaz - ucuz ve
+  kesin). Sert bulgu varsa AI "kabul" dese bile karar "düzeltilmeli"ye
+  çekilir; son söz yine yazarın ("Yine de yaz" seçeneği).
+- **🏗️ Yapısal Akış Taraması (bölümler arası)**: diğer denetimler tek
+  bölüme ya da cümlelere bakar; bu, ancak bölümler ARASI okununca görünen
+  sorunları arar. Editörlerin klasik testleri: NEDENSELLİK ("bu yüzden"
+  testi - bir bölümün sonucu sonrakinin hedefini doğuruyor mu, yoksa
+  "ve sonra" zinciri mi), TEKRAR EDEN ÇATIŞMA (aynı engel durumu
+  değiştirmeden tekrarlanıyor mu - yükselen komplikasyon mu, sıfırlanan
+  tekrar mı), BAHİS EĞRİSİ (yükseliyor/sabit/düşüyor), ÖLÜ BÖLGELER
+  (çıkarılsa fark edilmeyecek bölümler), BÖLÜM KAPANIŞLARI (eşikte mi
+  bitiyor, çözülüp mü). Bölüm ÖZETLERİYLE çalışır - metin göndermez,
+  ucuzdur; özetsiz bölümleri "zincirde kör nokta" olarak bildirir.
+- **Denetim menüsü (tek yer)**: metni kontrol eden tüm araçlar sekmeli tek
+  menüde - 🧩 Tutarlılık (roman geneli çelişkiler), ✍️ Üslup (yazım tikleri
+  ve kalıplar), 🔍 Bölüm İncelemesi (bölüme özel olduğu için bölümün kendi
+  ekranında çalışır; sekme nasıl çalıştırılacağını anlatıp Roman menüsüne
+  yönlendirir). Eskiden aynı aileden üç araç üç ayrı yerdeydi.
 - **🔍 Bölüm İncelemesi (birleşik denetim)**: iki aşama tek akışta.
   (1) EDİTÖR gözü - 10 edebî ölçüt karnesi, (2) OKUR gözü - düşürücü
   noktalar. Sonra bulgular PARAGRAF PARAGRAF birleştirilir: bir paragraf

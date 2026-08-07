@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, List, Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .sections import validate_section_keys
 
@@ -945,9 +945,68 @@ class LiteraryFix(BaseModel):
 
 
 class LiteraryReviewResponse(BaseModel):
-    """10 edebî ölçüt değerlendirmesi - kaydedilmez, rapor niteliğinde."""
+    """10 edebî ölçüt değerlendirmesi - kaydedilmez, rapor niteliğinde.
+    scanned/total/chunks: KAPSAMA bilgisi - uzun bölümler parça parça
+    taranır, kullanıcı ne kadarının incelendiğini görmelidir."""
     chapter_number: int
+    scanned: int = 0
+    total: int = 0
+    chunks: int = 1
     scores: List[LiteraryScore] = []
     strongest: str = ""
     fixes: List[LiteraryFix] = []
     average: float = 0
+
+
+class CausalityLink(BaseModel):
+    from_chapter: int = Field(alias="from")
+    to_chapter: int = Field(alias="to")
+    link: str = ""
+    problem: str = ""
+    fix: str = ""
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class RepetitionFinding(BaseModel):
+    chapters: List[int] = []
+    problem: str = ""
+    fix: str = ""
+
+
+class StakesTrend(BaseModel):
+    trend: str = ""
+    comment: str = ""
+
+
+class ChapterNote(BaseModel):
+    chapter: Optional[int] = None
+    reason: str = ""
+    problem: str = ""
+    fix: str = ""
+
+
+class StructureScanResponse(BaseModel):
+    """Bölümler arası yapısal akış denetimi - özetlerle çalışır, metin göndermez."""
+    summary: str = ""
+    causality: List[CausalityLink] = []
+    repetition: List[RepetitionFinding] = []
+    stakes: StakesTrend = StakesTrend()
+    dead_zones: List[ChapterNote] = []
+    endings: List[ChapterNote] = []
+    missing_summaries: List[int] = []
+
+
+class VerifyRewriteRequest(BaseModel):
+    old_text: str
+    new_text: str
+    purpose: str = ""      # paragrafın İŞLEVİ (varsa)
+    neighbors: str = ""
+
+
+class VerifyRewriteResponse(BaseModel):
+    """Yazım sonrası kabul kontrolü. hard_issues deterministik (sayı/isim
+    kaybı, yasak kalıp), issues AI değerlendirmesi."""
+    verdict: str = "kabul"        # kabul | duzelt | red
+    hard_issues: List[str] = []
+    issues: List[str] = []
+    note: str = ""
