@@ -4557,8 +4557,14 @@ async function runParagraphAi(chapter, number, mode) {
   // çıkarıp ona uygun teknikle derinleştirsin diye açıkça isteniyor.
   // Ayrıca somut detaylar (rakam, ölçü, isim) korunmak ZORUNDA - sohbetin
   // başında yaşanan "10 santimetre sessizce kayboldu" hatasının önlemi.
+  const zorla = window.__forceStrongRewrite ? (window.__forceStrongRewrite = false, true) : false;
+  const zorlaEk = zorla
+    ? 'ZORUNLU: Metni AYNEN geri döndürme. En az üç somut değişiklik yap - '
+      + 'fiil seçimini güçlendir, en az bir duyusal detay ekle, kalıplaşmış bir '
+      + 'ifadeyi kaldır. Sonuç mevcut metinle kelime kelime aynı OLAMAZ.\n'
+    : '';
   const instruction = mode === 'suggest'
-    ? (effectiveParaPurpose(number).text ? `BU PARAGRAFIN İŞİ (öncelikli ölçüt - yeni hâli bunu yerine getirmeli, kaynak: ${effectiveParaPurpose(number).source}): ${effectiveParaPurpose(number).text}\n` : '')
+    ? zorlaEk + (effectiveParaPurpose(number).text ? `BU PARAGRAFIN İŞİ (öncelikli ölçüt - yeni hâli bunu yerine getirmeli, kaynak: ${effectiveParaPurpose(number).source}): ${effectiveParaPurpose(number).text}\n` : '')
       + 'MEVCUT METİN olarak verilen paragrafı GÜÇLENDİRİLMİŞ haliyle yeniden yaz.\n'
       + 'ÖNCE bölümün özetine/planına ve çevresindeki akışa bak, bu sahnenin TÜRÜNÜ belirle '
       + '(polisiye/soruşturma, gerilim, aksiyon, dramatik/duygusal, atmosferik betimleme, diyalog) '
@@ -4592,6 +4598,13 @@ async function runParagraphAi(chapter, number, mode) {
     });
     const notes = (result.consistency_notes && result.consistency_notes.length)
       ? `<div style="font-size:12px;color:var(--danger);margin-top:6px;">⚠ ${result.consistency_notes.map(escapeHtml).join(' · ')}</div>` : '';
+    // DEĞİŞMEDİ KORUMASI: model bazen metni AYNEN geri döndürüyor (ya da
+    // sadece noktalama oynatıyor). Bunu "öneri" diye sunmak kullanıcıyı
+    // yanıltıyordu - fark yokken "Paragrafı Değiştir" düğmesi anlamsız.
+    // Normalize edilmiş karşılaştırma: boşluk/noktalama farkı sayılmaz.
+    const _norm = (t) => (t || '').replace(/\s+/g, ' ').replace(/[.,;:!?—–-]/g, '').trim().toLocaleLowerCase('tr');
+    const degismedi = mode === 'suggest' && _norm(result.generated_text) === _norm(text);
+
     // İKİ SÜTUN: solda öneri metni, sağda sohbet. Yan yana durunca
     // "öneriyi oku → tartış → yeni versiyon" döngüsü tek ekranda dönüyor;
     // eskiden sohbet önerinin ALTINDA açılıyor ve öneri ekrandan kayıyordu.
@@ -4604,6 +4617,11 @@ async function runParagraphAi(chapter, number, mode) {
             <input type="text" class="para-purpose" data-number="${number}" value="${escapeHtml(paraPurposes[number] || '')}" placeholder="ör. Yangın yerini masum göstermek - okur sonradan anlamalı" style="font-size:12.5px;">
           </div>
           <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">${mode === 'suggest' ? '✨ ÖNERİLEN VERSİYON - onaysız değişmez' : '🔍 EDİTÖR ELEŞTİRİSİ - metne dokunulmadı'}</strong>
+          ${degismedi ? `<div style="margin-top:6px;padding:8px;border:1px solid var(--danger);border-radius:6px;font-size:12.5px;color:var(--danger);">
+            ⚠ AI metni <b>değiştirmedi</b> - önerilen versiyon mevcut paragrafla aynı.
+            Ya model bu paragrafı yeterli buldu ya da istek yeterince belirgin değildi.
+            <div style="margin-top:6px;"><button class="btn btn-sm" id="retryStronger">🔁 Daha zorlayıcı talimatla tekrar dene</button></div>
+          </div>` : ''}
           <div style="white-space:pre-wrap;font-size:13px;margin-top:6px;">${escapeHtml(result.generated_text || '')}</div>
           ${notes}
           <div class="form-actions">
@@ -4629,6 +4647,11 @@ async function runParagraphAi(chapter, number, mode) {
     // BAŞINA konur. Eksik olan buydu - "ne anlatılıyor" ve "ne bozuk"
     // biliniyordu ama "bu paragraf ne YAPMAK zorunda" hiçbir yerde tanımlı
     // değildi; AI da estetiği optimize edip işlevi ıskalıyordu.
+    // "Değişmedi" durumunda daha zorlayıcı talimatla tekrar
+    panel.querySelector('#retryStronger')?.addEventListener('click', () => {
+      window.__forceStrongRewrite = true;
+      runParagraphAi(chapter, number, 'suggest');
+    });
     const purposeInput = panel.querySelector('.para-purpose');
     if (purposeInput) purposeInput.addEventListener('input', () => {
       paraPurposes[number] = purposeInput.value;
@@ -5778,41 +5801,77 @@ async function runInlineFix(chapter, paragraphNumber, issue, btn) {
     entity_type: cb.dataset.type, entity_id: parseInt(cb.dataset.id, 10),
   }));
   const isBilgi = effectiveParaPurpose(paragraphNumber).text;
+  // ÜÇ SEÇENEK: tek atış çoğu zaman yetersiz kalıyordu ve kullanıcı ya
+  // beğenmeden uyguluyor ya da sohbete geçmek zorunda kalıyordu. Üç farklı
+  // yaklaşım üretilir; beğenilen uygulanır, hiçbiri tutmazsa sohbet zaten
+  // yanında. Ayrıca BETİMLEME MATEMATİĞİ talimata gömüldü.
   const instruction =
     (isBilgi ? `BU PARAGRAFIN İŞİ (öncelikli ölçüt): ${isBilgi}\n` : '')
     + `P${paragraphNumber} paragrafını, aşağıdaki EDİTÖR UYARISINI giderecek şekilde yeniden yaz.\n`
     + `UYARI: ${issue}\n`
     + 'KURALLAR: Sadece bu uyarıyı gider, sahnenin anlamını ve olay akışını DEĞİŞTİRME. '
     + 'Eylem sırasını bozma (tamamlanmış eylemi yeniden başlatma). Somut detayları (rakam, '
-    + 'ölçü, özel isim) koru. Komşu paragraflarda geçen imge ve kalıpları tekrarlama. '
-    + 'SADECE paragraf metnini döndür - açıklama, başlık, tırnak ekleme.\n'
+    + 'ölçü, özel isim) koru. Komşu paragraflarda geçen imge ve kalıpları tekrarlama.\n'
+    + 'BETİMLEME MATEMATİĞİ (betimleme ağırlıklı paragraflarda uygula): '
+    + '1) geniş plan - tek cümle, EN FAZLA iki nitelik (sıfat yığma), '
+    + '2) orta plan - insan/hareket, 3) MİKRO DETAY - anlamı taşıyan tek somut şey, '
+    + '4) bir duyu (görme dışında: ses, koku, doku, sıcaklık), '
+    + '5) ANLAMI SÖYLEME - mikro detayda sakla. '
+    + 'BÜTÇE: en fazla BİR benzetme; "sanki/gibi/adeta" ile açıklama yok; '
+    + 'yargı sıfatı yok ("huzurlu", "sıradan", "unutulmuş", "kasvetli" gibi).\n'
+    + 'ÜÇ FARKLI SEÇENEK üret - aynı fikrin üç varyasyonu DEĞİL, üç ayrı yaklaşım '
+    + '(ör. biri mikro detaya, biri sese/sessizliğe, biri harekete yaslansın).\n'
+    + 'Yanıtın SADECE şu JSON olsun, başka hiçbir şey yazma:\n'
+    + '{"options": [{"text": "...", "approach": "hangi yaklaşım - 4 kelime"}]}\n'
     + (once ? `ÖNCEKİ:\n${once}\n` : '') + (sonra ? `SONRAKİ:\n${sonra}\n` : '');
   try {
     const result = await api.post('/ai/assist', {
       chapter_number: chapter.number, instruction,
       selected_entities: selected, existing_text: hedef.text,
     });
-    const yeni = (result.generated_text || '').trim();
+    // Yanıt JSON ise üç seçenek, değilse tek metin (geriye dönük uyumlu)
+    let secenekler = [];
+    const ham = (result.generated_text || '').trim();
+    try {
+      const temiz = ham.replace(/^```(?:json)?|```$/gm, '').trim();
+      const veri = JSON.parse(temiz.slice(temiz.indexOf('{'), temiz.lastIndexOf('}') + 1));
+      secenekler = (veri.options || []).filter(o => (o.text || '').trim())
+        .map(o => ({ text: o.text.trim(), approach: (o.approach || '').trim() }));
+    } catch (e) { /* düz metin gelmiş */ }
+    if (!secenekler.length) secenekler = [{ text: ham, approach: '' }];
+
+    // Değişiklik YOK koruması: model metni aynen döndürdüyse söyle
+    const aynilar = secenekler.filter(o => o.text.replace(/\s+/g, ' ').trim() === (hedef.text || '').replace(/\s+/g, ' ').trim());
     box.innerHTML = `
       <div class="panel" style="margin-top:6px;border-left:3px solid var(--gold);">
-        <strong style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">DÜZELTİLMİŞ VERSİYON - onaysız değişmez</strong>
-        <div style="white-space:pre-wrap;font-size:12.5px;margin-top:4px;">${escapeHtml(yeni)}</div>
-        <div class="form-actions">
-          <button class="btn btn-sm btn-primary inline-fix-apply">Paragrafı Değiştir</button>
-          <button class="btn btn-sm inline-fix-close">Kapat</button>
+        <strong style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">
+          ${secenekler.length > 1 ? `${secenekler.length} SEÇENEK - onaysız değişmez` : 'DÜZELTİLMİŞ VERSİYON - onaysız değişmez'}
+        </strong>
+        ${aynilar.length ? `<div style="font-size:12px;color:var(--danger);margin-top:4px;">⚠ ${aynilar.length} seçenek orijinalle AYNI geldi - AI değişiklik önermemiş. "AI ile konuşarak karar ver" ile yönlendirmeyi dene.</div>` : ''}
+        ${secenekler.map((o, i) => `
+          <div class="fix-option" data-idx="${i}" style="border-top:1px solid var(--border);padding-top:6px;margin-top:6px;">
+            <div style="font-size:10.5px;color:var(--gold);font-weight:600;">SEÇENEK ${i + 1}${o.approach ? ' · ' + escapeHtml(o.approach) : ''}</div>
+            <div style="white-space:pre-wrap;font-size:12.5px;margin-top:3px;">${escapeHtml(o.text)}</div>
+            <div class="form-actions" style="margin-top:4px;">
+              <button class="btn btn-sm btn-primary inline-fix-apply" data-idx="${i}" style="font-size:11.5px;">Bunu uygula</button>
+            </div>
+          </div>`).join('')}
+        <div style="margin-top:8px;">
+          <button class="btn btn-sm inline-fix-close" style="font-size:11.5px;">Kapat</button>
         </div>
       </div>`;
     box.querySelector('.inline-fix-close').addEventListener('click', () => { box.innerHTML = ''; btn.disabled = false; });
-    box.querySelector('.inline-fix-apply').addEventListener('click', async (e) => {
+    box.querySelectorAll('.inline-fix-apply').forEach(ab => ab.addEventListener('click', (e) => {
+      const secilen = secenekler[parseInt(e.target.dataset.idx, 10)].text;
       e.target.closest('.form-actions').insertAdjacentElement('afterend', renderQuickCheck(
-        hedef.text, yeni,
+        hedef.text, secilen,
         async () => {
-          await replaceParagraphText(chapter.id, paragraphNumber, yeni);
+          await replaceParagraphText(chapter.id, paragraphNumber, secilen);
           markParagraphResolved(paragraphNumber);
         },
-        () => verifyBeforeApply(chapter.id, paragraphNumber, hedef.text, yeni),
+        () => verifyBeforeApply(chapter.id, paragraphNumber, hedef.text, secilen),
       ));
-    });
+    }));
   } catch (err) {
     box.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
     btn.disabled = false;
