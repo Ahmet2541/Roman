@@ -486,3 +486,29 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   .para-ai-grid { grid-template-columns: 1fr; }
   .para-ai-col-right { border-left: none; border-top: 1px dashed var(--border); padding-left: 0; padding-top: 10px; }
 }
+
+
+/* BÖLÜM ATÖLYESİ: tam ekran, adım adım düzenleme. Mobilde asıl kullanılabilir
+   mod budur - yan paneller küçük ekranda sıkışıyordu. Masaüstünde ortada
+   sınırlı genişlikte bir kart olarak açılır. */
+.workshop-overlay {
+  position: fixed; inset: 0; z-index: 2000;
+  background: rgba(10, 12, 20, 0.5);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.workshop-box {
+  background: var(--paper); border-radius: 12px; width: 100%; max-width: 620px;
+  max-height: 92vh; display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+}
+.workshop-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border); background: #fff;
+}
+.workshop-body { padding: 14px 16px 18px; overflow-y: auto; }
+@media (max-width: 768px) {
+  .workshop-overlay { padding: 0; }
+  .workshop-box { max-width: none; max-height: 100vh; height: 100vh; border-radius: 0; }
+  .workshop-body { padding: 12px 12px 24px; }
+}
