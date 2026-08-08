@@ -512,3 +512,30 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   .workshop-box { max-width: none; max-height: 100vh; height: 100vh; border-radius: 0; }
   .workshop-body { padding: 12px 12px 24px; }
 }
+
+
+/* SEÇENEK KARTLARI: parmakla sağa/sola kaydırma. scroll-snap ile kart tam
+   ortalanır; mobilde üç seçeneği alt alta kaydırmaktan çok daha rahat. */
+.option-swiper {
+  display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch; padding: 4px 0 6px; outline: none;
+  scrollbar-width: thin;
+}
+.option-card {
+  flex: 0 0 100%; scroll-snap-align: center;
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px;
+  background: #fff; box-sizing: border-box;
+}
+.option-dots { display: flex; gap: 6px; align-items: center; justify-content: center; padding-bottom: 4px; }
+.option-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--border);
+  cursor: pointer; transition: background .2s, transform .2s;
+}
+.option-dot.active { background: var(--gold); transform: scale(1.25); }
+
+/* Atölye kapat düğmesi: her zaman erişilebilir, dokunma hedefi yeterli */
+.workshop-close-btn {
+  flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; line-height: 1; padding: 0;
+}

@@ -6508,7 +6508,7 @@ function workshopShell(baslik, adim, govde) {
           <div style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">ADIM ${adim}/3 · BÖLÜM ${ch.number}</div>
           <div style="font-weight:600;font-size:14px;">${escapeHtml(baslik)}</div>
         </div>
-        <button class="btn btn-sm" id="workshopClose">✕ Kapat</button>
+        <button class="btn btn-sm workshop-close-btn" id="workshopClose" title="Atölyeyi kapat">✕</button>
       </div>
       <div class="workshop-body">${govde}</div>
     </div>`;
@@ -6773,12 +6773,23 @@ async function workshopFix(chapter, num, issue) {
     } catch (e) { /* düz metin */ }
     if (!secenekler.length) secenekler = [{ text: ham, approach: '' }];
 
-    box.innerHTML = secenekler.map((o, i) => `
-      <div style="border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:8px;">
-        <div style="font-size:10.5px;color:var(--gold);font-weight:600;">SEÇENEK ${i + 1}${o.approach ? ' · ' + escapeHtml(o.approach) : ''}</div>
-        <div style="white-space:pre-wrap;font-size:13px;margin-top:4px;">${escapeHtml(o.text)}</div>
-        <button class="btn btn-sm btn-primary ws-apply" data-idx="${i}" style="margin-top:6px;width:100%;font-size:11.5px;">Bunu uygula</button>
-      </div>`).join('');
+    // KAYDIRMALI KARTLAR: mobilde üç seçeneği alt alta okumak yorucu;
+    // parmakla sağa/sola geçilen tek kart daha doğal. Noktalar hangi
+    // seçenekte olduğunu gösterir, klavyeyle de gezilebilir.
+    box.innerHTML = `
+      <div class="option-swiper" tabindex="0">
+        ${secenekler.map((o, i) => `
+          <div class="option-card" data-idx="${i}">
+            <div style="font-size:10.5px;color:var(--gold);font-weight:600;">SEÇENEK ${i + 1}/${secenekler.length}${o.approach ? ' · ' + escapeHtml(o.approach) : ''}</div>
+            <div style="white-space:pre-wrap;font-size:13px;margin-top:4px;">${escapeHtml(o.text)}</div>
+            <button class="btn btn-sm btn-primary ws-apply" data-idx="${i}" style="margin-top:8px;width:100%;font-size:11.5px;">Bunu uygula</button>
+          </div>`).join('')}
+      </div>
+      <div class="option-dots">
+        ${secenekler.map((_, i) => `<span class="option-dot${i === 0 ? ' active' : ''}" data-idx="${i}"></span>`).join('')}
+        <span style="font-size:11px;color:var(--text-muted);margin-left:6px;">← kaydır →</span>
+      </div>`;
+    wireOptionSwiper(box);
     box.querySelectorAll('.ws-apply').forEach(b => b.addEventListener('click', async (e) => {
       const secilen = secenekler[parseInt(e.target.dataset.idx, 10)].text;
       const eski = para ? para.text : '';
@@ -6903,4 +6914,27 @@ async function renderWorkshopPicker(el) {
   } catch (err) {
     el.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   }
+}
+
+// Seçenek kartları arası kaydırma: dokunmatikte parmakla, masaüstünde
+// ok tuşları ve noktalarla. scroll-snap sayesinde kart tam ortalanır.
+function wireOptionSwiper(box) {
+  const swiper = box.querySelector('.option-swiper');
+  const dots = box.querySelectorAll('.option-dot');
+  if (!swiper) return;
+  const guncelle = () => {
+    const kartGenislik = swiper.querySelector('.option-card')?.offsetWidth || 1;
+    const aktif = Math.round(swiper.scrollLeft / kartGenislik);
+    dots.forEach((d, i) => d.classList.toggle('active', i === aktif));
+  };
+  swiper.addEventListener('scroll', () => { window.requestAnimationFrame(guncelle); });
+  dots.forEach(d => d.addEventListener('click', () => {
+    const kartGenislik = swiper.querySelector('.option-card')?.offsetWidth || 0;
+    swiper.scrollTo({ left: kartGenislik * parseInt(d.dataset.idx, 10), behavior: 'smooth' });
+  }));
+  swiper.addEventListener('keydown', (e) => {
+    const kartGenislik = swiper.querySelector('.option-card')?.offsetWidth || 0;
+    if (e.key === 'ArrowRight') { e.preventDefault(); swiper.scrollBy({ left: kartGenislik, behavior: 'smooth' }); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); swiper.scrollBy({ left: -kartGenislik, behavior: 'smooth' }); }
+  });
 }
