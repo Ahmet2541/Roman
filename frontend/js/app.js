@@ -6418,10 +6418,19 @@ function renderQuickCheck(oldText, newText, onApply, onDeep, onRetry) {
     <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
       <button class="btn btn-sm ${temiz ? 'btn-primary' : ''} qc-apply" style="font-size:11.5px;">${temiz ? 'Paragrafa yaz' : 'Yine de yaz'}</button>
       <button class="btn btn-sm qc-deep" style="font-size:11.5px;" title="İşlev, süreklilik ve eylem sırası için AI kontrolü (ek istek)">🔎 Derin kontrol</button>
+      ${onRetry ? `<button class="btn btn-sm qc-retry" style="font-size:11.5px;" title="Bulguları da hesaba katarak yeniden yazdır">♻ Yeniden yaz</button>` : ''}
       <button class="btn btn-sm qc-cancel" style="font-size:11.5px;">Vazgeç</button>
     </div>`;
   div.querySelector('.qc-apply').addEventListener('click', () => { div.remove(); onApply(); });
   div.querySelector('.qc-cancel').addEventListener('click', () => div.remove());
+  // TAKILMAYI ÖNLEME: kontrol bir şey söylediğinde tek çıkış "yine de yaz"
+  // ya da "vazgeç" olmasın - bulguları hesaba katıp yeniden üretebilmeli.
+  div.querySelector('.qc-retry')?.addEventListener('click', async (e) => {
+    const b = e.target;
+    b.disabled = true; b.textContent = 'Yeniden yazılıyor…';
+    await onRetry(bulgular.length ? bulgular : ['Öneriyi daha da güçlendir; önceki seçenekleri tekrarlama.']);
+    div.remove();
+  });
   div.querySelector('.qc-deep').addEventListener('click', async (e) => {
     const b = e.target;
     b.disabled = true; b.textContent = 'Kontrol ediliyor…';
@@ -6798,8 +6807,23 @@ async function workshopFix(chapter, num, issue) {
       <div class="option-dots">
         ${secenekler.map((_, i) => `<span class="option-dot${i === 0 ? ' active' : ''}" data-idx="${i}"></span>`).join('')}
         <span style="font-size:11px;color:var(--text-muted);margin-left:6px;">← kaydır →</span>
-      </div>`;
+      </div>
+      <button class="btn btn-sm" id="wsMoreOptions" style="width:100%;margin-top:6px;font-size:11.5px;">🔄 Farklı 3 öneri getir</button>
+      <div id="wsPhraseBox"></div>`;
     wireOptionSwiper(box);
+
+    // FARKLI 3 ÖNERİ: önceki yaklaşımları dışlayarak yeniden üret
+    document.getElementById('wsMoreOptions').addEventListener('click', async (e) => {
+      const b = e.target; b.disabled = true; b.textContent = 'Yeni seçenekler…';
+      const oncekiler = secenekler.map(o => o.approach).filter(Boolean).join(', ');
+      await workshopFix(chapter, num, issue
+        + (oncekiler ? ` ÖNCEKİ YAKLAŞIMLARI TEKRARLAMA (${oncekiler}); tamamen farklı üç yol dene.` : ''));
+    });
+
+    // İFADE BAZLI DEĞİŞTİRME: altın bir öbeğe tıkla -> sadece o ifade için
+    // alternatifler. Tüm paragrafı yeniden yazdırmadan nokta atışı düzeltme.
+    box.querySelectorAll('.diff-clickable').forEach(sp => sp.addEventListener('click', () =>
+      openPhraseAlternatives(chapter, num, sp, secenekler)));
     box.querySelectorAll('.ws-apply').forEach(b => b.addEventListener('click', async (e) => {
       const secilen = secenekler[parseInt(e.target.dataset.idx, 10)].text;
       const eski = para ? para.text : '';
@@ -6810,7 +6834,20 @@ async function workshopFix(chapter, num, issue) {
           resolvedParas.add(String(num)); saveParaState();
           if (para) para.text = secilen;
           document.getElementById('wsParaText').textContent = secilen;
-          box.innerHTML = '<div style="font-size:12.5px;color:#3f7a4f;">✓ Kaydedildi. "Sonraki →" ile devam et.</div>';
+          box.innerHTML = `
+            <div style="font-size:12.5px;color:#3f7a4f;">✓ Kaydedildi.</div>
+            <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+              <button class="btn btn-sm" id="wsRefine" style="font-size:11.5px;">✨ Bunu da geliştir</button>
+              <button class="btn btn-sm btn-primary" id="wsGoNext" style="font-size:11.5px;">Sonraki paragraf →</button>
+            </div>`;
+          // Kaydettikten sonra da yol açık: metin üzerinde tekrar çalışılabilir
+          document.getElementById('wsRefine').addEventListener('click', () =>
+            workshopFix(chapter, num, 'Metni bir tur daha güçlendir; aynı yaklaşımları tekrarlama.'));
+          document.getElementById('wsGoNext').addEventListener('click', () => {
+            const sira = workshopState.order;
+            if (workshopState.idx === sira.length - 1) renderWorkshopDone();
+            else renderWorkshopParagraph(workshopState.idx + 1);
+          });
         },
         () => verifyBeforeApply(chapter.id, num, eski, secilen),
         async (uyarilar) => workshopFix(chapter, num, issue + ' AYRICA: ' + uyarilar.join(' | ')),
@@ -6992,12 +7029,84 @@ function highlightDiff(eski, yeni) {
       dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
   }
-  let i = 0, j = 0, out = '';
+  // Ardışık değişen kelimeler TEK öbekte toplanır: "cam kılıf" iki ayrı
+  // span değil, tıklanıp topluca değiştirilebilen bir ifade olur.
+  let i = 0, j = 0;
+  const parcalar = [];   // {changed: bool, text: string}
+  const ekle = (changed, text) => {
+    const son = parcalar[parcalar.length - 1];
+    if (son && son.changed === changed) son.text += text;
+    else parcalar.push({ changed, text });
+  };
   while (i < n && j < m) {
-    if (a[i] === b[j]) { out += escapeHtml(b[j]); i++; j++; }
+    if (a[i] === b[j]) { ekle(false, b[j]); i++; j++; }
     else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; }
-    else { out += `<span class="diff-new">${escapeHtml(b[j])}</span>`; j++; }
+    else { ekle(true, b[j]); j++; }
   }
-  while (j < m) { out += `<span class="diff-new">${escapeHtml(b[j])}</span>`; j++; }
-  return out;
+  while (j < m) { ekle(true, b[j]); j++; }
+
+  return parcalar.map((p, idx) => {
+    if (!p.changed || !p.text.trim()) return escapeHtml(p.text);
+    return `<span class="diff-new diff-clickable" data-phrase="${escapeHtml(p.text.trim())}" data-pi="${idx}" title="Tıkla: bu ifade için alternatif iste">${escapeHtml(p.text)}</span>`;
+  }).join('');
+}
+
+// ---------------------------------------------------------------------------
+// İFADE BAZLI ALTERNATİF: önerideki altın (değişmiş) bir öbeğe tıklayınca
+// SADECE o ifade için üç alternatif ister. Tüm paragrafı yeniden yazdırmak
+// yerine nokta atışı düzeltme - "cam kılıf yerine başka ne olur?" sorusunun
+// doğrudan cevabı. Seçilen alternatif kartın metnine yerinde işlenir.
+// ---------------------------------------------------------------------------
+async function openPhraseAlternatives(chapter, num, spanEl, secenekler) {
+  const box = document.getElementById('wsPhraseBox');
+  if (!box) return;
+  const ifade = spanEl.dataset.phrase;
+  const kart = spanEl.closest('.option-card');
+  const idx = parseInt(kart?.dataset.idx || '0', 10);
+  const tamMetin = secenekler[idx]?.text || '';
+
+  box.innerHTML = `<div class="panel" style="margin-top:8px;">
+    <div style="font-size:12px;">"<b>${escapeHtml(ifade)}</b>" için alternatifler aranıyor…</div></div>`;
+  const purpose = effectiveParaPurpose(num).text;
+  const instruction =
+    (purpose ? `PARAGRAFIN İŞİ: ${purpose}\n` : '')
+    + `Aşağıdaki paragrafta geçen "${ifade}" ifadesi için ÜÇ ALTERNATİF öner.\n`
+    + 'Kurallar: alternatifler aynı uzunluk mertebesinde olsun, paragrafın akışına ve '
+    + 'zamanına uysun, klişe olmasın, "sanki/gibi/adeta" kullanma. Sadece ifadeyi ver, '
+    + 'cümleyi yeniden yazma.\n'
+    + 'BİÇİM: her satırda tek alternatif, başına "- " koy, başka hiçbir şey yazma.\n'
+    + `PARAGRAF:\n${tamMetin}`;
+  try {
+    const r = await api.post('/ai/assist', {
+      chapter_number: chapter.number, instruction, selected_entities: [], existing_text: ifade,
+    });
+    const alternatifler = (r.generated_text || '').split('\n')
+      .map(x => x.replace(/^[-*•]\s*/, '').trim())
+      .filter(x => x && x.length < 200).slice(0, 5);
+    if (!alternatifler.length) {
+      box.innerHTML = '<div class="error-text" style="font-size:12px;">Alternatif üretilemedi.</div>';
+      return;
+    }
+    box.innerHTML = `
+      <div class="panel" style="margin-top:8px;">
+        <div style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">"${escapeHtml(ifade)}" YERİNE</div>
+        ${alternatifler.map((a, i) => `
+          <button class="btn btn-sm phrase-pick" data-alt="${escapeHtml(a)}" style="display:block;width:100%;text-align:left;margin-top:6px;font-size:12.5px;">${escapeHtml(a)}</button>`).join('')}
+        <button class="btn btn-sm" id="phraseClose" style="margin-top:8px;font-size:11.5px;">Kapat</button>
+      </div>`;
+    document.getElementById('phraseClose').addEventListener('click', () => { box.innerHTML = ''; });
+    box.querySelectorAll('.phrase-pick').forEach(b => b.addEventListener('click', () => {
+      // Seçilen alternatifi kartın metnine YERİNDE işle
+      const yeni = tamMetin.replace(ifade, b.dataset.alt);
+      secenekler[idx].text = yeni;
+      const govde = kart.querySelector('div[style*="white-space:pre-wrap"]');
+      const para = (chapter.paragraphs || []).find(p => p.number === num);
+      if (govde) govde.innerHTML = highlightDiff(para ? para.text : '', yeni);
+      kart.querySelectorAll('.diff-clickable').forEach(sp => sp.addEventListener('click', () =>
+        openPhraseAlternatives(chapter, num, sp, secenekler)));
+      box.innerHTML = '<div style="font-size:12px;color:#3f7a4f;margin-top:6px;">✓ İfade değiştirildi - kartta güncellendi.</div>';
+    }));
+  } catch (err) {
+    box.innerHTML = `<div class="error-text" style="font-size:12px;">${escapeHtml(err.message)}</div>`;
+  }
 }

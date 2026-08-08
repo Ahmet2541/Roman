@@ -213,7 +213,10 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
 - **🎯 Paragrafın işlevi + kabul kontrolü (zincirin kapanması)**: Paragraf
   AI panelinde "BU PARAGRAFIN İŞİ" alanı var (bir cümle: "Yangın yerini
   masum göstermek - okur sonradan anlamalı"). Bu cümle TÜM yeniden yazım
-  talimatlarının EN BAŞINA konur ve yeniden yazımın ölçüsü olur - eksik
+  talimatlarının EN BAŞINA konur ve yeniden yazımın ölçüsü olur. İŞLEV
+  MİRASI: paragrafın kendi işlevi boşsa BÖLÜM PLANI kullanılır (100 paragrafa
+  tek tek işlev yazmak gerçekçi değil); işlevler ve paragraf kararları
+  tarayıcıda saklanır, oturumlar arası korunur. Eksik
   olan buydu: sistem "ne anlatılıyor" ve "ne bozuk" biliyordu ama "bu
   paragraf ne YAPMAK zorunda" hiçbir yerde tanımlı değildi, AI da estetiği
   optimize edip işlevi ıskalıyordu. Yeni versiyon paragrafa YAZILMADAN
@@ -221,8 +224,12 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   eylem sırası korunmuş mu, komşularla çelişki/tekrar var mı (AI); ayrıca
   DETERMİNİSTİK olarak sayı/özel isim kaybı ve üslup taramasında eşiği
   aşmış kalıpların yeni metne girip girmediği (AI'ya sorulmaz - ucuz ve
-  kesin). Sert bulgu varsa AI "kabul" dese bile karar "düzeltilmeli"ye
-  çekilir; son söz yine yazarın ("Yine de yaz" seçeneği).
+  kesin). Kontrol KADEMELİDİR: önce ücretsiz/anlık deterministik kontrol
+  çalışır, AI'lı "🔎 Derin kontrol" isteğe bağlıdır - 100 paragraflık bölümde
+  her uygulamada AI çağırmak pahalı ve yavaştı. Sert bulgu varsa AI "kabul"
+  dese bile karar "düzeltilmeli"ye çekilir. Her noktada ÜÇ yön açıktır:
+  uygula, "♻ Yeniden yaz" (bulguları hesaba katıp yeniden üret) ya da vazgeç -
+  çıkmaz sokak yok.
 - **🏗️ Yapısal Akış Taraması (bölümler arası)**: diğer denetimler tek
   bölüme ya da cümlelere bakar; bu, ancak bölümler ARASI okununca görünen
   sorunları arar. Editörlerin klasik testleri: NEDENSELLİK ("bu yüzden"
@@ -234,10 +241,26 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   bitiyor, çözülüp mü). Bölüm ÖZETLERİYLE çalışır - metin göndermez,
   ucuzdur; özetsiz bölümleri "zincirde kör nokta" olarak bildirir.
 - **Denetim menüsü (tek yer)**: metni kontrol eden tüm araçlar sekmeli tek
-  menüde - 🧩 Tutarlılık (roman geneli çelişkiler), ✍️ Üslup (yazım tikleri
-  ve kalıplar), 🔍 Bölüm İncelemesi (bölüme özel olduğu için bölümün kendi
-  ekranında çalışır; sekme nasıl çalıştırılacağını anlatıp Roman menüsüne
-  yönlendirir). Eskiden aynı aileden üç araç üç ayrı yerdeydi.
+  menüde - **🛠 Atölye** (bölüm seçip elden geçirme; varsayılan sekme),
+  **🧩 Tutarlılık** (roman geneli çelişkiler), **✍️ Üslup** (yazım tikleri),
+  **🏗️ Yapısal Akış** (bölümler arası nedensellik/tekrar/bahis),
+  **🔍 Bölüm İncelemesi** (bölüme özel olduğu için bölümün kendi ekranından
+  çalışır). Eskiden aynı aileden araçlar üç ayrı yerdeydi.
+- **🛠 Bölüm Atölyesi (yazılmış bölümü elden geçirme akışı)**: mobil öncelikli,
+  tam ekran, üç adımlı. **ADIM 1 HAZIRLIK**: özet var mı (yoksa üret), zaman
+  çizelgesine bu bölümden olay işlenmiş mi (yoksa tara), plan bağlı mı - her
+  eksiğin NEDEN önemli olduğu yazılı ("özet yoksa AI bölümü tanımadan inceler").
+  **ADIM 2 İNCELEME**: editör gözü (10 ölçüt) + okur gözü, kapsama bilgisiyle.
+  **ADIM 3 PARAGRAF PARAGRAF**: tek ekranda tek paragraf - işlev alanı,
+  düzenlenebilir metin (elle kaydet), katlanabilir bulgular, "✨ 3 öneri",
+  "🔄 Farklı 3 öneri", "💬 Konuş", altta sabit ← Önceki · Atla · Sonraki →.
+  Öneriler parmakla kaydırılan kartlarda gelir; **değişen kelimeler ALTIN,
+  korunanlar siyah** (kelime bazlı fark) ve altın öbeğe tıklayınca SADECE o
+  ifade için üç alternatif istenir - tüm paragrafı yeniden yazdırmadan nokta
+  atışı düzeltme. Kaydedilen paragraf işaretlenir, tekrar önerilmez, akış
+  otomatik sıradakine geçer. Hangi bölüm/kısım üzerinde çalışılacağı Denetim →
+  **🛠 Atölye** sekmesinden seçilir (durum göstergeleriyle: kaç paragraf,
+  özet var mı, kaç paragraf elden geçmiş).
 - **🔍 Bölüm İncelemesi (birleşik denetim)**: iki aşama tek akışta.
   (1) EDİTÖR gözü - 10 edebî ölçüt karnesi, (2) OKUR gözü - düşürücü
   noktalar. Sonra bulgular PARAGRAF PARAGRAF birleştirilir: bir paragraf
@@ -357,6 +380,9 @@ app/
   migrations.py       - açılışta çalışan, idempotent hafif şema göçleri
   import_parser.py    - .txt bir el yazmasını Bölüm/Paragraf'a ayrıştırır
   ratelimit.py        - AI uçları için bellek-içi rate limiter
+  outline.py          - fihrist hiyerarşisi (sunucu tarafı): hangi girdi kimin
+                        altında, hiyerarşik numaralar (1, 1-1, 1-2-3).
+                        Frontend'deki buildChapterHierarchy ile aynı kurallar
   style_scan.py       - üslup taraması motoru: yapısal kalıp sayımı, çift eşik,
                         önbellek ve AI context'ine giren "bütçeli kaçın" uyarıları
   qwen_client.py      - DashScope bağlantısı + TÜM context katmanları:
@@ -515,7 +541,7 @@ Kurallar:
 
 ## Testler
 
-**139 test** (17 dosya) - AI çağrıları `unittest.mock` ile sahte Qwen
+**149 test** (17 dosya) - AI çağrıları `unittest.mock` ile sahte Qwen
 yanıtlarıyla çalışır, gerçek bir `DASHSCOPE_API_KEY` gerekmez.
 
 Kapsam: evren/kitap paylaşımı, migration'lar, sections merge ve seçici
@@ -551,9 +577,12 @@ progression'da yanlış chapter_number) otomatik yakalar.
   denk gelirse işle" diye girer, metne girince emekli olur.
 - **Açılış karşılaması**: "Kaldığın yer: 1-2 (planlı, metin yok)" gibi tek
   satırlık, AI'sız bir durum özeti.
-- **Denetçi katmanı (üretim sonrası)**: üretilen metni plana, haritaya ve
-  kurallara karşı otomatik hesaba çeken kontrol. Okur Testi bunun ilk
-  parçası; plan-kapsama denetimi henüz yok.
+- **Karar hafızası (kalıcı)**: paragraf işlevleri ve sohbet kararları şu an
+  yalnızca TARAYICIDA saklanıyor (localStorage). Başka bir cihazdan
+  bakıldığında görünmüyor - sunucuya taşınmalı.
+- **Grup adları mention taramasında yok**: "İçişleri Bakanlığı" metinde
+  geçse bile rozet çıkmaz; mention tespiti kişi/mekan/nesne/olay/ipucu/terime
+  bakıyor, gruplara bakmıyor.
 
 **Teknik borç:**
 
