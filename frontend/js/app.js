@@ -6407,7 +6407,7 @@ async function verifyBeforeApply(chapterId, number, oldText, newText) {
 // Kademeli akış: önce ÜCRETSİZ deterministik kontrol gösterilir; temizse
 // tek tıkla yazılır. Kullanıcı isterse (ya da bulgu varsa) AI'lı derin
 // kontrol çalıştırılır.
-function renderQuickCheck(oldText, newText, onApply, onDeep, onRetry) {
+function renderQuickCheck(oldText, newText, onApply, onDeep, onDiscuss) {
   const bulgular = quickFactCheck(oldText, newText);
   const temiz = !bulgular.length;
   const div = document.createElement('div');
@@ -6421,17 +6421,15 @@ function renderQuickCheck(oldText, newText, onApply, onDeep, onRetry) {
     <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
       <button class="btn btn-sm ${temiz ? 'btn-primary' : ''} qc-apply" style="font-size:11.5px;">${temiz ? 'Paragrafa yaz' : 'Yine de yaz'}</button>
       <button class="btn btn-sm qc-deep" style="font-size:11.5px;" title="İşlev, süreklilik ve eylem sırası için AI kontrolü (ek istek)">🔎 Derin kontrol</button>
-      ${onRetry ? `<button class="btn btn-sm qc-retry" style="font-size:11.5px;" title="Bulguları da hesaba katarak yeniden yazdır">♻ Yeniden yaz</button>` : ''}
+      ${onDiscuss ? `<button class="btn btn-sm qc-discuss" style="font-size:11.5px;" title="Bulgular + metin + AI yorumu ile tartış">💬 AI ile sohbet et</button>` : ''}
       <button class="btn btn-sm qc-cancel" style="font-size:11.5px;">Vazgeç</button>
     </div>`;
   div.querySelector('.qc-apply').addEventListener('click', () => { div.remove(); onApply(); });
   div.querySelector('.qc-cancel').addEventListener('click', () => div.remove());
   // TAKILMAYI ÖNLEME: kontrol bir şey söylediğinde tek çıkış "yine de yaz"
   // ya da "vazgeç" olmasın - bulguları hesaba katıp yeniden üretebilmeli.
-  div.querySelector('.qc-retry')?.addEventListener('click', async (e) => {
-    const b = e.target;
-    b.disabled = true; b.textContent = 'Yeniden yazılıyor…';
-    await onRetry(bulgular.length ? bulgular : ['Öneriyi daha da güçlendir; önceki seçenekleri tekrarlama.']);
+  div.querySelector('.qc-discuss')?.addEventListener('click', () => {
+    onDiscuss(bulgular, '');
     div.remove();
   });
   div.querySelector('.qc-deep').addEventListener('click', async (e) => {
@@ -6439,13 +6437,13 @@ function renderQuickCheck(oldText, newText, onApply, onDeep, onRetry) {
     b.disabled = true; b.textContent = 'Kontrol ediliyor…';
     const v = await onDeep();
     b.disabled = false; b.textContent = '🔎 Derin kontrol';
-    div.insertAdjacentElement('afterend', renderVerifyResult(v, () => { div.remove(); onApply(); }, onRetry));
+    div.insertAdjacentElement('afterend', renderVerifyResult(v, () => { div.remove(); onApply(); }, onDiscuss));
     div.querySelector('.qc-deep').remove();
   });
   return div;
 }
 
-function renderVerifyResult(v, onApply, onRetry) {
+function renderVerifyResult(v, onApply, onDiscuss) {
   const renk = { kabul: '#3f7a4f', duzelt: '#b08d3f', red: 'var(--danger)' }[v.verdict] || 'var(--text-muted)';
   const etiket = { kabul: '✓ Kabul edilebilir', duzelt: '⚠ Düzeltilmeli', red: '✕ Reddedildi' }[v.verdict] || v.verdict;
   const tumBulgular = [...(v.hard_issues || []), ...(v.issues || [])];
@@ -6457,18 +6455,17 @@ function renderVerifyResult(v, onApply, onRetry) {
     ${tumBulgular.length ? `<ul style="margin:6px 0 0 16px;padding:0;font-size:12px;">${tumBulgular.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : ''}
     <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
       <button class="btn btn-sm ${v.verdict === 'kabul' ? 'btn-primary' : ''} verify-apply" style="font-size:11.5px;">${v.verdict === 'kabul' ? 'Paragrafa yaz' : 'Yine de yaz'}</button>
-      ${onRetry && tumBulgular.length ? `<button class="btn btn-sm btn-primary verify-retry" style="font-size:11.5px;" title="Bu uyarıları da dikkate alarak yeniden yazdır">♻ Uyarılara göre yeniden yaz</button>` : ''}
+      ${onDiscuss && tumBulgular.length ? `<button class="btn btn-sm btn-primary verify-discuss" style="font-size:11.5px;" title="Kontrol uyarıları + seçtiğin metin + AI yorumu ile tartış">💬 AI ile sohbet et</button>` : ''}
       <button class="btn btn-sm verify-cancel" style="font-size:11.5px;">Vazgeç</button>
     </div>`;
   div.querySelector('.verify-apply').addEventListener('click', () => { div.remove(); onApply(); });
   div.querySelector('.verify-cancel').addEventListener('click', () => div.remove());
-  // ÇIKMAZ ÖNLEME: kontrol "düzeltilmeli" dediğinde tek seçenek "yine de yaz"
-  // ya da "vazgeç" idi - kullanıcı sıkışıyordu. Artık uyarılar TALİMATA
-  // eklenip yeniden üretilebiliyor.
-  div.querySelector('.verify-retry')?.addEventListener('click', async (e) => {
-    const b = e.target;
-    b.disabled = true; b.textContent = 'Yeniden yazılıyor…';
-    await onRetry(tumBulgular);
+  // ÇIKMAZ ÖNLEME: "uyarılara göre yeniden yaz" bağa giriyordu (aynı
+  // uyarılar tekrar çıkıyor, döngü kapanmıyor). Yerine SOHBET: kontrol
+  // uyarıları + seçilen metin + AI'nın kendi yorumu birlikte tartışılıyor -
+  // en iyi sonucu bu veriyor, çünkü karar insanla birlikte veriliyor.
+  div.querySelector('.verify-discuss')?.addEventListener('click', () => {
+    onDiscuss(tumBulgular, v.note || '');
     div.remove();
   });
   return div;
@@ -6866,11 +6863,19 @@ async function loadBannedPatterns() {
 
 // Atölyede 3 seçenekli öneri (mobil: tam genişlik kartlar)
 async function workshopFix(chapter, num, issue) {
+  // SAVUNMA: kapsayıcı yoksa (kullanıcı bu arada başka paragrafa geçtiyse)
+  // çökmek yerine sessizce çık. "Cannot set properties of null" hatası
+  // buradan geliyordu.
   const box = document.getElementById('wsWork');
+  if (!box) return;
   box.dataset.mode = 'fix';
   box.innerHTML = '<div class="empty-state">Üç seçenek hazırlanıyor…</div>';
   const para = (chapter.paragraphs || []).find(p => p.number === num);
   const kayitlar = workshopState.findings[num] || [];
+  // Görülen versiyonlar: "farklı 3 öneri" gerçekten farklı gelsin diye
+  // önceki turlarda üretilenler talimatta AÇIKÇA dışlanır.
+  workshopState.seen = workshopState.seen || {};
+  const gorulenler = workshopState.seen[num] || [];
   await loadBannedPatterns();   // kaçınma listesi taze olsun (düzelttikçe değişiyor)
   const direktifler = buildParagraphDirectives(num, kayitlar, para ? para.text : '');
   workshopState.directives = workshopState.directives || {};
@@ -6883,6 +6888,11 @@ async function workshopFix(chapter, num, issue) {
     + 'açıklama yok, yargı sıfatı yok.\n'
     + 'ÜÇ FARKLI YAKLAŞIM üret (aynı fikrin varyasyonu DEĞİL): biri mikro detaya, '
     + 'biri sese/sessizliğe, biri harekete yaslansın.\n'
+    + (gorulenler.length
+        ? 'DAHA ÖNCE ŞU VERSİYONLARI ÜRETTİN - HİÇBİRİNİ TEKRARLAMA, benzerini de yazma:\n'
+          + gorulenler.map((t, i) => `(${i + 1}) ${t.slice(0, 180)}`).join('\n')
+          + '\nTamamen farklı üç yol dene: farklı giriş cümlesi, farklı odak, farklı duyu.\n'
+        : '')
     + `UZUNLUK BÜTÇESİ: mevcut paragraf ${(para ? para.text : '').split(/\s+/).filter(Boolean).length} kelime. `
     + 'Yeni hâli bunun %70-140 aralığında kalsın - her turda uzayıp komşu paragrafların '
     + 'ritmini bozmasın.\n'
@@ -6898,6 +6908,8 @@ async function workshopFix(chapter, num, issue) {
       selected_entities: [], existing_text: para ? para.text : '',
     });
     const secenekler = parseOptionBlocks(result.generated_text || '');
+    // Üretilenleri belleğe al (sonraki turda dışlanacak - son 6 tanesi yeter)
+    workshopState.seen[num] = [...gorulenler, ...secenekler.map(o => o.text)].slice(-6);
 
     // KAYDIRMALI KARTLAR: mobilde üç seçeneği alt alta okumak yorucu;
     // parmakla sağa/sola geçilen tek kart daha doğal. Noktalar hangi
@@ -7043,7 +7055,7 @@ async function workshopFix(chapter, num, issue) {
           });
         },
         () => verifyBeforeApply(chapter.id, num, eski, secilen),
-        async (uyarilar) => workshopFix(chapter, num, issue + ' AYRICA: ' + uyarilar.join(' | ')),
+        (uyarilar, not) => openWorkshopVerifyChat(chapter, num, eski, secilen, uyarilar, not),
       ));
     }));
   } catch (err) {
@@ -7345,4 +7357,57 @@ async function runParagraphRetest(num, eskiMetin, yeniMetin, kayitlar) {
   } catch (err) {
     kutu.innerHTML = `<span style="color:var(--danger);">Yeniden test yapılamadı: ${escapeHtml(err.message)}</span>`;
   }
+}
+
+// ---------------------------------------------------------------------------
+// KONTROL SONRASI SOHBET: derin kontrol bir sorun bulduğunda "uyarılara göre
+// yeniden yaz" bağa giriyordu (aynı uyarılar tekrar çıkıyor, döngü
+// kapanmıyor). En iyi sonucu şu üçlü veriyor: KONTROL UYARILARI + SEÇİLEN
+// METİN + AI'nın kendi yorumu, birlikte tartışılarak. Karar insanla
+// birlikte veriliyor; anlaşınca "✍️ yeni versiyonu yaz" ile üretiliyor.
+// ---------------------------------------------------------------------------
+function openWorkshopVerifyChat(chapter, num, eskiMetin, secilenMetin, uyarilar, aiNotu) {
+  const box = document.getElementById('wsWork');
+  if (!box) return;
+  const para = (chapter.paragraphs || []).find(p => p.number === num);
+
+  // Sohbeti üç bilgiyle tohumla: uyarılar, seçilen metin, AI yorumu
+  paraChatHistories[num] = paraChatHistories[num] || [];
+  const acilis =
+    `P${num} için seçtiğim versiyon şu:\n"${secilenMetin}"\n\n`
+    + (uyarilar.length ? `Kontrol şu uyarıları verdi:\n- ${uyarilar.join('\n- ')}\n` : '')
+    + (aiNotu ? `Kontrolün notu: ${aiNotu}\n` : '')
+    + '\nSence bu uyarılar haklı mı? Hangisini nasıl çözelim - metni bozmadan?';
+
+  box.dataset.mode = 'chat';
+  box.innerHTML = `
+    <div class="panel" style="margin-top:8px;border-left:3px solid var(--gold);">
+      <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">💬 KONTROL SONRASI TARTIŞMA</div>
+      <div class="para-chat-log" data-number="${num}" style="max-height:240px;overflow-y:auto;font-size:12.5px;margin-top:6px;"></div>
+      <div style="display:flex;gap:6px;margin-top:6px;">
+        <textarea class="para-chat-input" data-number="${num}" placeholder="Ör: ilk uyarı haklı, ikincisi değil" style="flex:1;min-height:38px;box-sizing:border-box;font-size:12.5px;"></textarea>
+        <button class="btn btn-sm btn-primary" id="wsVcSend">Gönder</button>
+      </div>
+      <button class="btn btn-sm btn-primary" id="wsVcWrite" style="margin-top:6px;width:100%;font-size:11.5px;">✍️ Konuştuklarımıza göre yeni versiyonu yaz</button>
+      <button class="btn btn-sm" id="wsVcKeep" style="margin-top:6px;width:100%;font-size:11.5px;">Yine de seçtiğim metni uygula</button>
+    </div>`;
+
+  renderParaChatLog(num);
+  // İlk soruyu otomatik gönder - kullanıcı yazmadan tartışma başlasın
+  const input = box.querySelector('.para-chat-input');
+  input.value = acilis;
+  sendParagraphChat(chapter, num, '', para ? para.text : eskiMetin);
+
+  document.getElementById('wsVcSend').addEventListener('click', () =>
+    sendParagraphChat(chapter, num, '', para ? para.text : eskiMetin));
+  document.getElementById('wsVcWrite').addEventListener('click', () =>
+    writeParagraphVersion(chapter, num, '', para ? para.text : eskiMetin));
+  document.getElementById('wsVcKeep').addEventListener('click', async () => {
+    await replaceParagraphText(chapter.id, num, secilenMetin);
+    resolvedParas.add(String(num)); saveParaState();
+    if (para) para.text = secilenMetin;
+    const el = document.getElementById('wsParaText');
+    if (el) el.textContent = secilenMetin;
+    box.innerHTML = '<div style="font-size:12.5px;color:#3f7a4f;">✓ Kaydedildi.</div>';
+  });
 }
