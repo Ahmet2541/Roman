@@ -6177,6 +6177,11 @@ const DENETIM_SEKMELERI = {
     hint: 'Aşırı kullanılan kalıplar ve yazım tikleri; eşiği aşanlar AI\'ya "kaçın" uyarısı olarak gider.',
     render: (el) => renderStyleScanView(el),
   },
+  workshop: {
+    label: '🛠 Atölye',
+    hint: 'Bir bölüm ya da kısım seç, paragraf paragraf elden geçir: hazırlık kontrolü → inceleme → düzeltme.',
+    render: (el) => renderWorkshopPicker(el),
+  },
   structure: {
     label: '🏗️ Yapısal Akış',
     hint: 'Bölümler ARASI denetim: nedensellik ("bu yüzden" mi "ve sonra" mı), tekrar eden çatışma, bahis eğrisi, ölü bölgeler, bölüm kapanışları. Özetlerle çalışır.',
@@ -6203,7 +6208,7 @@ const DENETIM_SEKMELERI = {
     },
   },
 };
-let currentDenetimTab = 'fullscan';
+let currentDenetimTab = 'workshop';
 
 function renderDenetimView(view) {
   // Eski menü yolları (fullscan/stylescan) doğrudan ilgili sekmeyi açar
@@ -6814,4 +6819,88 @@ function renderWorkshopDone() {
   document.getElementById('workshopClose').addEventListener('click', closeWorkshop);
   document.getElementById('wsAgain').addEventListener('click', renderWorkshopReview);
   document.getElementById('wsFinish').addEventListener('click', closeWorkshop);
+}
+
+// ---------------------------------------------------------------------------
+// ATÖLYE SEÇİCİ: hangi bölüm/kısım üzerinde çalışılacağını Denetim menüsünden
+// seçmek. Atölye eskiden yalnızca AÇIK bölümden başlatılabiliyordu; 56
+// bölümlük bir romanda "hangisini elden geçireceğim" sorusu tek yerde
+// cevaplanmalı. Liste hiyerarşik numaralarla gelir ve her girdinin DURUMU
+// görünür: özet var mı, kaç paragraf, daha önce elden geçirilmiş mi.
+// ---------------------------------------------------------------------------
+async function renderWorkshopPicker(el) {
+  el.innerHTML = '<div class="empty-state">Fihrist yükleniyor…</div>';
+  try {
+    const tumu = await api.get('/chapters/');
+    const hiyerarsi = buildChapterHierarchy(tumu);
+    const metinliler = hiyerarsi.filter(it => (it.chapter.paragraph_count || 0) > 0);
+    if (!metinliler.length) {
+      el.innerHTML = '<div class="empty-state">Henüz metin yazılmış bir bölüm yok.</div>';
+      return;
+    }
+
+    const durum = (c) => {
+      const ozet = (c.summary || '').trim();
+      let elden = 0;
+      try {
+        const raw = localStorage.getItem(`roman_para_state_${c.id}`);
+        if (raw) elden = (JSON.parse(raw).resolved || []).length;
+      } catch (e) { /* yoksay */ }
+      return { ozet: !!ozet, elden };
+    };
+
+    el.innerHTML = `
+      <p style="font-size:12.5px;color:var(--text-muted);margin-top:0;max-width:680px;">
+        Elden geçirilecek girdiyi seç. Atölye üç adımda ilerler: <b>hazırlık</b> (özet,
+        zaman çizelgesi, plan) → <b>inceleme</b> (editör + okur gözü) → <b>paragraf paragraf düzeltme</b>.
+        Mobilde tam ekran çalışır.
+      </p>
+      <input type="text" id="wsFilter" placeholder="Başlıkta ara…" style="max-width:280px;margin-bottom:8px;">
+      <div id="wsPickerList">
+        ${metinliler.map(it => {
+          const c = it.chapter;
+          const d = durum(c);
+          const tur = c.kind === 'part' ? 'ÜST' : (c.kind === 'subtitle' ? 'ARA' : 'metin');
+          return `
+          <div class="entity-row ws-pick-row" data-title="${escapeHtml((c.title || '').toLowerCase())}" data-id="${c.id}" style="flex-wrap:wrap;">
+            <div style="flex:1;min-width:220px;">
+              <div class="name">#${it.displayNumber} ${escapeHtml(stripMarkdownArtifacts(c.title) || '(başlıksız)')}</div>
+              <div class="desc" style="display:flex;gap:8px;flex-wrap:wrap;font-size:11.5px;">
+                <span>${c.paragraph_count} paragraf</span>
+                <span style="color:${d.ozet ? '#3f7a4f' : 'var(--danger)'}">${d.ozet ? '✓ özet var' : '✗ özet yok'}</span>
+                ${d.elden ? `<span style="color:#3f7a4f;">✓ ${d.elden} paragraf elden geçmiş</span>` : ''}
+                <span style="color:var(--text-muted);">[${tur}]</span>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="btn btn-sm btn-primary ws-open" data-id="${c.id}">🛠 Atölyeyi aç</button>
+              <button class="btn btn-sm ws-goto" data-id="${c.id}">Bölüme git</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+
+    el.querySelector('#wsFilter').addEventListener('input', (e) => {
+      const q = _trLowerJs(e.target.value.trim());
+      el.querySelectorAll('.ws-pick-row').forEach(row => {
+        row.style.display = !q || _trLowerJs(row.dataset.title).includes(q) ? '' : 'none';
+      });
+    });
+    el.querySelectorAll('.ws-open').forEach(b => b.addEventListener('click', async () => {
+      b.disabled = true; b.textContent = 'Açılıyor…';
+      try {
+        const ch = await api.get(`/chapters/${b.dataset.id}`);
+        currentChapter = ch;                 // atölye içindeki işlemler bunu kullanır
+        loadParaState(ch.id);                // o bölümün önceki kararları
+        openChapterWorkshop(ch);
+      } catch (err) { alert(err.message); }
+      b.disabled = false; b.textContent = '🛠 Atölyeyi aç';
+    }));
+    el.querySelectorAll('.ws-goto').forEach(b => b.addEventListener('click', () => {
+      switchView('roman');
+      setTimeout(() => loadChapterList(parseInt(b.dataset.id, 10)), 200);
+    }));
+  } catch (err) {
+    el.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
 }
