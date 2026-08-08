@@ -6794,13 +6794,25 @@ async function workshopFix(chapter, num, issue) {
       return;
     }
     const eskiMetin = para ? para.text : '';
+    // ÜRETİLDİĞİ ANDA DENETİM: her seçenek için ücretsiz/anlık kontrol
+    // (sayı-isim kaybı) hemen çalışır ve karta rozet olarak basılır. Böylece
+    // "uygula -> kontrol -> geri dön -> yeniden yaz" döngüsüne girmeden
+    // hangi seçeneğin temiz olduğunu görüp doğrudan seçersin.
+    secenekler.forEach(o => { o.quick = quickFactCheck(eskiMetin, o.text); });
     box.innerHTML = `
       <div class="option-swiper" tabindex="0">
         ${secenekler.map((o, i) => `
           <div class="option-card" data-idx="${i}">
-            <div style="font-size:10.5px;color:var(--gold);font-weight:600;">SEÇENEK ${i + 1}/${secenekler.length}${o.approach ? ' · ' + escapeHtml(o.approach) : ''}</div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px;">
+              <div style="font-size:10.5px;color:var(--gold);font-weight:600;">SEÇENEK ${i + 1}/${secenekler.length}${o.approach ? ' · ' + escapeHtml(o.approach) : ''}</div>
+              <div class="opt-badge" data-idx="${i}" style="font-size:10.5px;color:${o.quick.length ? 'var(--danger)' : '#3f7a4f'};white-space:nowrap;">
+                ${o.quick.length ? `⚠ ${o.quick.length} uyarı` : '✓ temiz'}
+              </div>
+            </div>
+            ${o.quick.length ? `<div style="font-size:11px;color:var(--danger);margin-top:3px;">${o.quick.map(escapeHtml).join('<br>')}</div>` : ''}
             <div style="white-space:pre-wrap;font-size:13px;margin-top:4px;line-height:1.65;">${highlightDiff(eskiMetin, o.text)}</div>
-            <div style="font-size:10.5px;color:var(--text-muted);margin-top:4px;">Altın = değişen, siyah = korunan</div>
+            <div style="font-size:10.5px;color:var(--text-muted);margin-top:4px;">Altın = değişen, siyah = korunan · altına tıkla: alternatif iste</div>
+            <div class="opt-deep" data-idx="${i}"></div>
             <button class="btn btn-sm btn-primary ws-apply" data-idx="${i}" style="margin-top:8px;width:100%;font-size:11.5px;">Bunu uygula</button>
           </div>`).join('')}
       </div>
@@ -6808,9 +6820,39 @@ async function workshopFix(chapter, num, issue) {
         ${secenekler.map((_, i) => `<span class="option-dot${i === 0 ? ' active' : ''}" data-idx="${i}"></span>`).join('')}
         <span style="font-size:11px;color:var(--text-muted);margin-left:6px;">← kaydır →</span>
       </div>
+      <button class="btn btn-sm" id="wsDeepAll" style="width:100%;margin-top:6px;font-size:11.5px;" title="Üç seçeneği de işlev, süreklilik ve eylem sırası açısından denetler">🔎 Üçünü de derin kontrol et</button>
       <button class="btn btn-sm" id="wsMoreOptions" style="width:100%;margin-top:6px;font-size:11.5px;">🔄 Farklı 3 öneri getir</button>
       <div id="wsPhraseBox"></div>`;
     wireOptionSwiper(box);
+
+    // TOPLU DERİN KONTROL: üçünü birden denetler, sonuçları kartlara yazar.
+    // Tek tek uygulayıp geri dönmek yerine hepsini önden görürsün.
+    document.getElementById('wsDeepAll').addEventListener('click', async (e) => {
+      const b = e.target; b.disabled = true; b.textContent = 'Üçü denetleniyor…';
+      const sonuclar = await Promise.all(secenekler.map(o =>
+        verifyBeforeApply(chapter.id, num, eskiMetin, o.text)));
+      sonuclar.forEach((v, i) => {
+        secenekler[i].deep = v;
+        const renk = { kabul: '#3f7a4f', duzelt: '#b08d3f', red: 'var(--danger)' }[v.verdict] || 'var(--text-muted)';
+        const etiket = { kabul: '✓ kabul', duzelt: '⚠ düzeltilmeli', red: '✕ red' }[v.verdict] || v.verdict;
+        const rozet = box.querySelector(`.opt-badge[data-idx="${i}"]`);
+        if (rozet) { rozet.style.color = renk; rozet.textContent = etiket; }
+        const kutu = box.querySelector(`.opt-deep[data-idx="${i}"]`);
+        const bulgular = [...(v.hard_issues || []), ...(v.issues || [])];
+        if (kutu) kutu.innerHTML = `
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;border-top:1px dashed var(--border);padding-top:4px;">
+            ${v.note ? escapeHtml(v.note) : ''}
+            ${bulgular.length ? `<ul style="margin:4px 0 0 14px;padding:0;">${bulgular.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : ''}
+          </div>`;
+      });
+      // En iyi seçeneği işaretle
+      const enIyi = sonuclar.findIndex(v => v.verdict === 'kabul');
+      if (enIyi >= 0) {
+        const kart = box.querySelector(`.option-card[data-idx="${enIyi}"]`);
+        if (kart) kart.style.borderColor = '#3f7a4f';
+      }
+      b.disabled = false; b.textContent = '🔎 Üçünü de derin kontrol et';
+    });
 
     // FARKLI 3 ÖNERİ: önceki yaklaşımları dışlayarak yeniden üret
     document.getElementById('wsMoreOptions').addEventListener('click', async (e) => {
@@ -6825,8 +6867,31 @@ async function workshopFix(chapter, num, issue) {
     box.querySelectorAll('.diff-clickable').forEach(sp => sp.addEventListener('click', () =>
       openPhraseAlternatives(chapter, num, sp, secenekler)));
     box.querySelectorAll('.ws-apply').forEach(b => b.addEventListener('click', async (e) => {
-      const secilen = secenekler[parseInt(e.target.dataset.idx, 10)].text;
+      const secenek = secenekler[parseInt(e.target.dataset.idx, 10)];
+      const secilen = secenek.text;
       const eski = para ? para.text : '';
+      // Zaten denetlenmiş ve TEMİZ ise ikinci kez kontrol etme - kullanıcı
+      // sonucu görerek seçti, tekrar sormak gereksiz sürtünme.
+      if (secenek.deep && secenek.deep.verdict === 'kabul' && !secenek.quick.length) {
+        await replaceParagraphText(chapter.id, num, secilen);
+        resolvedParas.add(String(num)); saveParaState();
+        if (para) para.text = secilen;
+        document.getElementById('wsParaText').textContent = secilen;
+        box.innerHTML = `
+          <div style="font-size:12.5px;color:#3f7a4f;">✓ Kaydedildi (denetimden geçmişti).</div>
+          <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+            <button class="btn btn-sm" id="wsRefine" style="font-size:11.5px;">✨ Bunu da geliştir</button>
+            <button class="btn btn-sm btn-primary" id="wsGoNext" style="font-size:11.5px;">Sonraki paragraf →</button>
+          </div>`;
+        document.getElementById('wsRefine').addEventListener('click', () =>
+          workshopFix(chapter, num, 'Metni bir tur daha güçlendir; aynı yaklaşımları tekrarlama.'));
+        document.getElementById('wsGoNext').addEventListener('click', () => {
+          const sira = workshopState.order;
+          if (workshopState.idx === sira.length - 1) renderWorkshopDone();
+          else renderWorkshopParagraph(workshopState.idx + 1);
+        });
+        return;
+      }
       e.target.insertAdjacentElement('afterend', renderQuickCheck(
         eski, secilen,
         async () => {
