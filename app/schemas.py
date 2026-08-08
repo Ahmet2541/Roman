@@ -1010,3 +1010,45 @@ class VerifyRewriteResponse(BaseModel):
     hard_issues: List[str] = []
     issues: List[str] = []
     note: str = ""
+
+
+class RetestRequest(BaseModel):
+    old_text: str
+    new_text: str
+    findings: List[str] = []
+
+
+class RetestResult(BaseModel):
+    finding: str = ""
+    status: str = "kismen"       # giderildi | kismen | giderilmedi
+    note: str = ""
+
+
+class RetestResponse(BaseModel):
+    """Düzeltme sonrası yeniden test: bulgular gerçekten giderildi mi."""
+    results: List[RetestResult] = []
+    new_issues: List[str] = []
+    verdict: str = "iyilesti"    # iyilesti | ayni | kotulesti
+
+
+class MotifItem(BaseModel):
+    p: Optional[int] = None
+    image: str = ""
+    motif: str = ""
+
+
+class MotifRepeat(BaseModel):
+    image: str = ""
+    paragraphs: List[int] = []
+    kind: str = "tekrar"      # leitmotif | tekrar
+    reason: str = ""
+    fix: str = ""
+
+
+class MotifMapResponse(BaseModel):
+    """İmge/motif haritası: dilimleme sınırını aşarak tüm bölümdeki
+    tekrarları bulur (metni değil imge listesini kıyaslar)."""
+    items: List[MotifItem] = []
+    repeats: List[MotifRepeat] = []
+    unused_senses: List[str] = []
+    summary: str = ""

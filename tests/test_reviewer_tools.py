@@ -636,3 +636,55 @@ def test_long_chapter_scanned_in_chunks(client, headers):
     assert d["scanned"] == 30 and d["total"] == 30      # TAMAMI tarandı
     assert next(s for s in d["scores"] if s["key"] == "ritim")["score"] == 4   # ortalama
     assert len(d["fixes"]) == cagri["n"]                # her parçanın bulgusu korundu
+
+
+def test_retest_paragraph_checks_each_finding(client, headers):
+    """Düzeltme sonrası yeniden test: her bulgu tek tek sınanır, yeni sorun
+    doğduysa bildirilir. Kabul kontrolü 'detay düştü mü' bakar; bu
+    'klişe kalktı mı' bakar - döngüyü kapatan denetim budur."""
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "results": [
+                {"finding": "Klişe", "status": "giderildi", "note": "Yargı sıfatları kalktı."},
+                {"finding": "Alt metin", "status": "kismen", "note": "Hâlâ biraz açık."},
+                {"finding": "Uydurma ölçüt", "status": "gecersiz_durum", "note": "x"},
+            ],
+            "new_issues": ["Paragraf %40 uzadı."],
+            "verdict": "iyilesti",
+        })
+        r = client.post("/ai/retest-paragraph", json={
+            "old_text": "Sıradan. Huzurlu. Unutulmuş.",
+            "new_text": "Ayakkabılardan kalkan toz, güneşte asılı kaldı.",
+            "findings": ["Klişe: yargı sıfatları", "Alt metin: her şey söyleniyor"],
+        }, headers=headers)
+    d = r.json()
+    assert d["verdict"] == "iyilesti"
+    assert d["results"][0]["status"] == "giderildi"
+    assert d["results"][1]["status"] == "kismen"
+    assert d["results"][2]["status"] == "kismen"      # geçersiz durum güvenli tarafa çekildi
+    assert "uzadı" in d["new_issues"][0]
+
+    # Bulgu yoksa Qwen'e hiç gidilmez
+    with patch("app.qwen_client.get_client") as mc:
+        r = client.post("/ai/retest-paragraph", json={"old_text": "a", "new_text": "b", "findings": []}, headers=headers)
+        mc.assert_not_called()
+    assert r.json()["results"] == []
+
+
+def test_reader_test_has_dialogue_types(client, headers):
+    """Okur testi diyaloğa özel bulgu türlerini TANIMALI: sesler ayrışmıyor,
+    replikle bilgi aktarma, alt metin yokluğu. Sorgu ağırlıklı bir romanda
+    bunlar olmadan denetim kör kalıyordu."""
+    from app.qwen_client import READER_TEST_SYSTEM_PROMPT
+    for tur in ("diyalog_ses", "diyalog_bilgi", "diyalog_altmetin"):
+        assert tur in READER_TEST_SYSTEM_PROMPT, tur
+    assert "sesleri birbirinden ayrışıyor mu" in READER_TEST_SYSTEM_PROMPT
+
+    ch = _chapter_with_text(client, headers, ['"Biliyorsun ki 2023\'te bina çökmüştü," dedi Yargıç.'])
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({"findings": [
+            {"paragraph_number": 1, "type": "diyalog_bilgi", "severity": "yuksek",
+             "reason": "Karakterlerin zaten bildiğini birbirine anlatıyor.", "suggestion": "Bilgiyi eyleme yedir."},
+        ]})
+        r = client.post(f"/ai/reader-test/{ch['id']}", headers=headers)
+    assert r.json()["findings"][0]["type"] == "diyalog_bilgi"

@@ -119,8 +119,13 @@ def test_plan_layer_injected_only_for_linked_chapter(client, headers):
     r = client.post("/ai/context-preview", json={
         "selected_entities": [], "chapter_number": other_no,
     }, headers=headers)
-    assert "MÜCBİR SEBEP" not in r.json()["context"]
-    assert "BÖLÜM PLANI" not in r.json()["context"]  # boş hücre maliyet ödemez
+    ctx_other = r.json()["context"]
+    # Plan, BAŞKA bölümün KENDİ planı olarak gitmez. İleri bakış katmanında
+    # "SONRAKİ BÖLÜMÜN PLANI" etiketiyle görünebilir - bu bilinçli: sahne,
+    # sonrakine bağlanacak şekilde yazılmalı (bkz. build_forward_layer).
+    if "MÜCBİR SEBEP" in ctx_other:
+        assert "İLERİ BAKIŞ" in ctx_other and "SONRAKİ BÖLÜMÜN PLANI" in ctx_other
+    assert "BÖLÜM PLANI (plana sadık kal)" not in ctx_other  # kendi planı yok
 
 
 def test_delete_matrix_keeps_chapters(client, headers):

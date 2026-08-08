@@ -363,6 +363,44 @@ def build_style_layer(db: Session, universe_id: int, max_samples: int = 5) -> st
     return "\n".join(lines)
 
 
+def build_forward_layer(db: Session, novel_id: int, chapter_number: int | None) -> str:
+    """İLERİ BAKIŞ: SONRAKİ bölümün planı ve (varsa) özeti. Özet zinciri
+    hep GERİYE bakıyordu ("önceki bölümden ne devraldık"); oysa bir sahne
+    yazılırken asıl soru "bu, sonraki bölümü nasıl kuruyor" olmalı. Bu
+    katman olmadan bölüm sonları eşik bırakmak yerine çözülüp kapanıyor.
+    """
+    if chapter_number is None:
+        return ""
+    sonraki = (
+        db.query(models.Chapter)
+        .filter(models.Chapter.novel_id == novel_id, models.Chapter.number > chapter_number)
+        .order_by(models.Chapter.number)
+        .first()
+    )
+    if not sonraki:
+        return ""
+    parcalar = []
+    ozet = (sonraki.summary or "").strip()
+    if ozet:
+        parcalar.append(f"SONRAKİ BÖLÜMÜN ÖZETİ (Bölüm {sonraki.number}):\n{ozet}")
+    # Sonraki bölüme bağlı plan hücresi (varsa)
+    hucre = (
+        db.query(models.MatrixCell)
+        .filter(models.MatrixCell.chapter_id == sonraki.id)
+        .first()
+    )
+    if hucre and (hucre.content or "").strip():
+        parcalar.append(f"SONRAKİ BÖLÜMÜN PLANI:\n{hucre.content.strip()}")
+    if not parcalar:
+        return ""
+    return (
+        "=== İLERİ BAKIŞ (sonraki bölüm) ===\n"
+        "Bu bölüm oraya BAĞLANMALI: kapanış bir eşik/soru bıraksın, sonrakinin\n"
+        "hedefini doğursun. Sonrakinde anlatılacak bilgiyi burada ÖNDEN VERME.\n"
+        + "\n\n".join(parcalar)
+    )
+
+
 def build_plan_layer(db: Session, novel_id: int, chapter_number: int | None, instruction_text: str = "") -> str:
     """BÖLÜM PLANI katmanı: üzerinde çalışılan bölüme bağlı Plan Matrisi
     hücresi varsa (bkz. models.MatrixCell.chapter_id), hücrenin içeriği +
@@ -462,6 +500,8 @@ def build_context(
     # Matris haritası: bölüm ↔ kolon×satır eşleşmesi (etiketler + bölüm no,
     # hücre içerikleri DEĞİL - ucuz kalsın)
     matrix_map = build_matrix_map_layer(db, novel_id)
+    # İleri bakış: sonraki bölümün planı/özeti - "bu sahne oraya nasıl bağlanıyor"
+    forward = build_forward_layer(db, novel_id, chapter_number)
     # Kısayol kodlarıyla ("1BLM", "1-2KSM") anılan girdilerin İÇERİĞİ
     referenced = build_referenced_entries_layer(db, universe_id, novel_id, instruction_text)
     # Sohbet modunda çalışılan bölümün METNİ de gider (include_chapter_text);
@@ -483,7 +523,7 @@ def build_context(
     style_warnings = build_style_warning_layer(db, universe_id)
     plan = build_plan_layer(db, novel_id, chapter_number, instruction_text=instruction_text)
     dynamic = build_dynamic_layer(db, universe_id, selected_entities, instruction_text=instruction_text, include_hidden=include_hidden)
-    return "\n\n".join(part for part in [fixed, index, outline, matrix_map, referenced, style, style_warnings, plan, chapter_text, dynamic] if part)
+    return "\n\n".join(part for part in [fixed, index, outline, matrix_map, referenced, style, style_warnings, plan, forward, chapter_text, dynamic] if part)
 
 
 # ---------------------------------------------------------------------------
@@ -2005,12 +2045,22 @@ def suggest_matrix_cell_fills(db: Session, matrix, column, empty_rows: list) -> 
 READER_TEST_SYSTEM_PROMPT = """Sen deneyimli bir kurgu editörüsün. Görevin
 verilen bölüm metnini OKUR GÖZÜYLE taramak ve okuru metinden düşürebilecek
 noktaları işaretlemek. Aradığın sorun türleri:
+- diyalog_ses: konuşanlar ses olarak AYRIŞMIYOR (iki karakter aynı ağızdan
+  konuşuyor; replik kime ait belli olmuyor)
+- diyalog_bilgi: replik bilgi aktarma aracına dönüşmüş ("Biliyorsun ki 2023'te
+  bina çökmüştü" gibi karakterlerin zaten bildiğini birbirine anlatması)
+- diyalog_altmetin: replikler düz; söylenmeyeni sezdiren bir katman yok,
+  herkes tam olarak düşündüğünü söylüyor
 - tempo: aksiyonun/gerilimin ortasında gereksiz yavaşlama, uzayan betimleme
 - bilgi_bocasi: hikayeyi durduran yığın halinde açıklama (info-dump)
 - klise: basmakalıp ifade ya da öngörülebilir hamle
 - anlasilirlik: kimin konuştuğu/ne olduğu belirsiz, dolambaçlı cümle
 - gerilim: kurulan gerilimi erkenden söndüren açıklama/rahatlama
 - inandiricilik: karakterin ya da dünyanın kurallarıyla çelişen davranış
+
+DİYALOG İÇEREN PARAGRAFLARDA AYRICA ŞUNLARA BAK: her replik karakteri açığa
+çıkarıyor mu, konuşanların sesleri birbirinden ayrışıyor mu, sessizlik/
+duraklama kullanılıyor mu, replik "okur bilsin diye" mi söyleniyor.
 
 Kurallar:
 1. SEÇİCİ ol - her pürüzü değil, okuru GERÇEKTEN düşürecek olanları işaretle.
@@ -2863,7 +2913,7 @@ LITERARY_CRITERIA = [
     ("dil_ekonomisi", "Dil ekonomisi", "Az kelimeyle çok şey. Gereksiz sıfat, tekrar, boş cümle var mı?"),
     ("ritim", "Ritim", "Cümle uzunlukları ve tempo sahnenin gerilimiyle uyumlu mu?"),
     ("sembolizm", "Sembolizm", "Nesne/detaylar görünenden fazlasını taşıyor mu? Semboller metni boğuyor mu?"),
-    ("karakterizasyon", "Karakterizasyon", "Karakter davranış, seçim ve konuşmayla mı inşa ediliyor, yoksa anlatılıyor mu?"),
+    ("karakterizasyon", "Karakterizasyon", "Karakter davranış, seçim ve konuşmayla mı inşa ediliyor, yoksa anlatılıyor mu? DİYALOG varsa: her konuşanın sesi ayrışıyor mu, replikler karakteri açığa çıkarıyor mu, alt metin taşıyor mu?"),
     ("uslup", "Üslup", "Yazarın kendine özgü sesi tutarlı mı? Ödünç/genel bir ton var mı?"),
 ]
 
@@ -3205,4 +3255,160 @@ def verify_paragraph_rewrite(db: Session, universe_id: int, old_text: str, new_t
         "hard_issues": hard_issues,
         "issues": ai_issues,
         "note": (data.get("note") or "")[:300],
+    }
+
+
+# ---------------------------------------------------------------------------
+# TEK PARAGRAF YENİDEN TESTİ: bir paragraf düzeltildikten SONRA, giderilmesi
+# istenen bulguların gerçekten giderilip giderilmediğini ölçer. Kabul kontrolü
+# "detay düştü mü, çelişti mi" diye bakıyordu; bu ise "klişe kalktı mı,
+# alt metin oluştu mu" diye bakar - döngüyü asıl kapatan denetim budur.
+# ---------------------------------------------------------------------------
+
+RETEST_PROMPT = """Sen titiz bir editörsün. Bir paragraf, aşağıdaki BULGULARI
+gidermek için yeniden yazıldı. Her bulgu için tek tek karar ver: giderildi mi?
+
+Kurallar:
+- "giderildi" sadece sorun GERÇEKTEN kalktıysa. Kısmi ise "kismen".
+- Yeni bir sorun doğduysa (yeni klişe, uzama, ton kayması) new_issues'a yaz.
+- Kısa konuş; her açıklama tek cümle.
+
+Yanıtın SADECE şu JSON olsun:
+{"results": [{"finding": "bulgunun kısa adı", "status": "giderildi|kismen|giderilmedi", "note": "..."}],
+ "new_issues": ["..."], "verdict": "iyilesti|ayni|kotulesti"}"""
+
+
+def retest_paragraph(db: Session, old_text: str, new_text: str, findings: list) -> dict:
+    """Düzeltilmiş paragrafı, giderilmesi istenen bulgulara karşı sınar."""
+    if not findings:
+        return {"results": [], "new_issues": [], "verdict": "iyilesti"}
+    liste = "\n".join(f"- {f}" for f in findings[:8])
+    user = f"BULGULAR:\n{liste}\n\nESKİ HÂLİ:\n{old_text}\n\nYENİ HÂLİ:\n{new_text}"
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[{"role": "system", "content": RETEST_PROMPT}, {"role": "user", "content": user}],
+    )
+    data = _parse_json_lenient(response.choices[0].message.content) or {}
+    gecerli = {"giderildi", "kismen", "giderilmedi"}
+    return {
+        "results": [
+            {
+                "finding": (r.get("finding") or "")[:120],
+                "status": r.get("status") if r.get("status") in gecerli else "kismen",
+                "note": (r.get("note") or "")[:200],
+            }
+            for r in (data.get("results") or []) if isinstance(r, dict)
+        ],
+        "new_issues": [str(x)[:200] for x in (data.get("new_issues") or [])][:5],
+        "verdict": data.get("verdict") if data.get("verdict") in ("iyilesti", "ayni", "kotulesti") else "iyilesti",
+    }
+
+
+# ---------------------------------------------------------------------------
+# MOTİF / İMGE HARİTASI: bölümün TÜM paragraflarındaki imgeleri çıkarır ve
+# tekrarları bulur. Dilimleme sınırını aşar - metni değil İMGE LİSTESİNİ
+# kıyaslar, o yüzden 12. paragrafla 78. paragraf aynı bakışta görülebilir.
+# Üslup taraması kelime/yapı kalıplarını yakalar ama "yosun tutmuş su" ile
+# "kararmış cam" gibi FARKLI kelimelerle kurulmuş aynı motifi göremez.
+# ---------------------------------------------------------------------------
+
+MOTIF_EXTRACT_PROMPT = """Sen bir edebiyat analistisin. Sana bir bölümün
+paragrafları verilecek. Her paragraf için içindeki İMGELERİ ve MOTİFLERİ
+çıkar - kelimeleri değil, ZİHİNDE OLUŞAN GÖRÜNTÜYÜ ve taşıdığı anlamı.
+
+Örnek: "yosun tutmuş yeşil su" -> imge: "durgun/çürüyen su", motif: "zamanın
+durması". "kararmış cam" -> imge: "görüşü kesen yüzey", motif: "gerçeğin
+gizlenmesi".
+
+Kurallar:
+- Paragraf başına en fazla 3 imge; önemsiz detayları atla.
+- Aynı imgeyi farklı paragraflarda AYNI adla etiketle (tekrar görünür olsun).
+- motif alanı kısa olsun (2-4 kelime).
+
+Yanıtın SADECE şu JSON olsun:
+{"items": [{"p": 3, "image": "durgun/çürüyen su", "motif": "zamanın durması"}]}"""
+
+MOTIF_ANALYZE_PROMPT = """Sen deneyimli bir editörsün. Sana bir bölümdeki
+imge/motif listesi PARAGRAF NUMARALARIYLA verilecek. Tekrarları değerlendir.
+
+Ayrım kritik:
+- LEITMOTIF: bilinçli, anlam biriktiren tekrar (iyi) - her geçişte yeni bir
+  katman ekliyorsa.
+- TEKRAR: aynı imge aynı işlevle yeniden kullanılmış (kötü) - okur "bunu
+  zaten okudum" der.
+
+Yanıtın SADECE şu JSON olsun:
+{"repeats": [{"image": "...", "paragraphs": [3,17,42], "kind": "leitmotif|tekrar",
+  "reason": "...", "fix": "tekrar ise ne yapılmalı"}],
+ "unused_senses": ["metinde hiç kullanılmayan duyular"],
+ "summary": "iki cümlelik değerlendirme"}"""
+
+
+def motif_map(db: Session, chapter, max_chars: int = 12000) -> dict:
+    """Bölümün imge haritasını çıkarır ve tekrarları değerlendirir."""
+    paragraphs = [p for p in chapter.paragraphs if (p.text or "").strip()]
+    if len(paragraphs) < 3:
+        return {"items": [], "repeats": [], "unused_senses": [], "summary": "İmge haritası için en az 3 paragraf gerekir."}
+
+    # 1) Çıkarım - dilimlenerek (tüm paragraflar kapsanır)
+    dilimler, mevcut, used = [], [], 0
+    for p in paragraphs:
+        satir = f"[P{p.number}] {p.text.strip()}"
+        if mevcut and used + len(satir) > max_chars:
+            dilimler.append(mevcut); mevcut, used = [], 0
+        mevcut.append(satir); used += len(satir)
+    if mevcut:
+        dilimler.append(mevcut)
+
+    client = get_client()
+    items = []
+    for dilim in dilimler:
+        try:
+            r = client.chat.completions.create(
+                model=settings.qwen_model,
+                messages=[{"role": "system", "content": MOTIF_EXTRACT_PROMPT},
+                          {"role": "user", "content": "\n".join(dilim)}],
+            )
+            data = _parse_json_lenient(r.choices[0].message.content) or {}
+            for it in data.get("items", []):
+                if isinstance(it, dict) and (it.get("image") or "").strip():
+                    items.append({
+                        "p": it.get("p") if isinstance(it.get("p"), int) else None,
+                        "image": it["image"].strip()[:60],
+                        "motif": (it.get("motif") or "").strip()[:60],
+                    })
+        except Exception:
+            logger.exception("Motif çıkarımı: dilim başarısız")
+
+    if not items:
+        return {"items": [], "repeats": [], "unused_senses": [], "summary": "İmge çıkarılamadı."}
+
+    # 2) Değerlendirme - SADECE liste gönderilir (ucuz, tüm bölüm bir arada)
+    liste = "\n".join(f"P{i['p']}: {i['image']} ({i['motif']})" for i in items if i["p"])
+    try:
+        r2 = client.chat.completions.create(
+            model=settings.qwen_model,
+            messages=[{"role": "system", "content": MOTIF_ANALYZE_PROMPT},
+                      {"role": "user", "content": liste}],
+        )
+        analiz = _parse_json_lenient(r2.choices[0].message.content) or {}
+    except Exception:
+        logger.exception("Motif analizi başarısız")
+        analiz = {}
+
+    return {
+        "items": items,
+        "repeats": [
+            {
+                "image": (x.get("image") or "")[:60],
+                "paragraphs": [n for n in (x.get("paragraphs") or []) if isinstance(n, int)],
+                "kind": x.get("kind") if x.get("kind") in ("leitmotif", "tekrar") else "tekrar",
+                "reason": (x.get("reason") or "")[:300],
+                "fix": (x.get("fix") or "")[:300],
+            }
+            for x in (analiz.get("repeats") or []) if isinstance(x, dict)
+        ],
+        "unused_senses": [str(x)[:40] for x in (analiz.get("unused_senses") or [])][:5],
+        "summary": (analiz.get("summary") or "")[:400],
     }

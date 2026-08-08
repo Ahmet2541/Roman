@@ -190,3 +190,25 @@ def test_paragraph_reference_code(client, headers):
     # Olmayan paragraf: uyarı, uydurma yok
     yok = build_referenced_entries_layer(db, uid, novel_id, "1-1P99 hakkında ne dersin?")
     assert "99. paragraf yok" in yok and "4 paragraf var" in yok
+
+
+def test_forward_layer_shows_next_chapter(client, headers):
+    """İLERİ BAKIŞ: sonraki bölümün özeti/planı bağlama girer - "bu sahne
+    oraya nasıl bağlanıyor" sorusu ancak böyle sorulabilir. Özet zinciri
+    hep geriye bakıyordu."""
+    from app.qwen_client import build_forward_layer
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+
+    ch1 = client.post("/chapters/", json={"number": 1, "kind": "chapter", "title": "Şimdi"}, headers=headers).json()
+    ch2 = client.post("/chapters/", json={"number": 2, "kind": "chapter", "title": "Sonra"}, headers=headers).json()
+    client.put(f"/chapters/{ch2['id']}", json={"summary": "OLAY: Başkan çöker."}, headers=headers)
+
+    db = sessionmaker(bind=engine)()
+    novel_id = int(headers["X-Novel-Id"])
+    ileri = build_forward_layer(db, novel_id, 1)
+    assert "İLERİ BAKIŞ" in ileri
+    assert "Başkan çöker" in ileri
+    assert "ÖNDEN VERME" in ileri          # sızdırma uyarısı
+    # Son bölümde ileri bakış YOK (boşuna maliyet ödenmez)
+    assert build_forward_layer(db, novel_id, 2) == ""

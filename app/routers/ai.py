@@ -7,7 +7,7 @@ from ..auth import get_current_user
 from .. import schemas, models
 from ..qwen_client import (
     build_context, ask_qwen, full_scan, chat_with_qwen, reader_test_chapter,
-    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite,
+    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite, retest_paragraph, motif_map,
 )
 from ..entities import ENTITY_MODELS
 from ..sections import SECTIONS_BY_ENTITY_TYPE, _tr_lower
@@ -377,3 +377,41 @@ def verify_rewrite(
     except Exception as exc:
         raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
     return schemas.VerifyRewriteResponse(**result)
+
+
+@router.post("/retest-paragraph", response_model=schemas.RetestResponse)
+def retest_paragraph_endpoint(
+    payload: schemas.RetestRequest,
+    db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=20, window_seconds=60, label="yeniden test")),
+    universe_id: int = Depends(get_universe_id),
+):
+    """Düzeltilen paragrafı, giderilmesi istenen BULGULARA karşı sınar:
+    hangisi giderildi, hangisi kısmen, yeni sorun doğdu mu. Kabul kontrolü
+    'detay düştü mü' diye bakar; bu 'klişe kalktı mı' diye bakar."""
+    try:
+        return schemas.RetestResponse(**retest_paragraph(db, payload.old_text, payload.new_text, payload.findings))
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+
+
+@router.post("/motif-map/{chapter_id}", response_model=schemas.MotifMapResponse)
+def motif_map_endpoint(
+    chapter_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=4, window_seconds=120, label="imge haritası")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Bölümün İMGE/MOTİF haritası: tüm paragrafların imgeleri çıkarılır,
+    sonra SADECE liste değerlendirilir - böylece 12. paragrafla 78. paragraf
+    aynı bakışta kıyaslanır (dilimleme sınırı aşılır). Leitmotif (bilinçli,
+    anlam biriktiren tekrar) ile TEKRAR (aynı imge aynı işlevle) ayrılır."""
+    chapter = db.query(models.Chapter).filter(
+        models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id
+    ).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
+    try:
+        return schemas.MotifMapResponse(**motif_map(db, chapter))
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
