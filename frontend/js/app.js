@@ -6675,14 +6675,19 @@ async function renderWorkshopParagraph(idx) {
 
     ${kayitlar.length ? `
       <div style="margin-top:12px;">
-        <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">BULGULAR</div>
-        ${kayitlar.map(k => `
-          <div style="font-size:12.5px;margin-top:6px;border-left:3px solid ${k.kaynak === 'editor' ? 'var(--gold)' : 'var(--danger)'};padding-left:8px;">
-            ${k.kaynak === 'editor' ? '📊' : '🎯'} <b>${escapeHtml(k.baslik)}</b>
-            ${k.alinti ? `<div style="font-style:italic;color:var(--text-muted);">"${escapeHtml(k.alinti)}"</div>` : ''}
-            <div style="color:var(--text-muted);">${escapeHtml(k.sorun || '')}</div>
-            ${k.oneri ? `<div>→ ${escapeHtml(k.oneri)}</div>` : ''}
-          </div>`).join('')}
+        <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">BULGULAR (${kayitlar.length})</div>
+        ${kayitlar.map((k, ki) => `
+          <details class="finding-detail" ${ki === 0 ? 'open' : ''} style="margin-top:6px;border-left:3px solid ${k.kaynak === 'editor' ? 'var(--gold)' : 'var(--danger)'};padding-left:8px;">
+            <summary style="cursor:pointer;font-size:12.5px;list-style:none;">
+              ${k.kaynak === 'editor' ? '📊' : '🎯'} <b>${escapeHtml(k.baslik)}</b>
+              <span style="color:var(--text-muted);font-weight:400;">· ${escapeHtml(truncate((k.sorun || '').replace(/\s+/g, ' '), 40))}</span>
+            </summary>
+            <div style="font-size:12.5px;padding-top:4px;">
+              ${k.alinti ? `<div style="font-style:italic;color:var(--text-muted);">"${escapeHtml(k.alinti)}"</div>` : ''}
+              <div style="color:var(--text-muted);">${escapeHtml(k.sorun || '')}</div>
+              ${k.oneri ? `<div style="margin-top:2px;">→ ${escapeHtml(k.oneri)}</div>` : ''}
+            </div>
+          </details>`).join('')}
       </div>` : ''}
 
     <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap;">
@@ -6757,31 +6762,36 @@ async function workshopFix(chapter, num, issue) {
     + 'BETİMLEME MATEMATİĞİ: geniş plan (en fazla iki nitelik) → orta plan → MİKRO DETAY (anlamı taşısın) '
     + '→ bir duyu (görme dışında) → anlamı SÖYLEME. Bütçe: en fazla bir benzetme, "sanki/gibi/adeta" ile '
     + 'açıklama yok, yargı sıfatı yok.\n'
-    + 'ÜÇ FARKLI YAKLAŞIM üret (varyasyon değil).\n'
-    + 'Yanıtın SADECE şu JSON olsun: {"options":[{"text":"...","approach":"4 kelime"}]}';
+    + 'ÜÇ FARKLI YAKLAŞIM üret (aynı fikrin varyasyonu DEĞİL): biri mikro detaya, '
+    + 'biri sese/sessizliğe, biri harekete yaslansın.\n'
+    + 'BİÇİM (kesin): her seçeneği şöyle yaz, arada başka hiçbir şey olmasın:\n'
+    + '###YAKLAŞIM: mikro detay\n<paragrafın tam yeni hâli>\n'
+    + '###YAKLAŞIM: ses ve sessizlik\n<paragrafın tam yeni hâli>\n'
+    + '###YAKLAŞIM: hareket\n<paragrafın tam yeni hâli>\n'
+    + 'Açıklama, başlık, tırnak, madde işareti EKLEME. Her seçenek paragrafın '
+    + 'TAMAMI olsun - kısmi cümle değil.';
   try {
     const result = await api.post('/ai/assist', {
       chapter_number: chapter.number, instruction,
       selected_entities: [], existing_text: para ? para.text : '',
     });
-    let secenekler = [];
-    const ham = (result.generated_text || '').trim();
-    try {
-      const temiz = ham.replace(/^```(?:json)?|```$/gm, '').trim();
-      const veri = JSON.parse(temiz.slice(temiz.indexOf('{'), temiz.lastIndexOf('}') + 1));
-      secenekler = (veri.options || []).filter(o => (o.text || '').trim());
-    } catch (e) { /* düz metin */ }
-    if (!secenekler.length) secenekler = [{ text: ham, approach: '' }];
+    const secenekler = parseOptionBlocks(result.generated_text || '');
 
     // KAYDIRMALI KARTLAR: mobilde üç seçeneği alt alta okumak yorucu;
     // parmakla sağa/sola geçilen tek kart daha doğal. Noktalar hangi
     // seçenekte olduğunu gösterir, klavyeyle de gezilebilir.
+    if (!secenekler.length) {
+      box.innerHTML = '<div class="error-text" style="font-size:12.5px;">AI boş yanıt döndürdü. Tekrar dene ya da "💬 Konuş" ile yönlendir.</div>';
+      return;
+    }
+    const eskiMetin = para ? para.text : '';
     box.innerHTML = `
       <div class="option-swiper" tabindex="0">
         ${secenekler.map((o, i) => `
           <div class="option-card" data-idx="${i}">
             <div style="font-size:10.5px;color:var(--gold);font-weight:600;">SEÇENEK ${i + 1}/${secenekler.length}${o.approach ? ' · ' + escapeHtml(o.approach) : ''}</div>
-            <div style="white-space:pre-wrap;font-size:13px;margin-top:4px;">${escapeHtml(o.text)}</div>
+            <div style="white-space:pre-wrap;font-size:13px;margin-top:4px;line-height:1.65;">${highlightDiff(eskiMetin, o.text)}</div>
+            <div style="font-size:10.5px;color:var(--text-muted);margin-top:4px;">Altın = değişen, siyah = korunan</div>
             <button class="btn btn-sm btn-primary ws-apply" data-idx="${i}" style="margin-top:8px;width:100%;font-size:11.5px;">Bunu uygula</button>
           </div>`).join('')}
       </div>
@@ -6937,4 +6947,57 @@ function wireOptionSwiper(box) {
     if (e.key === 'ArrowRight') { e.preventDefault(); swiper.scrollBy({ left: kartGenislik, behavior: 'smooth' }); }
     if (e.key === 'ArrowLeft') { e.preventDefault(); swiper.scrollBy({ left: -kartGenislik, behavior: 'smooth' }); }
   });
+}
+
+// ---------------------------------------------------------------------------
+// SEÇENEK AYRIŞTIRMA: "###YAKLAŞIM: x" satırlarıyla ayrılmış blokları okur.
+// Neden JSON değil: /ai/assist düz metin üretmeye ayarlı; JSON istendiğinde
+// model kimi zaman hiç metin döndürmüyor ve kart BOŞ görünüyordu. Ayraç,
+// metin modelleri için çok daha dayanıklı - bozulsa bile ham metin kalır.
+// ---------------------------------------------------------------------------
+function parseOptionBlocks(raw) {
+  const metin = (raw || '').trim();
+  if (!metin) return [];
+  const parcalar = metin.split(/^###\s*YAKLAŞIM\s*:?\s*/im).filter(x => x.trim());
+  if (parcalar.length <= 1) {
+    // Ayraç yok - tek seçenek olarak ele al (JSON geldiyse temizle)
+    const temiz = metin.replace(/^```(?:json)?|```$/gm, '').trim();
+    try {
+      const veri = JSON.parse(temiz.slice(temiz.indexOf('{'), temiz.lastIndexOf('}') + 1));
+      const opts = (veri.options || []).filter(o => (o.text || '').trim());
+      if (opts.length) return opts.map(o => ({ text: o.text.trim(), approach: (o.approach || '').trim() }));
+    } catch (e) { /* düz metin */ }
+    return [{ text: temiz, approach: '' }];
+  }
+  return parcalar.map(p => {
+    const satirlar = p.split('\n');
+    const approach = satirlar[0].trim().slice(0, 40);
+    const text = satirlar.slice(1).join('\n').trim();
+    return { text, approach };
+  }).filter(o => o.text);
+}
+
+// ---------------------------------------------------------------------------
+// FARK VURGULAMA: önerinin DEĞİŞEN kısımları altın, korunan kısımlar siyah.
+// Kelime bazlı LCS - "neresi değişmiş" sorusunu okumadan görebilmek için.
+// ---------------------------------------------------------------------------
+function highlightDiff(eski, yeni) {
+  const a = (eski || '').split(/(\s+)/);
+  const b = (yeni || '').split(/(\s+)/);
+  // LCS tablosu (kelime sayısı makul: paragraf ölçeği)
+  const n = a.length, m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  let i = 0, j = 0, out = '';
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { out += escapeHtml(b[j]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; }
+    else { out += `<span class="diff-new">${escapeHtml(b[j])}</span>`; j++; }
+  }
+  while (j < m) { out += `<span class="diff-new">${escapeHtml(b[j])}</span>`; j++; }
+  return out;
 }
