@@ -6376,9 +6376,13 @@ function loadParaState(chapterId) {
 // çıkarsa ya da kullanıcı isterse çalışır.
 function quickFactCheck(oldText, newText) {
   const sayilar = (t) => new Set((t || '').match(/\b\d+(?:[.,]\d+)?\b/g) || []);
-  const isimler = (t) => new Set((t || '').match(/\b[A-ZÇĞİÖŞÜ][a-zçğıöşü]{2,}\b/g) || []);
+  // İsim kontrolü KANON listesinden: "büyük harfle başlayan her kelime özel
+  // isimdir" varsayımı cümle başı kelimeleri ("Ama", "Sonra") isim sanıyor,
+  // cümle yapısı değişince haksız "isim düştü" uyarısı üretiyordu.
+  const canon = window.__canonNames || [];
+  const gecen = (t) => canon.filter(ad => (t || '').includes(ad));
   const kayipSayi = [...sayilar(oldText)].filter(x => !sayilar(newText).has(x));
-  const kayipIsim = [...isimler(oldText)].filter(x => !isimler(newText).has(x));
+  const kayipIsim = gecen(oldText).filter(ad => !newText.includes(ad));
   const bulgular = [];
   if (kayipSayi.length) bulgular.push(`Somut sayı düştü: ${kayipSayi.join(', ')}`);
   if (kayipIsim.length) bulgular.push(`Özel isim düştü: ${kayipIsim.join(', ')}`);
@@ -6487,6 +6491,7 @@ const workshopState = { chapter: null, findings: {}, order: [], idx: 0, literary
 
 function openChapterWorkshop(chapter) {
   loadBannedPatterns();          // üslup taramasındaki yasak kalıplar (kaçınma listesi)
+  loadCanonNames();              // korunması gereken kanonik adlar
   workshopState.chapter = chapter;
   workshopState.findings = {};
   workshopState.order = [];
@@ -6846,14 +6851,38 @@ function buildParagraphDirectives(num, kayitlar, paraText) {
   const satirlar = [];
   if (purpose) satirlar.push(`İŞLEV (öncelikli ölçüt): ${purpose}`);
   if (degistir.length) satirlar.push('DEĞİŞTİR (testlerden çıkan bulgular):\n- ' + degistir.join('\n- '));
-  if (koru.length) satirlar.push('KORU (metinden düşmemeli): ' + koru.join(', '));
+  if (koru.length) satirlar.push(
+    'KORU - bu veriler yeni metinde AYNEN geçmeli (kontrol bunları arar): ' + koru.join(', '));
   if (kacin.length) satirlar.push('KAÇIN (aşırı kullanılmış kalıplar): ' + kacin.join(', '));
   satirlar.push('DAİMA: eylem sırasını bozma, olay akışını ve zamanı koru, '
     + '"sanki/gibi/adeta" ile açıklama yapma, yargı sıfatı kullanma.');
+  // ÜRETİM, DENETİMİ ÖNCEDEN BİLSİN: aynı ölçütlerle üretilmeyen metin
+  // kontrolde takılıyor ve döngü kuruluyordu. Kontrol listesi burada.
+  satirlar.push('YAZDIKTAN SONRA KENDİ METNİNİ ŞU KONTROLDEN GEÇİR (kontrol bunlara bakacak): '
+    + '(1) yukarıdaki KORU listesindeki her veri metinde var mı, '
+    + '(2) paragrafın işlevi yerine geliyor mu, '
+    + '(3) tamamlanmış bir eylemi yeniden başlattın mı, '
+    + '(4) komşu paragraflarda geçen bir imgeyi tekrarladın mı. '
+    + 'Bir madde bile ihlal ediliyorsa o seçeneği DÜZELT, öyle yaz.');
   return satirlar.join('\n');
 }
 
 // Üslup taramasındaki yasak kalıpları bir kez yükle (kaçınma listesi)
+// Kayıtlı karakter/mekan/nesne adları: kontrolün "korunmalı" ölçütü.
+async function loadCanonNames() {
+  try {
+    const [k, m, n] = await Promise.all([
+      api.get('/characters/'), api.get('/places/'), api.get('/objects/'),
+    ]);
+    const isimler = [];
+    [k, m, n].forEach(liste => (liste || []).forEach(x => {
+      if (x.name) isimler.push(x.name);
+      (x.aliases || []).forEach(a => a && isimler.push(a));
+    }));
+    window.__canonNames = [...new Set(isimler)].filter(a => a.length > 2);
+  } catch (e) { window.__canonNames = []; }
+}
+
 async function loadBannedPatterns() {
   try {
     const rapor = await api.get('/style/report');

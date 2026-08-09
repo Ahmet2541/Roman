@@ -585,6 +585,8 @@ def test_structure_scan_chain_analysis(client, headers):
 def test_verify_rewrite_catches_lost_facts(client, headers):
     """Kabul kontrolü: somut detay kaybı DETERMİNİSTİK yakalanır (AI'ya
     sorulmaz) ve AI 'kabul' dese bile karar 'duzelt'e çekilir."""
+    # İsim kontrolü artık KANON listesinden: kayıtlı bir karakter olmalı
+    client.post("/characters/", json={"name": "Vicdan"}, headers=headers)
     with patch("app.qwen_client.get_client") as mc:
         mc.return_value.chat.completions.create.return_value = _fake_qwen(
             {"verdict": "kabul", "issues": [], "note": "Akış korunmuş."})
@@ -597,7 +599,24 @@ def test_verify_rewrite_catches_lost_facts(client, headers):
     assert d["verdict"] == "duzelt"                      # AI kabul dedi ama sert bulgu var
     metin = " ".join(d["hard_issues"])
     assert "47" in metin                                  # düşen sayı yakalandı
-    assert "Vicdan" in metin                              # düşen özel isim yakalandı
+    assert "Vicdan" in metin                              # düşen KANONİK isim yakalandı
+
+
+def test_verify_rewrite_ignores_sentence_start_words(client, headers):
+    """KRİTİK REGRESYON: cümle başı büyük harfli kelimeler ("Ama", "Sonra")
+    özel isim SANILMAMALI. Eskiden cümle yapısı değişince "isim düştü"
+    diye haksız uyarı üretiliyor ve derin kontrol neredeyse her öneriyi
+    reddediyordu - "3 öneri hep hatalı çıkıyor" şikayetinin sebebi buydu."""
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen(
+            {"verdict": "kabul", "issues": [], "note": "İyileşmiş."})
+        r = client.post("/ai/verify-rewrite", json={
+            "old_text": "Ama çatlağın dibinde bir titreme vardı. Sonra sustu.",
+            "new_text": "Çatlağın dibinde bir titreme vardı; ardından sustu.",
+        }, headers=headers)
+    d = r.json()
+    assert d["hard_issues"] == [], d["hard_issues"]      # haksız uyarı YOK
+    assert d["verdict"] == "kabul"
 
 
 def test_verify_rewrite_passes_clean_rewrite(client, headers):

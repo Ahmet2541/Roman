@@ -3175,13 +3175,36 @@ def structure_scan(db: Session, novel_id: int, max_chars: int = 24000) -> dict:
 # ---------------------------------------------------------------------------
 
 NUMBER_TOKEN_RE = re.compile(r"\b\d+(?:[.,]\d+)?\b")
-PROPER_NOUN_RE = re.compile(r"\b[A-ZÇĞİÖŞÜ][a-zçğıöşü]{2,}\b")
 
 
-def _extract_facts(text: str) -> tuple[set, set]:
-    """Metindeki sayılar ve özel isim adayları (cümle başı hariç değil -
-    kaba ama işe yarar: kaybolan detayı yakalamak için yeterli)."""
-    return set(NUMBER_TOKEN_RE.findall(text or "")), set(PROPER_NOUN_RE.findall(text or ""))
+def _canonical_names(db: Session, universe_id: int) -> set:
+    """Evrende KAYITLI karakter/mekan/nesne adları ve takma adları.
+
+    Neden gerekli: eskiden "büyük harfle başlayan her kelime özel isimdir"
+    varsayımıyla regex kullanılıyordu ve CÜMLE BAŞI kelimeler ("Ama",
+    "Sonra", "Küçük") özel isim sanılıyordu. Cümle yapısı değişince
+    "özel isim düştü" diye HAKSIZ uyarı üretiliyor, derin kontrol
+    neredeyse her öneriyi reddediyordu. Artık ölçüt kanon: sadece
+    gerçekten kayıtlı adlar korunmalı sayılır."""
+    isimler = set()
+    for model in (models.Character, models.Place, models.Object):
+        for kayit in db.query(model).filter(model.universe_id == universe_id).all():
+            if (kayit.name or "").strip():
+                isimler.add(kayit.name.strip())
+            for takma in (getattr(kayit, "aliases", None) or []):
+                if (takma or "").strip():
+                    isimler.add(takma.strip())
+    return isimler
+
+
+def _extract_facts(text: str, canon: set | None = None) -> tuple[set, set]:
+    """(sayılar, metinde geçen KANONİK isimler). Kanon verilmezse isim
+    kontrolü yapılmaz - uydurma uyarı üretmektense hiç üretmemek yeğdir."""
+    sayilar = set(NUMBER_TOKEN_RE.findall(text or ""))
+    if not canon:
+        return sayilar, set()
+    metin = text or ""
+    return sayilar, {ad for ad in canon if ad and ad in metin}
 
 
 VERIFY_PROMPT = """Sen titiz bir redaktörsün. Sana bir paragrafın ESKİ ve
@@ -3194,9 +3217,14 @@ Kontrol et:
 3. SÜREKLİLİK: Önceki/sonraki paragraflarla çelişki ya da gereksiz tekrar var mı?
 4. EYLEM SIRASI: Tamamlanmış bir eylem yeniden başlatılmış mı?
 
+ÖNEMLİ: Cümle başındaki büyük harfli kelimeler ÖZEL İSİM DEĞİLDİR ("Ama",
+"Sonra", "Küçük"). Cümle yapısının değişmesi kayıp sayılmaz. Üslup tercihi
+farkını sorun olarak yazma. Metin daha iyi olmuşsa "kabul" de.
+
 Yanıtın SADECE şu JSON olsun:
 {"verdict": "kabul|duzelt|red", "issues": ["..."], "note": "tek cümle gerekçe"}
-Sorun yoksa issues boş liste, verdict "kabul" olsun. Uydurma sorun çıkarma."""
+Sorun yoksa issues boş liste, verdict "kabul" olsun. Uydurma sorun çıkarma -
+gerçek bir kusur göremiyorsan "kabul" demek DOĞRU cevaptır."""
 
 
 def verify_paragraph_rewrite(db: Session, universe_id: int, old_text: str, new_text: str,
@@ -3204,9 +3232,10 @@ def verify_paragraph_rewrite(db: Session, universe_id: int, old_text: str, new_t
     """Yeni versiyonu denetler. Deterministik bulgular + AI kararı döner."""
     hard_issues = []
 
-    # 1) Somut detay kaybı (deterministik)
-    eski_sayilar, eski_isimler = _extract_facts(old_text)
-    yeni_sayilar, yeni_isimler = _extract_facts(new_text)
+    # 1) Somut detay kaybı (deterministik) - isimler KANON listesinden
+    canon = _canonical_names(db, universe_id)
+    eski_sayilar, eski_isimler = _extract_facts(old_text, canon)
+    yeni_sayilar, yeni_isimler = _extract_facts(new_text, canon)
     kayip_sayi = sorted(eski_sayilar - yeni_sayilar)
     kayip_isim = sorted(eski_isimler - yeni_isimler)
     if kayip_sayi:
@@ -3234,8 +3263,10 @@ def verify_paragraph_rewrite(db: Session, universe_id: int, old_text: str, new_t
                 hard_issues.append(f"Aşırı kullanılan kalıp yeni metinde {hits} kez geçiyor: {p['name']}")
 
     # 3) AI kararı (işlev, anlam, süreklilik, eylem sırası)
+    korunacak = sorted(eski_isimler | eski_sayilar)
     user = (
         (f"PARAGRAFIN İŞLEVİ: {purpose}\n\n" if purpose.strip() else "")
+        + (f"KORUNMASI GEREKEN VERİLER (yalnızca bunlar): {', '.join(korunacak)}\n\n" if korunacak else "")
         + f"ESKİ HÂLİ:\n{old_text}\n\nYENİ HÂLİ:\n{new_text}\n"
         + (f"\nKOMŞULAR:\n{neighbors}" if neighbors else "")
     )
