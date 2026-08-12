@@ -363,6 +363,53 @@ def build_style_layer(db: Session, universe_id: int, max_samples: int = 5) -> st
     return "\n".join(lines)
 
 
+def build_knowledge_layer(db: Session, universe_id: int, chapter_number: int | None) -> str:
+    """BİLGİ DURUMU: bu bölüm yazılırken OKUR ve KARAKTERLER neyi biliyor?
+
+    Gerilim çoğu zaman olaydan değil, bu üç eksenin farkından doğar. Bilgi
+    Haritası menüde duruyordu ama hiçbir prompta girmiyordu - yani "okur
+    bunu henüz bilmiyor" bilgisi denetime hiç ulaşmıyordu. Bu katman
+    sızdırma (erken ifşa) ve dramatik ironi kayıplarını görünür kılar.
+    """
+    facts = db.query(models.KnowledgeFact).filter(
+        models.KnowledgeFact.universe_id == universe_id).all()
+    if not facts:
+        return ""
+    n = chapter_number or 0
+    gizli, sezdirilen, bilinen, sizdirma = [], [], [], []
+    for f in facts:
+        bilgi = (f.information or "").strip()
+        if not bilgi:
+            continue
+        ifsa = f.reveal_chapter
+        kim = f.known_by_characters or []
+        # Bu bölümde ifşa edilecek mi, yoksa daha sonra mı?
+        if ifsa and n and ifsa > n:
+            sizdirma.append(f"{bilgi} (ifşası Bölüm {ifsa} - BURADA AÇIKLAMA)")
+        elif f.reader_state == "hayir":
+            gizli.append(bilgi)
+        elif f.reader_state == "sezdirildi":
+            sezdirilen.append(bilgi)
+        else:
+            bilinen.append(bilgi)
+        # Dramatik ironi: okur bilir, karakterler bilmez
+        if f.reader_state == "evet" and not kim:
+            bilinen[-1:] = [f"{bilgi} [DRAMATİK İRONİ: okur bilir, karakterler bilmez - "
+                            f"karakterlerin davranışı bu bilgisizlikle TUTARLI olmalı]"]
+
+    lines = ["=== BİLGİ DURUMU (okur ne biliyor?) ==="]
+    if sizdirma:
+        lines.append("SIZDIRMA YASAĞI - bunlar SONRAKİ bölümlerde ifşa edilecek, burada "
+                     "açıkça yazma, ima bile etme:\n- " + "\n- ".join(sizdirma))
+    if gizli:
+        lines.append("OKUR HENÜZ BİLMİYOR (gizemi koru):\n- " + "\n- ".join(gizli))
+    if sezdirilen:
+        lines.append("OKURA SEZDİRİLDİ (biliniyormuş gibi yazma, hâlâ örtük):\n- " + "\n- ".join(sezdirilen))
+    if bilinen:
+        lines.append("OKUR BİLİYOR (tekrar açıklama, biliniyor varsay):\n- " + "\n- ".join(bilinen))
+    return "\n\n".join(lines) if len(lines) > 1 else ""
+
+
 def build_forward_layer(db: Session, novel_id: int, chapter_number: int | None) -> str:
     """İLERİ BAKIŞ: SONRAKİ bölümün planı ve (varsa) özeti. Özet zinciri
     hep GERİYE bakıyordu ("önceki bölümden ne devraldık"); oysa bir sahne
@@ -502,6 +549,8 @@ def build_context(
     matrix_map = build_matrix_map_layer(db, novel_id)
     # İleri bakış: sonraki bölümün planı/özeti - "bu sahne oraya nasıl bağlanıyor"
     forward = build_forward_layer(db, novel_id, chapter_number)
+    # Bilgi durumu: okur ne biliyor, ne sızdırılmamalı (dramatik ironi koruması)
+    knowledge = build_knowledge_layer(db, universe_id, chapter_number)
     # Kısayol kodlarıyla ("1BLM", "1-2KSM") anılan girdilerin İÇERİĞİ
     referenced = build_referenced_entries_layer(db, universe_id, novel_id, instruction_text)
     # Sohbet modunda çalışılan bölümün METNİ de gider (include_chapter_text);
@@ -523,7 +572,7 @@ def build_context(
     style_warnings = build_style_warning_layer(db, universe_id)
     plan = build_plan_layer(db, novel_id, chapter_number, instruction_text=instruction_text)
     dynamic = build_dynamic_layer(db, universe_id, selected_entities, instruction_text=instruction_text, include_hidden=include_hidden)
-    return "\n\n".join(part for part in [fixed, index, outline, matrix_map, referenced, style, style_warnings, plan, forward, chapter_text, dynamic] if part)
+    return "\n\n".join(part for part in [fixed, index, outline, matrix_map, referenced, style, style_warnings, plan, forward, knowledge, chapter_text, dynamic] if part)
 
 
 # ---------------------------------------------------------------------------
@@ -3208,14 +3257,20 @@ def _extract_facts(text: str, canon: set | None = None) -> tuple[set, set]:
 
 
 VERIFY_PROMPT = """Sen titiz bir redaktörsün. Sana bir paragrafın ESKİ ve
-YENİ hâli, (varsa) paragrafın İŞLEVİ ve komşu paragraflar verilecek.
-Yeni hâli KABUL EDİLEBİLİR mi, karar ver.
+YENİ hâli, (varsa) paragrafın İŞLEVİ, ÖNERİNİN AMACI ve komşu paragraflar
+verilecek. Yeni hâli KABUL EDİLEBİLİR mi, karar ver.
 
-Kontrol et:
+ÖNCE ŞUNU SOR: Önerinin HEDEFİ gerçekleşti mi? "Metin değişmiş" yetmez -
+önerinin gidermek istediği sorun gerçekten giderildi mi? Amaç verilmemişse
+bu maddeyi atla.
+
+Sonra kontrol et:
 1. İŞLEV: Paragrafın işi tanımlıysa yeni hâli bunu yerine getiriyor mu?
 2. ANLAM: Olay akışı, zaman ve mekân korunmuş mu? Yeni bir olay uydurulmuş mu?
 3. SÜREKLİLİK: Önceki/sonraki paragraflarla çelişki ya da gereksiz tekrar var mı?
 4. EYLEM SIRASI: Tamamlanmış bir eylem yeniden başlatılmış mı?
+5. KANON: Metinde/kanonda olmayan karakter geçmişi, olay, nesne, ilişki ya da
+   motivasyon eklenmiş mi? Eklendiyse bu bir HATADIR.
 
 ÖNEMLİ: Cümle başındaki büyük harfli kelimeler ÖZEL İSİM DEĞİLDİR ("Ama",
 "Sonra", "Küçük"). Cümle yapısının değişmesi kayıp sayılmaz. Üslup tercihi
@@ -3228,7 +3283,8 @@ gerçek bir kusur göremiyorsan "kabul" demek DOĞRU cevaptır."""
 
 
 def verify_paragraph_rewrite(db: Session, universe_id: int, old_text: str, new_text: str,
-                             purpose: str = "", neighbors: str = "") -> dict:
+                             purpose: str = "", neighbors: str = "",
+                             proposal_goal: str = "", expected_effect: str = "") -> dict:
     """Yeni versiyonu denetler. Deterministik bulgular + AI kararı döner."""
     hard_issues = []
 
@@ -3265,7 +3321,10 @@ def verify_paragraph_rewrite(db: Session, universe_id: int, old_text: str, new_t
     # 3) AI kararı (işlev, anlam, süreklilik, eylem sırası)
     korunacak = sorted(eski_isimler | eski_sayilar)
     user = (
-        (f"PARAGRAFIN İŞLEVİ: {purpose}\n\n" if purpose.strip() else "")
+        (f"ÖNERİNİN AMACI: {proposal_goal}\n" if proposal_goal.strip() else "")
+        + (f"BEKLENEN ETKİ: {expected_effect}\n" if expected_effect.strip() else "")
+        + ("\n" if (proposal_goal.strip() or expected_effect.strip()) else "")
+        + (f"PARAGRAFIN İŞLEVİ: {purpose}\n\n" if purpose.strip() else "")
         + (f"KORUNMASI GEREKEN VERİLER (yalnızca bunlar): {', '.join(korunacak)}\n\n" if korunacak else "")
         + f"ESKİ HÂLİ:\n{old_text}\n\nYENİ HÂLİ:\n{new_text}\n"
         + (f"\nKOMŞULAR:\n{neighbors}" if neighbors else "")
@@ -3299,6 +3358,10 @@ def verify_paragraph_rewrite(db: Session, universe_id: int, old_text: str, new_t
 RETEST_PROMPT = """Sen titiz bir editörsün. Bir paragraf, aşağıdaki BULGULARI
 gidermek için yeniden yazıldı. Her bulgu için tek tek karar ver: giderildi mi?
 
+ÖLÇÜT "metin farklı olmuş" DEĞİLDİR. Ölçüt şudur: önerinin HEDEFLEDİĞİ etki
+gerçekleşti mi? Örneğin hedef "alt metni güçlendirmek" idiyse, yeni metinde
+söylenmeyen bir katman oluşmuş mu - yoksa sadece kelimeler mi değişmiş?
+
 Kurallar:
 - "giderildi" sadece sorun GERÇEKTEN kalktıysa. Kısmi ise "kismen".
 - Yeni bir sorun doğduysa (yeni klişe, uzama, ton kayması) new_issues'a yaz.
@@ -3309,12 +3372,17 @@ Yanıtın SADECE şu JSON olsun:
  "new_issues": ["..."], "verdict": "iyilesti|ayni|kotulesti"}"""
 
 
-def retest_paragraph(db: Session, old_text: str, new_text: str, findings: list) -> dict:
+def retest_paragraph(db: Session, old_text: str, new_text: str, findings: list,
+                    proposal_goal: str = "", expected_effect: str = "") -> dict:
     """Düzeltilmiş paragrafı, giderilmesi istenen bulgulara karşı sınar."""
     if not findings:
         return {"results": [], "new_issues": [], "verdict": "iyilesti"}
     liste = "\n".join(f"- {f}" for f in findings[:8])
-    user = f"BULGULAR:\n{liste}\n\nESKİ HÂLİ:\n{old_text}\n\nYENİ HÂLİ:\n{new_text}"
+    user = (
+        (f"UYGULANAN ÖNERİ: {proposal_goal}\n" if proposal_goal.strip() else "")
+        + (f"BEKLENEN ETKİ: {expected_effect}\n" if expected_effect.strip() else "")
+        + f"\nBULGULAR:\n{liste}\n\nESKİ HÂLİ:\n{old_text}\n\nYENİ HÂLİ:\n{new_text}"
+    )
     client = get_client()
     response = client.chat.completions.create(
         model=settings.qwen_model,
@@ -3345,33 +3413,51 @@ def retest_paragraph(db: Session, old_text: str, new_text: str, findings: list) 
 # ---------------------------------------------------------------------------
 
 MOTIF_EXTRACT_PROMPT = """Sen bir edebiyat analistisin. Sana bir bölümün
-paragrafları verilecek. Her paragraf için içindeki İMGELERİ ve MOTİFLERİ
-çıkar - kelimeleri değil, ZİHİNDE OLUŞAN GÖRÜNTÜYÜ ve taşıdığı anlamı.
+paragrafları verilecek. Her paragraftaki İMGELERİ çıkar.
 
-Örnek: "yosun tutmuş yeşil su" -> imge: "durgun/çürüyen su", motif: "zamanın
-durması". "kararmış cam" -> imge: "görüşü kesen yüzey", motif: "gerçeğin
-gizlenmesi".
+İMGE ile MOTİFİ BİRBİRİNDEN AYIR - bu kural kritiktir:
+- İMGE: metnin GERÇEKTEN oluşturduğu duyusal/görsel unsur. Metinde vardır.
+- MOTİF: aynı unsurun roman içinde tekrarlanarak anlam biriktirdiği
+  KANITLANABİLİYORSA kullanılır.
+
+Tek bir paragraftaki nesneye anlam ATAMA. "Kararmış cam → gerçeğin
+gizlenmesi" gibi yorumlar senin kültürel bilginden gelir; romanın gerçek
+anlamı YAZARIN METNİNDEN çıkmalıdır.
+
+Her imge için motif_status ver:
+- "ilk_gorunum": bu unsur ilk kez geçiyor. motif alanını BOŞ bırak.
+- "tekrar_adayi": daha önce de geçmiş ama anlam bağlantısı metinden
+  kanıtlanamıyor. motif alanını BOŞ bırak.
+- "kanitli": tekrarlanmış VE metnin kendisi anlam bağını kuruyor
+  (karakterin tepkisi, tekrarlanan bağlam, açık atıf). Ancak bu durumda
+  motif yaz ve evidence alanında metinden kanıt göster.
 
 Kurallar:
 - Paragraf başına en fazla 3 imge; önemsiz detayları atla.
 - Aynı imgeyi farklı paragraflarda AYNI adla etiketle (tekrar görünür olsun).
-- motif alanı kısa olsun (2-4 kelime).
+- Emin değilsen "ilk_gorunum" de. Uydurma motif çıkarma.
 
 Yanıtın SADECE şu JSON olsun:
-{"items": [{"p": 3, "image": "durgun/çürüyen su", "motif": "zamanın durması"}]}"""
+{"items": [{"p": 3, "image": "durgun/çürüyen su", "motif_status": "ilk_gorunum",
+  "motif": "", "evidence": ""}]}"""
 
 MOTIF_ANALYZE_PROMPT = """Sen deneyimli bir editörsün. Sana bir bölümdeki
-imge/motif listesi PARAGRAF NUMARALARIYLA verilecek. Tekrarları değerlendir.
+imge listesi PARAGRAF NUMARALARIYLA verilecek. Tekrarları değerlendir.
 
-Ayrım kritik:
-- LEITMOTIF: bilinçli, anlam biriktiren tekrar (iyi) - her geçişte yeni bir
-  katman ekliyorsa.
-- TEKRAR: aynı imge aynı işlevle yeniden kullanılmış (kötü) - okur "bunu
+Üç sınıf var - "belirsiz" gerçek ve GEÇERLİ bir cevaptır:
+- "leitmotif": bilinçli, anlam biriktiren tekrar (iyi). Her geçişte yeni bir
+  katman ekliyorsa. Bunu ancak metinsel kanıt varsa söyle.
+- "tekrar": aynı imge AYNI işlevle yeniden kullanılmış (kötü) - okur "bunu
   zaten okudum" der.
+- "belirsiz": önceki bölümlerdeki kullanımlar görülmeden bilinçli mi tesadüf
+  mü ayırt edilemiyor. EMİN DEĞİLSEN BUNU SEÇ.
+
+Önceki analizleri doğru kabul ETME - onlar hipotezdir; metin kanıtıyla
+desteklenmiyorsa reddet. confidence alanında ne kadar emin olduğunu yaz.
 
 Yanıtın SADECE şu JSON olsun:
-{"repeats": [{"image": "...", "paragraphs": [3,17,42], "kind": "leitmotif|tekrar",
-  "reason": "...", "fix": "tekrar ise ne yapılmalı"}],
+{"repeats": [{"image": "...", "paragraphs": [3,17,42], "kind": "leitmotif|tekrar|belirsiz",
+  "confidence": 0.0-1.0, "reason": "...", "fix": "tekrar ise ne yapılmalı"}],
  "unused_senses": ["metinde hiç kullanılmayan duyular"],
  "summary": "iki cümlelik değerlendirme"}"""
 
@@ -3404,10 +3490,20 @@ def motif_map(db: Session, chapter, max_chars: int = 12000) -> dict:
             data = _parse_json_lenient(r.choices[0].message.content) or {}
             for it in data.get("items", []):
                 if isinstance(it, dict) and (it.get("image") or "").strip():
+                    durum = it.get("motif_status")
+                    if durum not in ("ilk_gorunum", "tekrar_adayi", "kanitli"):
+                        durum = "ilk_gorunum"
+                    # Kanıtsız motif anlamı KABUL EDİLMEZ - model kendi
+                    # kültürel bilgisinden anlam atamasın diye sert kural
+                    motif = (it.get("motif") or "").strip()[:60]
+                    if durum != "kanitli" or not (it.get("evidence") or "").strip():
+                        motif = ""
                     items.append({
                         "p": it.get("p") if isinstance(it.get("p"), int) else None,
                         "image": it["image"].strip()[:60],
-                        "motif": (it.get("motif") or "").strip()[:60],
+                        "motif": motif,
+                        "motif_status": durum,
+                        "evidence": (it.get("evidence") or "").strip()[:120],
                     })
         except Exception:
             logger.exception("Motif çıkarımı: dilim başarısız")
@@ -3416,7 +3512,11 @@ def motif_map(db: Session, chapter, max_chars: int = 12000) -> dict:
         return {"items": [], "repeats": [], "unused_senses": [], "summary": "İmge çıkarılamadı."}
 
     # 2) Değerlendirme - SADECE liste gönderilir (ucuz, tüm bölüm bir arada)
-    liste = "\n".join(f"P{i['p']}: {i['image']} ({i['motif']})" for i in items if i["p"])
+    liste = "\n".join(
+        f"P{i['p']}: {i['image']}"
+        + (f" [motif: {i['motif']} - kanıt: {i['evidence']}]" if i.get("motif") else f" [{i.get('motif_status', '')}]")
+        for i in items if i["p"]
+    )
     try:
         r2 = client.chat.completions.create(
             model=settings.qwen_model,
@@ -3434,7 +3534,9 @@ def motif_map(db: Session, chapter, max_chars: int = 12000) -> dict:
             {
                 "image": (x.get("image") or "")[:60],
                 "paragraphs": [n for n in (x.get("paragraphs") or []) if isinstance(n, int)],
-                "kind": x.get("kind") if x.get("kind") in ("leitmotif", "tekrar") else "tekrar",
+                "kind": x.get("kind") if x.get("kind") in ("leitmotif", "tekrar", "belirsiz") else "belirsiz",
+                "confidence": (lambda c: max(0.0, min(1.0, c)))(
+                    float(x.get("confidence", 0.5)) if isinstance(x.get("confidence"), (int, float)) else 0.5),
                 "reason": (x.get("reason") or "")[:300],
                 "fix": (x.get("fix") or "")[:300],
             }

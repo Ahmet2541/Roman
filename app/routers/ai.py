@@ -373,6 +373,7 @@ def verify_rewrite(
         result = verify_paragraph_rewrite(
             db, universe_id, payload.old_text, payload.new_text,
             purpose=payload.purpose, neighbors=payload.neighbors,
+            proposal_goal=payload.proposal_goal, expected_effect=payload.expected_effect,
         )
     except Exception as exc:
         raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
@@ -390,7 +391,10 @@ def retest_paragraph_endpoint(
     hangisi giderildi, hangisi kısmen, yeni sorun doğdu mu. Kabul kontrolü
     'detay düştü mü' diye bakar; bu 'klişe kalktı mı' diye bakar."""
     try:
-        return schemas.RetestResponse(**retest_paragraph(db, payload.old_text, payload.new_text, payload.findings))
+        return schemas.RetestResponse(**retest_paragraph(
+            db, payload.old_text, payload.new_text, payload.findings,
+            proposal_goal=payload.proposal_goal, expected_effect=payload.expected_effect,
+        ))
     except Exception as exc:
         raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
 

@@ -212,3 +212,64 @@ def test_forward_layer_shows_next_chapter(client, headers):
     assert "ÖNDEN VERME" in ileri          # sızdırma uyarısı
     # Son bölümde ileri bakış YOK (boşuna maliyet ödenmez)
     assert build_forward_layer(db, novel_id, 2) == ""
+
+
+def test_knowledge_layer_prevents_leaks(client, headers):
+    """BİLGİ DURUMU katmanı: okur ne biliyor, ne SIZDIRILMAMALI. Bilgi
+    Haritası menüde duruyordu ama hiçbir prompta girmiyordu - yani sızdırma
+    koruması hiç çalışmıyordu."""
+    from app.qwen_client import build_knowledge_layer
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+    from app import models
+
+    baskan = client.post("/characters/", json={"name": "Başkan"}, headers=headers).json()
+    # Bölüm 12'de ifşa olacak bir sır - Bölüm 3 yazılırken sızmamalı
+    client.post("/knowledge/", json={
+        "information": "Başkan imzayı attı", "reveal_chapter": 12,
+        "known_by_characters": [baskan["id"]], "reader_state": "hayir",
+    }, headers=headers)
+    # Dramatik ironi: okur bilir, kimse bilmez
+    client.post("/knowledge/", json={
+        "information": "Vicdan yedinci timi göremiyor", "reader_state": "evet",
+        "known_by_characters": [],
+    }, headers=headers)
+
+    db = sessionmaker(bind=engine)()
+    novel_id = int(headers["X-Novel-Id"])
+    uid = db.query(models.Novel).filter(models.Novel.id == novel_id).first().universe_id
+
+    katman = build_knowledge_layer(db, uid, 3)
+    assert "SIZDIRMA YASAĞI" in katman
+    assert "Başkan imzayı attı" in katman and "Bölüm 12" in katman
+    assert "DRAMATİK İRONİ" in katman
+    assert "yedinci timi" in katman
+
+    # Kayıt yoksa katman hiç oluşmaz (boşuna maliyet yok)
+    bos_uid = 999999
+    assert build_knowledge_layer(db, bos_uid, 3) == ""
+
+
+def test_verify_knows_proposal_goal(client, headers):
+    """Doğrulama artık "metin değişti mi" değil "önerinin HEDEFİ gerçekleşti
+    mi" diye soruyor - amaç prompta giriyor."""
+    from unittest.mock import patch
+    from tests.test_reviewer_tools import _fake_qwen
+
+    captured = {}
+    def fake_create(**kwargs):
+        captured["user"] = kwargs["messages"][1]["content"]
+        captured["system"] = kwargs["messages"][0]["content"]
+        return _fake_qwen({"verdict": "kabul", "issues": [], "note": "Hedef tuttu."})
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.side_effect = fake_create
+        client.post("/ai/verify-rewrite", json={
+            "old_text": "Sıradan bir mahalle.", "new_text": "Tozlar güneşte asılı kaldı.",
+            "proposal_goal": "Yargı sıfatlarını gözlemlenebilir detayla değiştir",
+            "expected_effect": "Alt metin güçlensin",
+        }, headers=headers)
+    assert "ÖNERİNİN AMACI" in captured["user"]
+    assert "Yargı sıfatlarını" in captured["user"]
+    assert "BEKLENEN ETKİ" in captured["user"]
+    assert "HEDEFİ gerçekleşti mi" in captured["system"]
+    assert "KANON" in captured["system"]          # kanon dışı ekleme kontrolü

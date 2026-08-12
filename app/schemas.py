@@ -999,8 +999,10 @@ class StructureScanResponse(BaseModel):
 class VerifyRewriteRequest(BaseModel):
     old_text: str
     new_text: str
-    purpose: str = ""      # paragrafın İŞLEVİ (varsa)
+    purpose: str = ""           # paragrafın İŞLEVİ (varsa)
     neighbors: str = ""
+    proposal_goal: str = ""     # önerinin AMACI - "metin değişti mi" yetmez
+    expected_effect: str = ""   # beklenen etki
 
 
 class VerifyRewriteResponse(BaseModel):
@@ -1016,6 +1018,8 @@ class RetestRequest(BaseModel):
     old_text: str
     new_text: str
     findings: List[str] = []
+    proposal_goal: str = ""
+    expected_effect: str = ""
 
 
 class RetestResult(BaseModel):
@@ -1035,12 +1039,15 @@ class MotifItem(BaseModel):
     p: Optional[int] = None
     image: str = ""
     motif: str = ""
+    motif_status: str = "ilk_gorunum"   # ilk_gorunum | tekrar_adayi | kanitli
+    evidence: str = ""
 
 
 class MotifRepeat(BaseModel):
     image: str = ""
     paragraphs: List[int] = []
-    kind: str = "tekrar"      # leitmotif | tekrar
+    kind: str = "belirsiz"    # leitmotif | tekrar | belirsiz
+    confidence: float = 0.5
     reason: str = ""
     fix: str = ""
 

@@ -6401,7 +6401,12 @@ async function verifyBeforeApply(chapterId, number, oldText, newText) {
   try {
     return await api.post('/ai/verify-rewrite', {
       old_text: oldText, new_text: newText,
-      purpose: paraPurposes[number] || '', neighbors: komsular,
+      purpose: effectiveParaPurpose(number).text, neighbors: komsular,
+      // Önerinin AMACI: "metin değişti mi" değil "hedef gerçekleşti mi"
+      proposal_goal: (workshopState.lastGoal && workshopState.lastGoal[number]) || '',
+      expected_effect: (workshopState.diagnoses?.[number] || [])
+        .filter(d => d.cls === 'hata' || d.cls === 'zayif')
+        .map(d => d.title).join(' | '),
     });
   } catch (err) {
     return { verdict: 'kabul', hard_issues: [], issues: [], note: 'Kontrol yapılamadı: ' + err.message };
@@ -6661,7 +6666,9 @@ async function renderWorkshopReview() {
     // İmge tekrarları da paragraf bulgusu olur: hangi paragrafta tekrar
     // ettiği belli olduğu için doğrudan oraya bağlanır (leitmotif'ler
     // bulgu sayılmaz - onlar bilinçli tekrardır).
-    (motif.repeats || []).filter(x => x.kind === 'tekrar').forEach(x => {
+    // Sadece KANITLI tekrarlar bulgu olur; "belirsiz" ve "leitmotif" olmaz -
+    // kanıtsız iddiadan öneri üretmek sistemin en tehlikeli davranışı.
+    (motif.repeats || []).filter(x => x.kind === 'tekrar' && (x.confidence ?? 1) >= 0.6).forEach(x => {
       (x.paragraphs || []).forEach(pn => {
         (byPara[pn] = byPara[pn] || []).push({
           kaynak: 'imge',
@@ -6692,7 +6699,7 @@ async function renderWorkshopReview() {
           ${motif.summary ? `<div style="font-size:12.5px;margin-top:4px;">${escapeHtml(motif.summary)}</div>` : ''}
           ${motif.repeats.map(x => `
             <div style="font-size:12.5px;margin-top:6px;border-left:3px solid ${x.kind === 'leitmotif' ? '#3f7a4f' : 'var(--danger)'};padding-left:8px;">
-              <b>${escapeHtml(x.image)}</b> <span style="font-size:11px;color:${x.kind === 'leitmotif' ? '#3f7a4f' : 'var(--danger)'};">${x.kind === 'leitmotif' ? '✓ leitmotif' : '⚠ tekrar'}</span>
+              <b>${escapeHtml(x.image)}</b> <span style="font-size:11px;color:${({leitmotif:'#3f7a4f',tekrar:'var(--danger)',belirsiz:'var(--text-muted)'})[x.kind]};">${({leitmotif:'✓ leitmotif',tekrar:'⚠ tekrar',belirsiz:'? belirsiz'})[x.kind]}${x.confidence ? ' %' + Math.round(x.confidence * 100) : ''}</span>
               <div style="color:var(--text-muted);">P${(x.paragraphs || []).join(', P')} · ${escapeHtml(x.reason || '')}</div>
             </div>`).join('')}
           ${motif.unused_senses?.length ? `<div style="font-size:12px;color:var(--text-muted);margin-top:6px;">Hiç kullanılmayan duyular: ${motif.unused_senses.map(escapeHtml).join(', ')}</div>` : ''}
@@ -6934,6 +6941,16 @@ function buildParagraphDirectives(num, kayitlar, paraText) {
     + '"sanki/gibi/adeta" ile açıklama yapma, yargı sıfatı kullanma.');
   // ÜRETİM, DENETİMİ ÖNCEDEN BİLSİN: aynı ölçütlerle üretilmeyen metin
   // kontrolde takılıyor ve döngü kuruluyordu. Kontrol listesi burada.
+  // EN KÜÇÜK ETKİLİ MÜDAHALE: model "paragrafı baştan yazalım, yeni sembol
+  // ekleyelim" eğilimindeydi. Teşhisi giderecek EN AZ değişiklik istenir.
+  satirlar.push('MÜDAHALE ÖLÇÜSÜ: teşhisi gideren EN KÜÇÜK ETKİLİ değişikliği yap. '
+    + 'Sorun tek bir cümledeyse sadece o cümleyi değiştir; paragrafı baştan yazma. '
+    + 'İşe yarayan cümleleri AYNEN koru.');
+  // KANON DIŞI EKLEME YASAĞI: model olmayan geçmiş/olay/nesne uyduruyordu
+  satirlar.push('YENİ BİLGİ EKLEME YASAĞI: metinde ya da kayıtlarda BULUNMAYAN '
+    + 'karakter geçmişi, olay, nesne, ilişki, motivasyon EKLEME. '
+    + '("Çocukluğunda babası dövmüştü" gibi uydurma geçmiş yasak.) '
+    + 'Önerinin uygulanması mevcut kanondan mümkün olmalı.');
   satirlar.push('YAZDIKTAN SONRA KENDİ METNİNİ ŞU KONTROLDEN GEÇİR (kontrol bunlara bakacak): '
     + '(1) yukarıdaki KORU listesindeki her veri metinde var mı, '
     + '(2) paragrafın işlevi yerine geliyor mu, '
@@ -6984,7 +7001,9 @@ async function workshopFix(chapter, num, issue) {
   await loadBannedPatterns();   // kaçınma listesi taze olsun (düzelttikçe değişiyor)
   const direktifler = buildParagraphDirectives(num, kayitlar, para ? para.text : '');
   workshopState.directives = workshopState.directives || {};
-  workshopState.directives[num] = direktifler;   // kelime bazlı istekler de bunu kullanır
+  workshopState.directives[num] = direktifler;
+  workshopState.lastGoal = workshopState.lastGoal || {};
+  workshopState.lastGoal[num] = (kayitlar.map(k => k.baslik).join(', ') || issue).slice(0, 300);   // kelime bazlı istekler de bunu kullanır
   const instruction =
     `P${num} paragrafını aşağıdaki DİREKTİFLERE göre yeniden yaz.\n${direktifler}\n`
     + (issue && !kayitlar.length ? `EK NOT: ${issue}\n` : '')
@@ -7440,6 +7459,8 @@ async function runParagraphRetest(num, eskiMetin, yeniMetin, kayitlar) {
   try {
     const r = await api.post('/ai/retest-paragraph', {
       old_text: eskiMetin, new_text: yeniMetin, findings: bulguMetinleri,
+      proposal_goal: (workshopState.lastGoal && workshopState.lastGoal[num]) || '',
+      expected_effect: bulguMetinleri.join(' | '),
     });
     const simge = { giderildi: '✅', kismen: '🟡', giderilmedi: '❌' };
     const kalanlar = r.results.filter(x => x.status !== 'giderildi');
