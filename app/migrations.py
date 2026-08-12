@@ -43,6 +43,7 @@ def run_startup_migrations(engine):
         _add_rule_scope_columns(engine)
         _add_matrix_row_instructions(engine)
         _add_event_occurred_at(engine)
+        _create_knowledge_facts(engine)
     except Exception:
         logger.exception("Şema göçü sırasında beklenmeyen bir hata oluştu - uygulama yine de başlatılıyor")
 
@@ -465,3 +466,11 @@ def _add_event_occurred_at(engine):
         with engine.begin() as conn:
             logger.info("Göç: events.occurred_at ekleniyor")
             conn.execute(text("ALTER TABLE events ADD COLUMN occurred_at TEXT"))
+
+
+def _create_knowledge_facts(engine):
+    """knowledge_facts tablosu (Bilgi/İfşa Haritası) - idempotent."""
+    inspector = inspect(engine)
+    if "knowledge_facts" not in inspector.get_table_names():
+        logger.info("Göç: knowledge_facts tablosu oluşturuluyor")
+        models.KnowledgeFact.__table__.create(bind=engine, checkfirst=True)

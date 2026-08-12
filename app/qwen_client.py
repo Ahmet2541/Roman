@@ -3443,3 +3443,301 @@ def motif_map(db: Session, chapter, max_chars: int = 12000) -> dict:
         "unused_senses": [str(x)[:40] for x in (analiz.get("unused_senses") or [])][:5],
         "summary": (analiz.get("summary") or "")[:400],
     }
+
+
+# ---------------------------------------------------------------------------
+# PARAGRAF İŞLEVLERİ (otomatik): her paragrafın sahnedeki GÖREVİNİ çıkarır -
+# "olay mahalli tanıtılıyor", "dijital doğum hazırlığı", "gerilim kuruluyor".
+# Neden gerekli: işlev, yeniden yazımın ölçüsüdür ama 100 paragrafa tek tek
+# elle yazmak gerçekçi değildi. Bölüm özeti + plan + metin zaten elimizde;
+# AI bunu kendisi çıkarabilir. Kullanıcı gerekirse üzerine yazar.
+# ---------------------------------------------------------------------------
+
+PARAGRAPH_ROLE_PROMPT = """Sen bir yapı editörüsün. Sana bir bölümün özeti ve
+paragrafları verilecek. HER paragraf için o paragrafın sahnedeki GÖREVİNİ
+tek bir kısa cümleyle yaz.
+
+İyi örnekler:
+- "Olay mahalli tanıtılıyor; okur mekânı zihninde kurmalı."
+- "Dijital doğum hazırlığı: teknik kurulum, gerilim henüz yok."
+- "Karakterin suçluluk duygusu ilk kez sezdiriliyor."
+- "Tempo düşürülüyor; bir sonraki darbeye zemin hazırlanıyor."
+- "Geri dönüş: yedi yıl önceki çöküş hatırlatılıyor."
+
+Kurallar:
+- Görev = paragrafın NE YAPTIĞI, ne anlattığı DEĞİL. "Adam kapıyı açtı" özet;
+  "eşiğin geçilmesi, dönüşü olmayan an" görevdir.
+- Tek cümle, en fazla 12 kelime.
+- Bölüm özetindeki akışa göre konumlandır (kurulum / gelişme / dönüş / kapanış).
+- Ayrıca paragrafın türünü etiketle: betimleme | diyalog | eylem | ic_ses |
+  gecis | bilgi
+
+Yanıtın SADECE şu JSON olsun:
+{"roles": [{"p": 3, "role": "...", "kind": "betimleme"}]}"""
+
+
+def paragraph_roles(db: Session, chapter, max_chars: int = 12000) -> list[dict]:
+    """Bölümdeki her paragrafın işlevini çıkarır. Uzun bölümler dilimlenir."""
+    paragraphs = [p for p in chapter.paragraphs if (p.text or "").strip()]
+    if not paragraphs:
+        return []
+    ozet = (chapter.summary or "").strip()
+    plan_hucre = db.query(models.MatrixCell).filter(models.MatrixCell.chapter_id == chapter.id).first()
+    plan = (plan_hucre.content or "").strip() if plan_hucre else ""
+
+    dilimler, mevcut, used = [], [], 0
+    for p in paragraphs:
+        satir = f"[P{p.number}] {p.text.strip()}"
+        if mevcut and used + len(satir) > max_chars:
+            dilimler.append(mevcut); mevcut, used = [], 0
+        mevcut.append(satir); used += len(satir)
+    if mevcut:
+        dilimler.append(mevcut)
+
+    gecerli_turler = {"betimleme", "diyalog", "eylem", "ic_ses", "gecis", "bilgi"}
+    numaralar = {p.number for p in paragraphs}
+    client = get_client()
+    out = []
+    for dilim in dilimler:
+        baslik = ""
+        if ozet:
+            baslik += f"BÖLÜM ÖZETİ:\n{ozet}\n\n"
+        if plan:
+            baslik += f"BÖLÜM PLANI:\n{plan}\n\n"
+        try:
+            r = client.chat.completions.create(
+                model=settings.qwen_model,
+                messages=[{"role": "system", "content": PARAGRAPH_ROLE_PROMPT},
+                          {"role": "user", "content": baslik + "\n".join(dilim)}],
+            )
+            data = _parse_json_lenient(r.choices[0].message.content) or {}
+        except Exception:
+            logger.exception("Paragraf işlevi çıkarımı: dilim başarısız")
+            continue
+        for it in data.get("roles", []):
+            if not isinstance(it, dict):
+                continue
+            num = it.get("p")
+            rol = (it.get("role") or "").strip()
+            if num in numaralar and rol:
+                out.append({
+                    "p": num,
+                    "role": rol[:160],
+                    "kind": it.get("kind") if it.get("kind") in gecerli_turler else "betimleme",
+                })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# TEŞHİS FÜZYONU (Diagnostic Fusion). Üç test aynı soruna üç ayrı isimle
+# işaret edebiliyor: "alt metin zayıf" + "bilgi doğrudan veriliyor" +
+# "karakterin bunu söylemesi profiliyle uyumsuz" aslında TEK teşhistir.
+# Bu katman bulguları birleştirir ve HER teşhisi sınıflandırır:
+#   HATA   - gerçek kusur (kanon çelişkisi, mantık hatası)
+#   ZAYIF  - tartışılabilir zayıflık (öneri üretilir)
+#   TERCİH - yazarın bilinçli tercihi olabilir (ÖNERİ ÜRETİLMEZ, bilgi verilir)
+#   BELİRSİZ - kanıt yetersiz (karar verilemez)
+# Kritik ilke: bir edebî normdan sapma otomatik olarak hata DEĞİLDİR.
+# ---------------------------------------------------------------------------
+
+FUSION_PROMPT = """Sen kıdemli bir yayın editörüsün. Sana bir paragrafın metni,
+(varsa) işlevi ve FARKLI TESTLERDEN çıkmış ham bulgular verilecek.
+
+GÖREVİN İKİ AŞAMALI:
+
+AŞAMA 1 - BİRLEŞTİR: Aynı temel soruna işaret eden bulguları TEK teşhiste
+topla. Üç test aynı şeyi farklı kelimelerle söylüyorsa bu, teşhisin GÜÇLÜ
+olduğunun kanıtıdır - ayrı ayrı listeleme, birleştir ve kanıt olarak say.
+
+AŞAMA 2 - SINIFLANDIR: Her teşhis için karar ver. ÖNCE "bu gerçekten hata
+mı?" diye sor, sonra "nasıl düzeltilir" diye düşün.
+- "hata": nesnel kusur (kanon/mantık/zaman çelişkisi, tamamlanmış eylemin
+  yeniden başlaması, düşen somut veri).
+- "zayif": tartışılabilir edebî zayıflık; düzeltilebilir.
+- "tercih": YAZARIN BİLİNÇLİ TERCİHİ olabilir. Örnek: karakter panikliyorsa
+  kısa cümleler ritim sorunu değil, bilinçli tempo. Bilinçli tekrar leitmotif
+  olabilir. Bu sınıfa ÖNERİ ÜRETME - sadece dikkat çek.
+- "belirsiz": kanıt yetersiz; önceki bölümler görülmeden karar verilemez.
+
+KURALLAR:
+1. Bir edebî normdan sapma otomatik olarak hata DEĞİLDİR.
+2. Metinden KANIT göstermeden teşhis yazma. Kanıt = en fazla 10 kelimelik
+   alıntı. Kanıt bulamıyorsan sınıf "belirsiz" olsun.
+3. Ham bulguları doğru kabul ETME - onlar hipotezdir. Metinde karşılığı
+   yoksa "belirsiz" de ya da teşhisi hiç yazma.
+4. Paragrafın işlevi verilmişse sınıflandırmayı ona göre yap: işlevine
+   hizmet eden bir sapma "tercih"tir.
+5. Uydurma teşhis çıkarma. Sorun göremiyorsan boş liste döndür - bu DOĞRU
+   cevaptır.
+
+Yanıtın SADECE şu JSON olsun:
+{"diagnoses": [{"title": "tek cümlelik teşhis", "class": "hata|zayif|tercih|belirsiz",
+  "evidence": "metinden en fazla 10 kelime", "sources": ["editor","okur"],
+  "confidence": 0.0-1.0, "why": "tek cümle gerekçe",
+  "intent_note": "tercih ise: yazar bunu neden bilerek yapmış olabilir"}]}"""
+
+
+def fuse_diagnoses(db: Session, paragraph_text: str, findings: list,
+                   purpose: str = "", neighbors: str = "") -> list[dict]:
+    """Ham bulguları birleştirip sınıflandırır. Kaydetmez."""
+    if not findings:
+        return []
+    ham = "\n".join(f"- [{f.get('source', '?')}] {f.get('title', '')}: {f.get('detail', '')}"
+                    for f in findings)
+    user = (
+        (f"PARAGRAFIN İŞLEVİ: {purpose}\n\n" if purpose.strip() else "")
+        + f"PARAGRAF:\n{paragraph_text}\n\n"
+        + (f"KOMŞULAR:\n{neighbors}\n\n" if neighbors else "")
+        + f"HAM BULGULAR (hipotez - doğru kabul etme):\n{ham}"
+    )
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[{"role": "system", "content": FUSION_PROMPT}, {"role": "user", "content": user}],
+    )
+    data = _parse_json_lenient(response.choices[0].message.content) or {}
+    gecerli = {"hata", "zayif", "tercih", "belirsiz"}
+    out = []
+    for d in data.get("diagnoses", []):
+        if not isinstance(d, dict) or not (d.get("title") or "").strip():
+            continue
+        sinif = d.get("class") if d.get("class") in gecerli else "belirsiz"
+        # Kanıtsız teşhis "belirsiz"e çekilir - halüsinasyona karşı sert kural
+        if not (d.get("evidence") or "").strip() and sinif in ("hata", "zayif"):
+            sinif = "belirsiz"
+        try:
+            guven = max(0.0, min(1.0, float(d.get("confidence", 0.5))))
+        except (TypeError, ValueError):
+            guven = 0.5
+        out.append({
+            "title": d["title"].strip()[:200],
+            "cls": sinif,
+            "evidence": (d.get("evidence") or "").strip()[:120],
+            "sources": [str(x)[:20] for x in (d.get("sources") or [])][:5],
+            "confidence": guven,
+            "why": (d.get("why") or "")[:300],
+            "intent_note": (d.get("intent_note") or "")[:300],
+        })
+    return out[:8]
+
+
+# ---------------------------------------------------------------------------
+# KAZANÇ-KAYIP + KARŞI ARGÜMAN. Bir öneri yalnızca kazandırdığını değil,
+# KAYBETTİRDİĞİNİ de hesaplamalı: "tempo +2, atmosfer -3 → net -1" ise öneri
+# reddedilmeli. Ayrıca sistem kendi önerisine karşı argüman üretmeli -
+# "bu yavaşlık karakterin zihinsel donmasını taşıyor olabilir".
+# ---------------------------------------------------------------------------
+
+TRADEOFF_PROMPT = """Sen titiz bir editörsün. Bir paragrafın ESKİ ve ÖNERİLEN
+hâli veriliyor. Önerinin KAZANDIRDIĞINI ve KAYBETTİRDİĞİNİ ayrı ayrı ölç.
+
+Boyutlar: tempo, atmosfer, alt_metin, karakter, bilgi, imge, ritim.
+Her boyut için -3 ile +3 arası puan ver (0 = değişmedi).
+
+Sonra KARŞI ARGÜMAN üret: "Bu öneri neden YANLIŞ olabilir?" Eski hâlin
+korunmasını gerektiren bir sebep var mı? Yoksa "yok" yaz.
+
+Yanıtın SADECE şu JSON olsun:
+{"gains": [{"dim": "tempo", "score": 2, "why": "..."}],
+ "losses": [{"dim": "atmosfer", "score": -3, "why": "..."}],
+ "net": -1, "counter_argument": "...", "recommend": "uygula|tartis|reddet"}"""
+
+
+def evaluate_tradeoff(db: Session, old_text: str, new_text: str, purpose: str = "") -> dict:
+    """Öneriyi kazanç-kayıp dengesiyle ölçer ve karşı argüman üretir."""
+    user = (
+        (f"PARAGRAFIN İŞLEVİ: {purpose}\n\n" if purpose.strip() else "")
+        + f"ESKİ HÂLİ:\n{old_text}\n\nÖNERİLEN HÂLİ:\n{new_text}"
+    )
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[{"role": "system", "content": TRADEOFF_PROMPT}, {"role": "user", "content": user}],
+    )
+    data = _parse_json_lenient(response.choices[0].message.content) or {}
+    def _puanlar(anahtar, isaret):
+        out = []
+        for x in (data.get(anahtar) or []):
+            if not isinstance(x, dict):
+                continue
+            try:
+                p = max(-3, min(3, int(x.get("score", 0))))
+            except (TypeError, ValueError):
+                p = 0
+            out.append({"dim": (x.get("dim") or "")[:20], "score": p, "why": (x.get("why") or "")[:200]})
+        return out
+    gains, losses = _puanlar("gains", 1), _puanlar("losses", -1)
+    net = sum(g["score"] for g in gains) + sum(l["score"] for l in losses)
+    tavsiye = data.get("recommend") if data.get("recommend") in ("uygula", "tartis", "reddet") else None
+    if not tavsiye:
+        tavsiye = "uygula" if net > 0 else ("tartis" if net == 0 else "reddet")
+    return {
+        "gains": gains, "losses": losses, "net": net,
+        "counter_argument": (data.get("counter_argument") or "")[:400],
+        "recommend": tavsiye,
+    }
+
+
+# ---------------------------------------------------------------------------
+# SİLME TESTİ: "Bu paragraf silinirse ne kaybolur?" Cevap "hiçbir şey" ise
+# güçlü bir kesme adayıdır; ama karakter değişimi ya da ön sezdirme
+# taşıyorsa silme önerisi ENGELLENMELİ. Ayrıca EDEBÎ KALİTE ile ANLATISAL
+# GEREKLİLİK ayrı ölçülür: "iyi yazılmış ama gereksiz" ile "zayıf yazılmış
+# ama zorunlu" tamamen farklı iki durumdur ve farklı müdahale ister.
+# ---------------------------------------------------------------------------
+
+NECESSITY_PROMPT = """Sen bir yapı editörüsün. Sana bölüm özeti ve bir paragraf
+verilecek. İki AYRI puan ver ve silme testini uygula.
+
+1. literary_quality (1-10): edebî kalite - dil, imge, ritim.
+2. narrative_necessity (1-10): romanın buna İHTİYACI var mı? Çıkarılırsa
+   sonraki olaylar/kararlar mümkün olmaya devam eder mi?
+3. loses: paragraf silinirse ne kaybolur? Şunlardan seç (birden çok olabilir):
+   hicbir_sey | bilgi | duygu | karakter_degisimi | on_sezdirme | motif |
+   gecis | atmosfer | tema | odeme
+4. verdict:
+   - "korunmali": gereklilik yüksek
+   - "kisaltilmali": kalite iyi ama gereklilik düşük (yer kaplıyor)
+   - "guclendirilmeli": gereklilik yüksek ama kalite düşük (SİLME - ifadesini düzelt)
+   - "silinebilir": SADECE loses = ["hicbir_sey"] ise
+
+Kural: karakter_degisimi ya da on_sezdirme varsa ASLA "silinebilir" deme.
+
+Yanıtın SADECE şu JSON olsun:
+{"literary_quality": 7, "narrative_necessity": 4, "loses": ["atmosfer"],
+ "verdict": "kisaltilmali", "note": "tek cümle"}"""
+
+
+def paragraph_necessity(db: Session, chapter, paragraph_text: str, purpose: str = "") -> dict:
+    ozet = (chapter.summary or "").strip()
+    user = (
+        (f"BÖLÜM ÖZETİ:\n{ozet}\n\n" if ozet else "")
+        + (f"PARAGRAFIN İŞLEVİ: {purpose}\n\n" if purpose.strip() else "")
+        + f"PARAGRAF:\n{paragraph_text}"
+    )
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[{"role": "system", "content": NECESSITY_PROMPT}, {"role": "user", "content": user}],
+    )
+    data = _parse_json_lenient(response.choices[0].message.content) or {}
+    def _puan(k, vars=5):
+        try:
+            return max(1, min(10, int(data.get(k, vars))))
+        except (TypeError, ValueError):
+            return vars
+    gecerli_kayip = {"hicbir_sey", "bilgi", "duygu", "karakter_degisimi", "on_sezdirme",
+                     "motif", "gecis", "atmosfer", "tema", "odeme"}
+    loses = [x for x in (data.get("loses") or []) if x in gecerli_kayip] or ["bilgi"]
+    verdict = data.get("verdict") if data.get("verdict") in (
+        "korunmali", "kisaltilmali", "guclendirilmeli", "silinebilir") else "korunmali"
+    # KORUMA: karakter değişimi / ön sezdirme varsa silme önerisi engellenir
+    if verdict == "silinebilir" and ({"karakter_degisimi", "on_sezdirme"} & set(loses)):
+        verdict = "korunmali"
+    if verdict == "silinebilir" and loses != ["hicbir_sey"]:
+        verdict = "kisaltilmali"
+    return {
+        "literary_quality": _puan("literary_quality", 6),
+        "narrative_necessity": _puan("narrative_necessity", 6),
+        "loses": loses, "verdict": verdict, "note": (data.get("note") or "")[:300],
+    }

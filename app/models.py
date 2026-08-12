@@ -229,6 +229,33 @@ class GlossaryTerm(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class KnowledgeFact(Base):
+    """BİLGİ / İFŞA HARİTASI: bir duruşma-gerilim romanında gerilimi olay
+    değil, "kim ne biliyor" farkı üretir. Her önemli bilgi için üç ayrı
+    eksen tutulur: karakter biliyor mu, OKUR biliyor mu, anlatıcı biliyor mu.
+    Dramatik ironi (okur bilir, karakter bilmez) ve gizem (ikisi de bilmez)
+    ancak bu tabloyla denetlenebilir.
+    """
+    __tablename__ = "knowledge_facts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    universe_id = Column(Integer, ForeignKey("universes.id"), nullable=False, index=True)
+    information = Column(EncryptedString, nullable=False)   # "Başkan imzayı attı"
+    notes = Column(EncryptedString, default="")
+    # Nerede devreye giriyor / açığa çıkıyor (bölüm numarası)
+    introduced_chapter = Column(Integer, nullable=True)
+    reveal_chapter = Column(Integer, nullable=True)
+    # Kim biliyor: karakter kimlikleri (JSON liste)
+    known_by_characters = Column(EncryptedJSON, default=list)
+    # OKUR biliyor mu: hayir | sezdirildi | evet
+    reader_state = Column(String(20), default="hayir")
+    # İfşa yöntemi ve planlanan ödeme (payoff)
+    reveal_method = Column(EncryptedString, default="")
+    planned_payoff = Column(EncryptedString, default="")
+
+    universe = relationship("Universe")
+
+
 class Rule(Base):
     """Roman kuralları - sabit katman. Varsayılan olarak her AI isteğinde
     otomatik ve tam olarak dahil edilir. tags (opsiyonel) - devasa

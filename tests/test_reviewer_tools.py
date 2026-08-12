@@ -707,3 +707,94 @@ def test_reader_test_has_dialogue_types(client, headers):
         ]})
         r = client.post(f"/ai/reader-test/{ch['id']}", headers=headers)
     assert r.json()["findings"][0]["type"] == "diyalog_bilgi"
+
+
+# ---- Eleştirmen Motoru v2: füzyon, sınıflandırma, kazanç-kayıp, gereklilik --
+
+def test_fusion_classifies_and_guards_against_hallucination(client, headers):
+    """Teşhis füzyonu: bulgular TEK teşhiste birleşir ve sınıflandırılır.
+    KRİTİK: 'tercih' sınıfına öneri üretilmez (yazarın bilinçli tercihi
+    olabilir) ve KANITSIZ teşhis 'belirsiz'e çekilir."""
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({"diagnoses": [
+            {"title": "Karakterin keşfi yerine bilgi doğrudan veriliyor",
+             "class": "hata", "evidence": "Biliyorsun ki 2023'te", "sources": ["editor", "okur"],
+             "confidence": 0.9, "why": "Üç test aynı noktaya işaret ediyor."},
+            {"title": "Kısa cümleler ritmi kırıyor", "class": "tercih",
+             "evidence": "Durdu. Baktı.", "sources": ["okur"], "confidence": 0.6,
+             "why": "Panik anı.", "intent_note": "Karakter panikliyor; bilinçli tempo olabilir."},
+            {"title": "Kanıtsız iddia", "class": "hata", "evidence": "", "sources": ["editor"]},
+            {"title": "Uydurma sınıf", "class": "saçma", "evidence": "x"},
+        ]})
+        r = client.post("/ai/fuse-diagnoses", json={
+            "paragraph_text": "Biliyorsun ki 2023'te bina çökmüştü. Durdu. Baktı.",
+            "findings": [{"source": "editor", "title": "Alt metin zayıf", "detail": "..."}],
+            "purpose": "Karakterin kendisi sezmeli",
+        }, headers=headers)
+    d = r.json()["diagnoses"]
+    assert d[0]["cls"] == "hata" and len(d[0]["sources"]) == 2
+    assert d[1]["cls"] == "tercih" and "panikliyor" in d[1]["intent_note"]
+    assert d[2]["cls"] == "belirsiz", "kanıtsız teşhis belirsize çekilmeli"
+    assert d[3]["cls"] == "belirsiz", "geçersiz sınıf belirsize çekilmeli"
+
+    # Bulgu yoksa Qwen'e hiç gidilmez
+    with patch("app.qwen_client.get_client") as mc:
+        r = client.post("/ai/fuse-diagnoses", json={"paragraph_text": "x", "findings": []}, headers=headers)
+        mc.assert_not_called()
+    assert r.json()["diagnoses"] == []
+
+
+def test_tradeoff_rejects_net_negative(client, headers):
+    """Öneri sadece kazandırdığını değil KAYBETTİRDİĞİNİ de hesaplamalı."""
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "gains": [{"dim": "tempo", "score": 2, "why": "Hızlandı."}],
+            "losses": [{"dim": "atmosfer", "score": -3, "why": "Mekân duygusu gitti."}],
+            "counter_argument": "Bu yavaşlık karakterin donmasını taşıyor.",
+        })
+        r = client.post("/ai/tradeoff", json={"old_text": "uzun metin", "new_text": "kısa"}, headers=headers)
+    d = r.json()
+    assert d["net"] == -1
+    assert d["recommend"] == "reddet"           # net negatif -> reddedilir
+    assert "donmasını" in d["counter_argument"]
+
+
+def test_necessity_blocks_deletion_of_load_bearing_paragraph(client, headers):
+    """Silme testi: karakter değişimi ya da ön sezdirme taşıyan paragraf
+    için silme ASLA önerilmez; 'zayıf ama gerekli' ise güçlendirilir."""
+    ch = _chapter_with_text(client, headers, ["Pencerenin önünde oturdu."])
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "literary_quality": 4, "narrative_necessity": 9,
+            "loses": ["karakter_degisimi", "on_sezdirme"],
+            "verdict": "silinebilir", "note": "Olay yok.",
+        })
+        r = client.post(f"/ai/necessity/{ch['id']}", json={"paragraph_text": "Pencerenin önünde oturdu."}, headers=headers)
+    d = r.json()
+    assert d["verdict"] == "korunmali", "yük taşıyan paragraf silinemez"
+    assert d["literary_quality"] == 4 and d["narrative_necessity"] == 9
+
+
+def test_knowledge_map_tracks_reader_vs_character(client, headers):
+    """Bilgi/İfşa haritası: gerilim 'kim ne biliyor' farkından doğar.
+    Okur bilip hiçbir karakter bilmiyorsa DRAMATİK İRONİ vardır."""
+    baskan = client.post("/characters/", json={"name": "Başkan"}, headers=headers).json()
+    r = client.post("/knowledge/", json={
+        "information": "Başkan imzayı attı", "introduced_chapter": 3, "reveal_chapter": 12,
+        "known_by_characters": [baskan["id"]], "reader_state": "sezdirildi",
+        "reveal_method": "Hologram kaydı", "planned_payoff": "Tur 1 kapanışı",
+    }, headers=headers)
+    assert r.status_code == 201, r.text
+    d = r.json()
+    assert d["character_names"] == ["Başkan"]
+    assert d["dramatic_irony"] is False          # karakter de biliyor
+
+    r2 = client.post("/knowledge/", json={
+        "information": "Vicdan yedinci timi göremiyor", "reader_state": "evet",
+        "known_by_characters": [],
+    }, headers=headers)
+    assert r2.json()["dramatic_irony"] is True   # okur bilir, kimse bilmez
+
+    # Sıralama: ifşa bölümüne göre, planlanmamışlar sona
+    liste = client.get("/knowledge/", headers=headers).json()
+    assert liste[0]["reveal_chapter"] == 12 and liste[-1]["reveal_chapter"] is None

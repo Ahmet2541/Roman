@@ -131,6 +131,7 @@ async function switchView(view) {
   if (view === 'import') return renderImportView();
   if (view === 'event') return renderEventsView();
   if (view === 'relationships') return renderRelationshipsView();
+  if (view === 'knowledge') return renderKnowledgeView();
   if (view === 'fullscan' || view === 'stylescan' || view === 'denetim') return renderDenetimView(view);
   if (view === 'matrix') return renderMatrixView();
   if (view === 'faction') return renderFactionView();
@@ -6425,6 +6426,7 @@ function renderQuickCheck(oldText, newText, onApply, onDeep, onDiscuss) {
     <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
       <button class="btn btn-sm ${temiz ? 'btn-primary' : ''} qc-apply" style="font-size:11.5px;">${temiz ? 'Paragrafa yaz' : 'Yine de yaz'}</button>
       <button class="btn btn-sm qc-deep" style="font-size:11.5px;" title="İşlev, süreklilik ve eylem sırası için AI kontrolü (ek istek)">🔎 Derin kontrol</button>
+      <button class="btn btn-sm qc-tradeoff" style="font-size:11.5px;" title="Bu öneri ne kazandırıyor, ne kaybettiriyor? Karşı argüman üretir.">⚖ Kazanç-kayıp</button>
       ${onDiscuss ? `<button class="btn btn-sm qc-discuss" style="font-size:11.5px;" title="Bulgular + metin + AI yorumu ile tartış">💬 AI ile sohbet et</button>` : ''}
       <button class="btn btn-sm qc-cancel" style="font-size:11.5px;">Vazgeç</button>
     </div>`;
@@ -6432,6 +6434,27 @@ function renderQuickCheck(oldText, newText, onApply, onDeep, onDiscuss) {
   div.querySelector('.qc-cancel').addEventListener('click', () => div.remove());
   // TAKILMAYI ÖNLEME: kontrol bir şey söylediğinde tek çıkış "yine de yaz"
   // ya da "vazgeç" olmasın - bulguları hesaba katıp yeniden üretebilmeli.
+  // KAZANÇ-KAYIP: öneri sadece kazandırdığını değil KAYBETTİRDİĞİNİ de
+  // göstermeli. Net negatifse sistem kendi önerisini reddeder.
+  div.querySelector('.qc-tradeoff')?.addEventListener('click', async (e) => {
+    const b = e.target;
+    b.disabled = true; b.textContent = 'Ölçülüyor…';
+    try {
+      const t = await api.post('/ai/tradeoff', { old_text: oldText, new_text: newText });
+      const renk = { uygula: '#3f7a4f', tartis: '#b08d3f', reddet: 'var(--danger)' }[t.recommend];
+      const satir = (x, isaret) => `<div>${isaret} ${escapeHtml(x.dim)} ${x.score > 0 ? '+' : ''}${x.score} — <span style="color:var(--text-muted);">${escapeHtml(x.why)}</span></div>`;
+      div.insertAdjacentHTML('beforeend', `
+        <div style="margin-top:8px;border-top:1px dashed var(--border);padding-top:6px;font-size:12px;">
+          <div style="color:${renk};font-weight:600;">⚖ Net ${t.net > 0 ? '+' : ''}${t.net} · ${escapeHtml(t.recommend)}</div>
+          ${t.gains.map(x => satir(x, '↑')).join('')}
+          ${t.losses.map(x => satir(x, '↓')).join('')}
+          ${t.counter_argument ? `<div style="margin-top:4px;color:var(--text-muted);">🤔 Karşı argüman: ${escapeHtml(t.counter_argument)}</div>` : ''}
+        </div>`);
+    } catch (err) {
+      div.insertAdjacentHTML('beforeend', `<div class="error-text" style="font-size:11.5px;">${escapeHtml(err.message)}</div>`);
+    }
+    b.disabled = false; b.textContent = '⚖ Kazanç-kayıp';
+  });
   div.querySelector('.qc-discuss')?.addEventListener('click', () => {
     onDiscuss(bulgular, '');
     div.remove();
@@ -6748,6 +6771,7 @@ async function renderWorkshopParagraph(idx) {
           <button class="btn btn-sm" id="wsShowDirectives" style="font-size:10.5px;padding:1px 6px;" title="Bu bulgulardan çıkarılan ve AI'ya giden kural listesi">📋 Direktifler</button>
         </div>
         <div id="wsDirectiveBox"></div>
+        <div id="wsDiagnosisBox"></div>
         ${kayitlar.map((k, ki) => `
           <details class="finding-detail" ${ki === 0 ? 'open' : ''} style="margin-top:6px;border-left:3px solid ${k.kaynak === 'editor' ? 'var(--gold)' : (k.kaynak === 'imge' ? '#7a5fb0' : 'var(--danger)')};padding-left:8px;">
             <summary style="cursor:pointer;font-size:12.5px;list-style:none;">
@@ -6766,6 +6790,8 @@ async function renderWorkshopParagraph(idx) {
       <button class="btn btn-primary" id="wsFix" style="flex:1;font-size:12px;">✨ 3 öneri getir</button>
       <button class="btn" id="wsChat" style="flex:1;font-size:12px;">💬 Konuş</button>
     </div>
+    <button class="btn btn-sm" id="wsNecessity" style="width:100%;margin-top:6px;font-size:11.5px;" title="Bu paragraf silinirse ne kaybolur? Edebî kalite ve anlatısal gereklilik ayrı ölçülür.">🧪 Silme testi / gereklilik</button>
+    <div id="wsNecessityBox"></div>
     <div id="wsWork" style="margin-top:8px;"></div>
 
     <div style="display:flex;gap:6px;margin-top:16px;position:sticky;bottom:0;background:var(--paper);padding-top:8px;">
@@ -6778,11 +6804,61 @@ async function renderWorkshopParagraph(idx) {
   document.getElementById('wsPurpose').addEventListener('input', (e) => {
     paraPurposes[num] = e.target.value; saveParaState();
   });
+  // TEŞHİS FÜZYONU: ham bulguları tek teşhiste birleştirip sınıflandırır.
+  // "tercih" sınıfına öneri üretilmez - yazarın bilinçli tercihi olabilir.
+  if (kayitlar.length && !workshopState.diagnoses?.[num]) {
+    (async () => {
+      const kutu = document.getElementById('wsDiagnosisBox');
+      if (!kutu) return;
+      kutu.innerHTML = '<div style="font-size:11.5px;color:var(--text-muted);">Bulgular birleştiriliyor…</div>';
+      try {
+        const r = await api.post('/ai/fuse-diagnoses', {
+          paragraph_text: para ? para.text : '',
+          findings: kayitlar.map(k => ({ source: k.kaynak, title: k.baslik, detail: k.sorun || '' })),
+          purpose: effectiveParaPurpose(num).text,
+        });
+        workshopState.diagnoses = workshopState.diagnoses || {};
+        workshopState.diagnoses[num] = r.diagnoses;
+        renderDiagnoses(num, r.diagnoses);
+      } catch (e) { kutu.innerHTML = ''; }
+    })();
+  } else if (workshopState.diagnoses?.[num]) {
+    renderDiagnoses(num, workshopState.diagnoses[num]);
+  }
+
   document.getElementById('wsShowDirectives')?.addEventListener('click', () => {
     const kutu = document.getElementById('wsDirectiveBox');
     if (kutu.innerHTML) { kutu.innerHTML = ''; return; }
     const d = buildParagraphDirectives(num, kayitlar, para ? para.text : '');
     kutu.innerHTML = `<pre style="white-space:pre-wrap;font-size:11.5px;background:var(--paper-dim);padding:8px;border-radius:6px;margin:6px 0;">${escapeHtml(d)}</pre>`;
+  });
+  document.getElementById('wsNecessity').addEventListener('click', async (e) => {
+    const b = e.target, kutu = document.getElementById('wsNecessityBox');
+    b.disabled = true; b.textContent = 'Ölçülüyor…';
+    try {
+      const n = await api.post(`/ai/necessity/${chapter.id}`, {
+        paragraph_text: para ? para.text : '', purpose: effectiveParaPurpose(num).text,
+      });
+      const kararRenk = { korunmali: '#3f7a4f', guclendirilmeli: '#b08d3f',
+                          kisaltilmali: '#b08d3f', silinebilir: 'var(--danger)' }[n.verdict];
+      const kararMetin = {
+        korunmali: 'Korunmalı - romanın buna ihtiyacı var',
+        guclendirilmeli: 'Güçlendirilmeli - SİLME, ifadesini düzelt',
+        kisaltilmali: 'Kısaltılmalı - iyi yazılmış ama fazla yer kaplıyor',
+        silinebilir: 'Silinebilir - hiçbir şey kaybolmaz',
+      }[n.verdict];
+      kutu.innerHTML = `
+        <div class="panel" style="margin-top:6px;border-left:3px solid ${kararRenk};font-size:12.5px;">
+          <div style="display:flex;gap:14px;flex-wrap:wrap;">
+            <span>Edebî kalite: <b>${n.literary_quality}</b>/10</span>
+            <span>Anlatısal gereklilik: <b>${n.narrative_necessity}</b>/10</span>
+          </div>
+          <div style="color:${kararRenk};font-weight:600;margin-top:4px;">${kararMetin}</div>
+          <div style="color:var(--text-muted);">Silinirse kaybolur: ${n.loses.map(escapeHtml).join(', ')}</div>
+          ${n.note ? `<div style="color:var(--text-muted);margin-top:2px;">${escapeHtml(n.note)}</div>` : ''}
+        </div>`;
+    } catch (err) { kutu.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; }
+    b.disabled = false; b.textContent = '🧪 Silme testi / gereklilik';
   });
   document.getElementById('wsPrev').addEventListener('click', () => renderWorkshopParagraph(workshopState.idx - 1));
   document.getElementById('wsSkip').addEventListener('click', () => renderWorkshopParagraph(workshopState.idx + 1));
@@ -7438,5 +7514,152 @@ function openWorkshopVerifyChat(chapter, num, eskiMetin, secilenMetin, uyarilar,
     const el = document.getElementById('wsParaText');
     if (el) el.textContent = secilenMetin;
     box.innerHTML = '<div style="font-size:12.5px;color:#3f7a4f;">✓ Kaydedildi.</div>';
+  });
+}
+
+// Teşhisleri sınıflarıyla göster. Kritik: "tercih" sınıfı için düzeltme
+// düğmesi ÇIKMAZ - bir edebî normdan sapma otomatik olarak hata değildir.
+function renderDiagnoses(num, teshisler) {
+  const kutu = document.getElementById('wsDiagnosisBox');
+  if (!kutu) return;
+  if (!teshisler || !teshisler.length) { kutu.innerHTML = ''; return; }
+  const stil = {
+    hata: { renk: 'var(--danger)', etiket: '⛔ HATA', not: 'Nesnel kusur - düzeltilmeli.' },
+    zayif: { renk: '#b08d3f', etiket: '⚠ ZAYIF', not: 'Tartışılabilir zayıflık.' },
+    tercih: { renk: '#3f7a4f', etiket: '✎ YAZAR TERCİHİ', not: 'Bilinçli olabilir - öneri üretilmiyor.' },
+    belirsiz: { renk: 'var(--text-muted)', etiket: '? BELİRSİZ', not: 'Kanıt yetersiz.' },
+  };
+  const siraDegeri = { hata: 0, zayif: 1, belirsiz: 2, tercih: 3 };
+  const sirali = teshisler.slice().sort((a, b) => (siraDegeri[a.cls] ?? 9) - (siraDegeri[b.cls] ?? 9));
+  kutu.innerHTML = `
+    <div style="margin-top:8px;">
+      <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">TEŞHİS (bulgular birleştirildi)</div>
+      ${sirali.map(d => {
+        const st = stil[d.cls] || stil.belirsiz;
+        return `
+        <div style="border-left:3px solid ${st.renk};padding-left:8px;margin-top:6px;font-size:12.5px;">
+          <span style="color:${st.renk};font-weight:600;font-size:10.5px;">${st.etiket}</span>
+          ${d.sources?.length ? `<span style="font-size:10.5px;color:var(--text-muted);">· ${d.sources.length} test birleşti</span>` : ''}
+          ${d.confidence ? `<span style="font-size:10.5px;color:var(--text-muted);">· güven %${Math.round(d.confidence * 100)}</span>` : ''}
+          <div><b>${escapeHtml(d.title)}</b></div>
+          ${d.evidence ? `<div style="font-style:italic;color:var(--text-muted);">"${escapeHtml(d.evidence)}"</div>` : ''}
+          ${d.why ? `<div style="color:var(--text-muted);">${escapeHtml(d.why)}</div>` : ''}
+          ${d.cls === 'tercih' && d.intent_note ? `<div style="color:#3f7a4f;">💡 ${escapeHtml(d.intent_note)}</div>` : ''}
+          <div style="font-size:10.5px;color:var(--text-muted);">${st.not}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// BİLGİ / İFŞA HARİTASI: duruşma-gerilim romanında gerilimi olay değil,
+// "kim ne biliyor" farkı üretir. Üç eksen ayrı tutulur: karakterler, OKUR
+// ve türetilmiş dramatik ironi. Okur bilip hiçbir karakter bilmiyorsa
+// dramatik ironi vardır - romanın en güçlü gerilim aracı.
+// ---------------------------------------------------------------------------
+async function renderKnowledgeView() {
+  main().innerHTML = `
+    <h1 class="view-title">Bilgi Haritası</h1>
+    <p style="color:var(--text-muted);font-size:13.5px;max-width:700px;">
+      Gerilimi çoğu zaman olay değil, <b>kim ne biliyor</b> farkı üretir. Her önemli bilgi için
+      üç ekseni ayrı tut: hangi karakterler biliyor, <b>okur</b> ne durumda, ne zaman ifşa olacak.
+      Okur bilip hiçbir karakterin bilmediği bilgi = <b>dramatik ironi</b>.
+    </p>
+    <div class="toolbar"><div></div><button class="btn btn-primary" id="addFactBtn">+ Yeni Bilgi</button></div>
+    <div id="factForm"></div>
+    <div id="factList"><div class="empty-state">Yükleniyor…</div></div>`;
+  document.getElementById('addFactBtn').addEventListener('click', () => showFactForm(null));
+  await loadFactList();
+}
+
+async function loadFactList() {
+  const el = document.getElementById('factList');
+  try {
+    const facts = await api.get('/knowledge/');
+    if (!facts.length) {
+      el.innerHTML = '<div class="empty-state">Henüz bilgi kaydı yok. "Başkan imzayı attı", "Vicdan yedinci timi göremiyor" gibi kritik bilgileri buraya ekle.</div>';
+      return;
+    }
+    const okurEtiket = { hayir: '🔒 okur bilmiyor', sezdirildi: '🔎 sezdirildi', evet: '👁 okur biliyor' };
+    const okurRenk = { hayir: 'var(--text-muted)', sezdirildi: '#b08d3f', evet: '#3f7a4f' };
+    el.innerHTML = facts.map(f => `
+      <div class="entity-row" style="flex-wrap:wrap;">
+        <div style="flex:1;min-width:240px;">
+          <div class="name">${escapeHtml(f.information)}
+            ${f.dramatic_irony ? '<span style="font-size:10.5px;color:#7a5fb0;border:1px solid #7a5fb0;border-radius:3px;padding:0 4px;" title="Okur biliyor, hiçbir karakter bilmiyor">DRAMATİK İRONİ</span>' : ''}</div>
+          <div class="desc" style="display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;">
+            <span style="color:${okurRenk[f.reader_state]};">${okurEtiket[f.reader_state] || ''}</span>
+            <span>${f.character_names.length ? '👤 ' + f.character_names.map(escapeHtml).join(', ') : '👤 kimse bilmiyor'}</span>
+            ${f.introduced_chapter ? `<span>giriş: B${f.introduced_chapter}</span>` : ''}
+            ${f.reveal_chapter ? `<span>ifşa: B${f.reveal_chapter}</span>` : '<span style="color:var(--danger);">ifşa planlanmamış</span>'}
+          </div>
+          ${f.planned_payoff ? `<div class="desc">🎯 ${escapeHtml(f.planned_payoff)}</div>` : ''}
+        </div>
+        <div class="actions">
+          <button class="btn btn-sm edit-fact-btn" data-id="${f.id}">Düzenle</button>
+          <button class="btn btn-sm btn-danger del-fact-btn" data-id="${f.id}">Sil</button>
+        </div>
+      </div>`).join('');
+    el.querySelectorAll('.edit-fact-btn').forEach(b => b.addEventListener('click', () =>
+      showFactForm(facts.find(x => x.id === parseInt(b.dataset.id, 10)))));
+    el.querySelectorAll('.del-fact-btn').forEach(b => b.addEventListener('click', async () => {
+      if (!confirm('Bu bilgi kaydı silinsin mi?')) return;
+      try { await api.del(`/knowledge/${b.dataset.id}`); await loadFactList(); }
+      catch (err) { alert(err.message); }
+    }));
+  } catch (err) { el.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; }
+}
+
+async function showFactForm(fact) {
+  const kap = document.getElementById('factForm');
+  let karakterler = [];
+  try { karakterler = await api.get('/characters/'); } catch (e) { /* yoksay */ }
+  const secili = fact ? (fact.known_by_characters || []) : [];
+  kap.innerHTML = `
+    <div class="panel">
+      <b>${fact ? 'Bilgiyi Düzenle' : 'Yeni Bilgi'}</b>
+      <div class="field" style="margin-top:8px;"><label>Bilgi <span style="font-weight:400;color:var(--text-muted);font-size:11.5px;">(tek cümle - "Başkan imzayı attı")</span></label>
+        <input type="text" id="fk_info" value="${fact ? escapeHtml(fact.information) : ''}"></div>
+      <div class="field"><label>Bunu bilen karakterler</label>
+        <div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:6px;">
+          ${karakterler.map(c => `<label class="entity-picker-label"><input type="checkbox" class="fk-char" value="${c.id}" ${secili.includes(c.id) ? 'checked' : ''}> ${escapeHtml(c.name)}</label>`).join('') || '<span style="font-size:12px;color:var(--text-muted);">Kayıtlı kişi yok</span>'}
+        </div></div>
+      <div class="field"><label>Okur ne durumda?</label>
+        <select id="fk_reader">
+          <option value="hayir" ${!fact || fact.reader_state === 'hayir' ? 'selected' : ''}>🔒 Bilmiyor</option>
+          <option value="sezdirildi" ${fact && fact.reader_state === 'sezdirildi' ? 'selected' : ''}>🔎 Sezdirildi</option>
+          <option value="evet" ${fact && fact.reader_state === 'evet' ? 'selected' : ''}>👁 Biliyor</option>
+        </select></div>
+      <div style="display:flex;gap:10px;">
+        <div class="field" style="flex:1;"><label>Giriş bölümü</label><input type="number" id="fk_intro" value="${fact && fact.introduced_chapter ? fact.introduced_chapter : ''}"></div>
+        <div class="field" style="flex:1;"><label>İfşa bölümü</label><input type="number" id="fk_reveal" value="${fact && fact.reveal_chapter ? fact.reveal_chapter : ''}"></div>
+      </div>
+      <div class="field"><label>İfşa yöntemi</label><input type="text" id="fk_method" placeholder="ör. Hologram kaydı" value="${fact ? escapeHtml(fact.reveal_method) : ''}"></div>
+      <div class="field"><label>Planlanan ödeme (payoff)</label><input type="text" id="fk_payoff" placeholder="ör. Tur 1 kapanışı" value="${fact ? escapeHtml(fact.planned_payoff) : ''}"></div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="fk_save">Kaydet</button>
+        <button class="btn" id="fk_cancel">Vazgeç</button>
+      </div>
+      <div id="fk_err" class="error-text"></div>
+    </div>`;
+  document.getElementById('fk_cancel').addEventListener('click', () => { kap.innerHTML = ''; });
+  document.getElementById('fk_save').addEventListener('click', async () => {
+    const bilgi = document.getElementById('fk_info').value.trim();
+    if (!bilgi) { document.getElementById('fk_err').textContent = 'Bilgi metni gerekli.'; return; }
+    const veri = {
+      information: bilgi,
+      known_by_characters: Array.from(document.querySelectorAll('.fk-char:checked')).map(x => parseInt(x.value, 10)),
+      reader_state: document.getElementById('fk_reader').value,
+      introduced_chapter: parseInt(document.getElementById('fk_intro').value, 10) || null,
+      reveal_chapter: parseInt(document.getElementById('fk_reveal').value, 10) || null,
+      reveal_method: document.getElementById('fk_method').value.trim(),
+      planned_payoff: document.getElementById('fk_payoff').value.trim(),
+    };
+    try {
+      if (fact) await api.put(`/knowledge/${fact.id}`, veri);
+      else await api.post('/knowledge/', veri);
+      kap.innerHTML = '';
+      await loadFactList();
+    } catch (err) { document.getElementById('fk_err').textContent = err.message; }
   });
 }

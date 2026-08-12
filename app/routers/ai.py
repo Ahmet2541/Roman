@@ -7,7 +7,7 @@ from ..auth import get_current_user
 from .. import schemas, models
 from ..qwen_client import (
     build_context, ask_qwen, full_scan, chat_with_qwen, reader_test_chapter,
-    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite, retest_paragraph, motif_map,
+    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite, retest_paragraph, motif_map, paragraph_roles, fuse_diagnoses, evaluate_tradeoff, paragraph_necessity,
 )
 from ..entities import ENTITY_MODELS
 from ..sections import SECTIONS_BY_ENTITY_TYPE, _tr_lower
@@ -413,5 +413,85 @@ def motif_map_endpoint(
         raise HTTPException(404, "Bölüm bulunamadı")
     try:
         return schemas.MotifMapResponse(**motif_map(db, chapter))
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+
+
+@router.post("/paragraph-roles/{chapter_id}", response_model=schemas.ParagraphRolesResponse)
+def paragraph_roles_endpoint(
+    chapter_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=6, window_seconds=120, label="paragraf işlevleri")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Her paragrafın sahnedeki GÖREVİNİ çıkarır ("olay mahalli tanıtılıyor",
+    "dijital doğum hazırlığı"). İşlev, yeniden yazımın ölçüsüdür; 100
+    paragrafa tek tek elle yazmak gerçekçi değildi. Bölüm özeti ve planı
+    kullanılır. Kullanıcı üzerine yazabilir."""
+    chapter = db.query(models.Chapter).filter(
+        models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id
+    ).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
+    try:
+        return schemas.ParagraphRolesResponse(roles=[schemas.ParagraphRole(**r) for r in paragraph_roles(db, chapter)])
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+
+
+@router.post("/fuse-diagnoses", response_model=schemas.FusionResponse)
+def fuse_diagnoses_endpoint(
+    payload: schemas.FusionRequest,
+    db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=30, window_seconds=60, label="teşhis füzyonu")),
+    universe_id: int = Depends(get_universe_id),
+):
+    """Farklı testlerden gelen ham bulguları TEK teşhiste birleştirir ve
+    sınıflandırır: hata / zayif / tercih / belirsiz. 'tercih' için öneri
+    üretilmez (yazarın bilinçli tercihi olabilir); kanıtsız teşhis
+    'belirsiz'e çekilir."""
+    try:
+        return schemas.FusionResponse(diagnoses=[
+            schemas.Diagnosis(**d) for d in fuse_diagnoses(
+                db, payload.paragraph_text,
+                [f.model_dump() for f in payload.findings],
+                purpose=payload.purpose, neighbors=payload.neighbors,
+            )
+        ])
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+
+
+@router.post("/tradeoff", response_model=schemas.TradeoffResponse)
+def tradeoff_endpoint(
+    payload: schemas.TradeoffRequest,
+    db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=30, window_seconds=60, label="kazanç-kayıp")),
+    universe_id: int = Depends(get_universe_id),
+):
+    """Öneriyi kazanç-kayıp dengesiyle ölçer ve KARŞI ARGÜMAN üretir:
+    "tempo +2, atmosfer -3 → net -1, reddet"."""
+    try:
+        return schemas.TradeoffResponse(**evaluate_tradeoff(db, payload.old_text, payload.new_text, payload.purpose))
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+
+
+@router.post("/necessity/{chapter_id}", response_model=schemas.NecessityResponse)
+def necessity_endpoint(
+    chapter_id: int, payload: schemas.NecessityRequest,
+    db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=30, window_seconds=60, label="gereklilik testi")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Silme testi + edebî kalite/anlatısal gereklilik ayrımı. Karakter
+    değişimi ya da ön sezdirme taşıyan paragraf için silme önerilmez."""
+    chapter = db.query(models.Chapter).filter(
+        models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id
+    ).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
+    try:
+        return schemas.NecessityResponse(**paragraph_necessity(db, chapter, payload.paragraph_text, payload.purpose))
     except Exception as exc:
         raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")

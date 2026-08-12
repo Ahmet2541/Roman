@@ -1052,3 +1052,124 @@ class MotifMapResponse(BaseModel):
     repeats: List[MotifRepeat] = []
     unused_senses: List[str] = []
     summary: str = ""
+
+
+class ParagraphRole(BaseModel):
+    p: int
+    role: str = ""
+    kind: str = "betimleme"    # betimleme|diyalog|eylem|ic_ses|gecis|bilgi
+
+
+class ParagraphRolesResponse(BaseModel):
+    """Paragraf işlevleri: her paragrafın sahnedeki görevi (otomatik çıkarım).
+    Kullanıcı üzerine yazabilir - öneri niteliğindedir."""
+    roles: List[ParagraphRole] = []
+
+
+class RawFinding(BaseModel):
+    source: str = ""      # editor | okur | imge | yapisal
+    title: str = ""
+    detail: str = ""
+
+
+class FusionRequest(BaseModel):
+    paragraph_text: str
+    findings: List[RawFinding] = []
+    purpose: str = ""
+    neighbors: str = ""
+
+
+class Diagnosis(BaseModel):
+    title: str = ""
+    cls: str = "belirsiz"     # hata | zayif | tercih | belirsiz
+    evidence: str = ""
+    sources: List[str] = []
+    confidence: float = 0.5
+    why: str = ""
+    intent_note: str = ""
+
+
+class FusionResponse(BaseModel):
+    """Birleştirilmiş ve sınıflandırılmış teşhisler. 'tercih' sınıfı için
+    öneri ÜRETİLMEZ - yazarın bilinçli tercihi olabilir."""
+    diagnoses: List[Diagnosis] = []
+
+
+class TradeoffRequest(BaseModel):
+    old_text: str
+    new_text: str
+    purpose: str = ""
+
+
+class TradeoffDim(BaseModel):
+    dim: str = ""
+    score: int = 0
+    why: str = ""
+
+
+class TradeoffResponse(BaseModel):
+    """Önerinin kazanç-kayıp dengesi ve karşı argümanı."""
+    gains: List[TradeoffDim] = []
+    losses: List[TradeoffDim] = []
+    net: int = 0
+    counter_argument: str = ""
+    recommend: str = "uygula"     # uygula | tartis | reddet
+
+
+class NecessityRequest(BaseModel):
+    paragraph_text: str
+    purpose: str = ""
+
+
+class NecessityResponse(BaseModel):
+    """Edebî kalite ile anlatısal gereklilik AYRI ölçülür + silme testi."""
+    literary_quality: int = 6
+    narrative_necessity: int = 6
+    loses: List[str] = []
+    verdict: str = "korunmali"
+    note: str = ""
+
+
+class KnowledgeFactCreate(BaseModel):
+    information: str
+    notes: str = ""
+    introduced_chapter: Optional[int] = None
+    reveal_chapter: Optional[int] = None
+    known_by_characters: List[int] = []
+    reader_state: str = "hayir"      # hayir | sezdirildi | evet
+    reveal_method: str = ""
+    planned_payoff: str = ""
+
+    @field_validator("reader_state")
+    @classmethod
+    def _check_state(cls, v):
+        if v not in ("hayir", "sezdirildi", "evet"):
+            raise ValueError("reader_state hayir/sezdirildi/evet olmalı")
+        return v
+
+
+class KnowledgeFactUpdate(BaseModel):
+    information: Optional[str] = None
+    notes: Optional[str] = None
+    introduced_chapter: Optional[int] = None
+    reveal_chapter: Optional[int] = None
+    known_by_characters: Optional[List[int]] = None
+    reader_state: Optional[str] = None
+    reveal_method: Optional[str] = None
+    planned_payoff: Optional[str] = None
+
+
+class KnowledgeFactOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    information: str
+    notes: str = ""
+    introduced_chapter: Optional[int] = None
+    reveal_chapter: Optional[int] = None
+    known_by_characters: List[int] = []
+    character_names: List[str] = []
+    reader_state: str = "hayir"
+    reveal_method: str = ""
+    planned_payoff: str = ""
+    # Türetilmiş: dramatik ironi var mı (okur bilir, karakterler bilmez)
+    dramatic_irony: bool = False
