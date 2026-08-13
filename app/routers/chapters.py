@@ -931,3 +931,32 @@ def move_paragraphs_to_new_chapter(
     db.commit()
     db.refresh(new_chapter)
     return new_chapter
+
+
+@router.post("/{chapter_id}/split-preview", response_model=schemas.AiSplitParagraphsResponse)
+def split_paragraph_preview(
+    chapter_id: int, payload: schemas.AiSplitParagraphsRequest, db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=15, window_seconds=60, label="paragraf bölme önizleme")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """TEK bir paragrafın bölünme ÖNİZLEMESİ - kaydetmez.
+
+    Mevcut ai-split-paragraphs doğrudan kaydediyor (içe aktarma için doğru);
+    ama atölyede yazar bölmeyi görmeden onaylamak istemiyor. Bu uç yalnızca
+    öneriyi döner; uygulama ayrı adımda, paragraf paragraf yapılır."""
+    chapter = db.query(models.Chapter).filter(
+        models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
+    if not chapter:
+        raise HTTPException(404, "Bölüm bulunamadı")
+    if not payload.text.strip():
+        raise HTTPException(400, "Bölünecek metin boş olamaz")
+    try:
+        parcalar = split_paragraphs_with_ai(payload.text)
+    except Exception as exc:
+        logger.exception("Paragraf bölme önizlemesi başarısız")
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+    return schemas.AiSplitParagraphsResponse(
+        created=0, paragraphs=[schemas.ParagraphOut(
+            id=0, number=i + 1, text=t, mentions=[], is_style_sample=False)
+            for i, t in enumerate(parcalar)],
+    )

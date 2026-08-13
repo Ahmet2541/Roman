@@ -13,6 +13,13 @@ def _reset_rate_limiter():
     yield
 
 
+def _fake_qwen_text(metin: str):
+    """Düz metin döndüren sahte Qwen yanıtı (JSON beklemeyen uçlar için)."""
+    resp = MagicMock()
+    resp.choices = [MagicMock(message=MagicMock(content=metin))]
+    return resp
+
+
 def _fake_qwen(payload):
     resp = MagicMock()
     resp.choices = [MagicMock(message=MagicMock(content=_json.dumps(payload, ensure_ascii=False)))]
@@ -798,3 +805,52 @@ def test_knowledge_map_tracks_reader_vs_character(client, headers):
     # Sıralama: ifşa bölümüne göre, planlanmamışlar sona
     liste = client.get("/knowledge/", headers=headers).json()
     assert liste[0]["reveal_chapter"] == 12 and liste[-1]["reveal_chapter"] is None
+
+
+def test_micro_edit_touches_only_target(client, headers):
+    """MİKRO DÜZENLEME: yalnızca hedef parça değişir, gerisi AYNEN kalır.
+    Tek ifade için paragrafı baştan yazdırmak iyi cümleleri kaybettiriyordu."""
+    paragraf = "İhtiyar, mendilini çıkardı. Alnını sildi. Ve kapıyı açtı."
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({"options": [
+            {"replacement": "yıpranmış mendilini", "why": "Somut detay ekler."},
+            {"replacement": "", "why": "boş - ayıklanmalı"},
+        ]})
+        r = client.post("/ai/micro-edit", json={
+            "paragraph_text": paragraf, "target": "mendilini", "request": "somutlaştır",
+        }, headers=headers)
+    d = r.json()["options"]
+    assert len(d) == 1, "boş seçenek ayıklanmalı"
+    assert d[0]["replacement"] == "yıpranmış mendilini"
+    # Önizleme: SADECE hedef değişmiş, diğer cümleler aynen duruyor
+    assert d[0]["preview"] == "İhtiyar, yıpranmış mendilini çıkardı. Alnını sildi. Ve kapıyı açtı."
+    assert "Alnını sildi." in d[0]["preview"]
+
+    # Hedef metinde yoksa Qwen'e hiç gidilmez
+    with patch("app.qwen_client.get_client") as mc:
+        r = client.post("/ai/micro-edit", json={
+            "paragraph_text": paragraf, "target": "olmayan ifade",
+        }, headers=headers)
+        mc.assert_not_called()
+    assert r.json()["options"] == []
+
+
+def test_plan_from_text(client, headers):
+    """Yazılmış bölümden GERİYE DÖNÜK plan: önce yazıp sonra planlayan
+    akışta plan yoksa işlev mirası çalışmıyordu."""
+    ch = _chapter_with_text(client, headers, [
+        "Vicdan salonu tanıttı, kuralları okudu.",
+        "İlk hologram belirdi: yaşlı çift.",
+    ])
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen_text(
+            "- Vicdan salonu tanıtır, kuralları okur (kurulum)\n- İlk hologram: yaşlı çift")
+        r = client.post(f"/ai/plan-from-text/{ch['id']}", headers=headers)
+    assert r.status_code == 200
+    assert "Vicdan salonu tanıtır" in r.json()["plan"]
+
+    bos = client.post("/chapters/", json={"number": 8, "kind": "chapter", "title": "Boş"}, headers=headers).json()
+    with patch("app.qwen_client.get_client") as mc:
+        r = client.post(f"/ai/plan-from-text/{bos['id']}", headers=headers)
+        mc.assert_not_called()
+    assert r.json()["plan"] == ""

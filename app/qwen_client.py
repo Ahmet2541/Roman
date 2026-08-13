@@ -3843,3 +3843,105 @@ def paragraph_necessity(db: Session, chapter, paragraph_text: str, purpose: str 
         "narrative_necessity": _puan("narrative_necessity", 6),
         "loses": loses, "verdict": verdict, "note": (data.get("note") or "")[:300],
     }
+
+
+# ---------------------------------------------------------------------------
+# METİNDEN PLAN ÇIKARIMI: yazılmış bir bölümden geriye dönük plan üretir.
+# Önce yazıp sonra planlayan bir yazar için şart - plan yoksa paragrafların
+# işlevi tanımsız kalıyor, Talimat Kasası ve işlev mirası çalışmıyor.
+# ---------------------------------------------------------------------------
+
+PLAN_FROM_TEXT_PROMPT = """Sen bir yapı editörüsün. Sana yazılmış bir bölümün
+metni verilecek. Bu bölümün PLANINI geriye dönük çıkar.
+
+Plan, "ne oldu" özeti DEĞİLDİR; "bu bölümde ne olmalı" listesidir - yazarın
+başta yazmış olacağı madde madde iskelet.
+
+Kurallar:
+- 4-8 madde. Her madde tek satır, kısa.
+- Sıra metindeki akışa uysun.
+- Olay + işlev birlikte: "Vicdan salonu tanıtır, kuralları okur (kurulum)".
+- Metinde OLMAYAN madde ekleme.
+
+Yanıtın SADECE düz metin olsun: her satır "- " ile başlasın, başka hiçbir şey
+yazma."""
+
+
+def plan_from_text(db: Session, chapter, max_chars: int = 14000) -> str:
+    paragraphs = [p for p in chapter.paragraphs if (p.text or "").strip()]
+    if not paragraphs:
+        return ""
+    metin, used = [], 0
+    for p in paragraphs:
+        satir = p.text.strip()
+        if used + len(satir) > max_chars:
+            metin.append("[... kalanı kırpıldı ...]")
+            break
+        metin.append(satir)
+        used += len(satir)
+    ozet = (chapter.summary or "").strip()
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": PLAN_FROM_TEXT_PROMPT},
+            {"role": "user", "content": (f"BÖLÜM ÖZETİ:\n{ozet}\n\n" if ozet else "")
+             + f"BÖLÜM METNİ:\n" + "\n\n".join(metin)},
+        ],
+    )
+    return (response.choices[0].message.content or "").strip()[:2000]
+
+
+# ---------------------------------------------------------------------------
+# MİKRO DÜZENLEME: tüm paragrafı yeniden yazmadan, TEK NOKTAYA müdahale.
+# "Vicdan ile robot palyaço" gibi tek bir ifade takıldığında paragrafı baştan
+# yazdırmak hem gereksiz hem riskli (iyi cümleler kayboluyor). Bu motor
+# yalnızca hedeflenen parçayı değiştirir, gerisine DOKUNMAZ.
+# ---------------------------------------------------------------------------
+
+MICRO_EDIT_PROMPT = """Sen bir redaktörsün. Sana bir paragraf, içindeki HEDEF
+PARÇA ve bir İSTEK verilecek. SADECE hedef parçayı değiştir.
+
+MUTLAK KURALLAR:
+1. Hedef parça dışındaki tek bir kelimeye bile DOKUNMA.
+2. Değiştirdiğin parça, cümlenin dilbilgisine ve akışına oturmalı (ek, çekim,
+   bağlaç uyumu senin sorumluluğun).
+3. Yeni bilgi ekleme; kanonda olmayan geçmiş/olay/nesne uydurma.
+4. "sanki/gibi/adeta" ile açıklama yapma, yargı sıfatı kullanma.
+5. Her seçenek FARKLI bir çözüm olsun - aynı fikrin eş anlamlısı değil.
+
+ÜÇ seçenek üret. Yanıtın SADECE şu JSON olsun:
+{"options": [{"replacement": "hedef parçanın yerine geçecek metin",
+  "why": "tek cümle gerekçe"}]}"""
+
+
+def micro_edit(db: Session, paragraph_text: str, target: str, request_text: str,
+               purpose: str = "") -> list[dict]:
+    """Paragrafın yalnızca hedef parçası için üç alternatif üretir."""
+    if not target.strip() or target not in paragraph_text:
+        return []
+    user = (
+        (f"PARAGRAFIN İŞLEVİ: {purpose}\n\n" if purpose.strip() else "")
+        + f"PARAGRAF:\n{paragraph_text}\n\n"
+        + f"HEDEF PARÇA (sadece bunu değiştir):\n{target}\n\n"
+        + f"İSTEK:\n{request_text or 'Bu ifadeyi güçlendir; klişeden kaçın.'}"
+    )
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[{"role": "system", "content": MICRO_EDIT_PROMPT}, {"role": "user", "content": user}],
+    )
+    data = _parse_json_lenient(response.choices[0].message.content) or {}
+    out = []
+    for o in (data.get("options") or []):
+        if not isinstance(o, dict):
+            continue
+        yeni = (o.get("replacement") or "").strip()
+        if not yeni:
+            continue
+        out.append({
+            "replacement": yeni[:400],
+            "why": (o.get("why") or "")[:200],
+            "preview": paragraph_text.replace(target, yeni, 1),
+        })
+    return out[:4]

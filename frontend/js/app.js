@@ -6592,7 +6592,7 @@ async function renderWorkshopPrep() {
     </p>
     ${satir(ozetVar, 'Bölüm özeti', ozetVar ? 'Var - ZAMAN/OLAY/MEKAN bilgisi incelemeye gidecek.' : 'Yok. AI bölümü tanımadan inceler; bulgular yüzeysel kalır.', 'wsMakeSummary', 'AI ile özet oluştur')}
     ${satir(olayVar, 'Zaman çizelgesi', olayVar ? 'Bu bölümden olaylar çizelgede işlenmiş.' : 'Bu bölümden çizelgeye olay işlenmemiş. Kronoloji hataları görünmez kalır.', 'wsMakeEvents', '🕐 Zaman çizelgesini güncelle')}
-    ${satir(planVar, 'Bölüm planı', planVar ? 'Var - paragrafların işlevi buradan miras alınacak.' : 'Yok. Paragrafların "ne yapması gerektiği" tanımsız kalır.', 'wsMakePlan', 'Plan yaz')}
+    ${satir(planVar, 'Bölüm planı', planVar ? 'Var - paragrafların işlevi buradan miras alınacak.' : 'Yok. Paragrafların "ne yapması gerektiği" tanımsız kalır.', 'wsMakePlan', '⚡ Metinden plan çıkar')}
     <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
       <button class="btn btn-primary" id="wsToReview" style="flex:1;">İncelemeye geç →</button>
     </div>
@@ -6622,9 +6622,34 @@ async function renderWorkshopPrep() {
     } catch (err) { box.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; }
     b.disabled = false; b.textContent = '🕐 Zaman çizelgesini güncelle';
   });
-  document.getElementById('wsMakePlan')?.addEventListener('click', () => {
-    closeWorkshop();
-    openQuickPlanEditor(ch, '');
+  document.getElementById('wsMakePlan')?.addEventListener('click', async (e) => {
+    // METİNDEN PLAN: yazılmış bölümden geriye dönük plan çıkarır. Önce
+    // yazıp sonra planlayan akışta plan elle yazılmıyordu ve işlev mirası
+    // çalışmıyordu.
+    const b = e.target, kutu = document.getElementById('wsPrepResult');
+    b.disabled = true; b.textContent = 'Metinden çıkarılıyor…';
+    try {
+      const r = await api.post(`/ai/plan-from-text/${ch.id}`, {});
+      kutu.innerHTML = `
+        <div class="panel" style="border-left:3px solid var(--gold);">
+          <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">METİNDEN ÇIKARILAN PLAN - onaysız kaydedilmez</div>
+          <textarea id="wsPlanDraft" style="width:100%;min-height:130px;font-size:12.5px;margin-top:6px;box-sizing:border-box;">${escapeHtml(r.plan)}</textarea>
+          <div class="form-actions">
+            <button class="btn btn-sm btn-primary" id="wsPlanSave">Planı kaydet</button>
+            <button class="btn btn-sm" id="wsPlanCancel">Vazgeç</button>
+          </div>
+        </div>`;
+      document.getElementById('wsPlanCancel').addEventListener('click', () => { kutu.innerHTML = ''; });
+      document.getElementById('wsPlanSave').addEventListener('click', async () => {
+        try {
+          await api.post('/matrix/quick-plan', {
+            chapter_id: ch.id, content: document.getElementById('wsPlanDraft').value.trim(),
+          });
+          renderWorkshopPrep();
+        } catch (err) { alert(err.message); }
+      });
+    } catch (err) { kutu.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; }
+    b.disabled = false; b.textContent = 'Plan yaz';
   });
 }
 
@@ -6642,13 +6667,40 @@ async function renderWorkshopReview() {
   };
   ov.innerHTML = workshopShell('Derin Analiz', 2, '');
   document.getElementById('workshopClose').addEventListener('click', closeWorkshop);
+
+  // Önbellek: daha önce incelenmişse sonuçları geri yükle, yeniden analiz
+  // için kullanıcıya sor. Uzun bölümlerde analiz dakikalar sürüyor.
+  const onbellek = loadReviewCache(ch.id);
+  if (onbellek && !workshopState.forceRescan) {
+    const gun = Math.floor((Date.now() - onbellek.at) / 86400000);
+    workshopState.literary = onbellek.literary;
+    workshopState.findings = onbellek.findings;
+    workshopState.order = onbellek.order || [];
+    workshopState.roleKinds = onbellek.roleKinds || {};
+    renderWorkshopReviewSummary(onbellek.literary, onbellek.motif || {}, true, gun);
+    return;
+  }
+  workshopState.forceRescan = false;
   asama(1, 'Editör gözüyle 10 edebî ölçüt');
   try {
     const literary = await api.post(`/ai/literary-review/${ch.id}`, {});
     workshopState.literary = literary;
     asama(2, 'Okur gözüyle düşürücü noktalar');
     const reader = await api.post(`/ai/reader-test/${ch.id}`, {});
-    asama(3, 'İmge/motif haritası - tekrarlar');
+    asama(3, 'Paragraf işlevleri ve imge haritası');
+    // PARAGRAF İŞLEVLERİ: her paragrafın sahnedeki görevi ("olay mahalli
+    // tanıtılıyor", "dijital doğum hazırlığı"). Özet + paragraf birlikte
+    // kullanıldığı için isabet yüksek. Elle yazmak zorunda kalmıyorsun;
+    // üzerine yazabilirsin.
+    try {
+      const roller = await api.post(`/ai/paragraph-roles/${ch.id}`, {});
+      (roller.roles || []).forEach(r => {
+        if (!paraPurposes[r.p]) paraPurposes[r.p] = r.role;
+        workshopState.roleKinds = workshopState.roleKinds || {};
+        workshopState.roleKinds[r.p] = r.kind;
+      });
+      saveParaState();
+    } catch (e) { /* işlev çıkarımı başarısız olsa da inceleme sürer */ }
     let motif = { repeats: [], unused_senses: [], summary: '', items: [] };
     try { motif = await api.post(`/ai/motif-map/${ch.id}`, {}); }
     catch (e) { /* imge haritası başarısız olsa da inceleme sürer */ }
@@ -6681,58 +6733,15 @@ async function renderWorkshopReview() {
     workshopState.findings = byPara;
     workshopState.order = Object.keys(byPara).map(Number).sort((a, b) => a - b);
     workshopState.idx = 0;
-
-    const renk = (p) => p <= 2 ? 'var(--danger)' : (p === 3 ? '#b08d3f' : '#3f7a4f');
-    ov.querySelector('.workshop-body').innerHTML = `
-      <div style="text-align:center;padding:10px 0;">
-        <div style="font-size:30px;font-weight:700;color:${renk(Math.round(literary.average))}">${literary.average}<span style="font-size:16px;color:var(--text-muted);">/5</span></div>
-        <div style="font-size:12px;color:var(--text-muted);">edebî ortalama</div>
-      </div>
-      ${literary.strongest ? `<div style="font-size:12.5px;padding:8px;background:var(--paper-dim);border-radius:6px;">💪 ${escapeHtml(literary.strongest)}</div>` : ''}
-      <div style="font-size:12.5px;color:var(--text-muted);margin-top:10px;">
-        Kapsama: ${literary.total || 0} paragrafın ${literary.scanned || 0}'i tarandı${literary.chunks > 1 ? ` (${literary.chunks} parça)` : ''}.
-      </div>
-      <div style="font-size:13.5px;margin-top:10px;"><b>${workshopState.order.length}</b> paragrafta bulgu var.</div>
-      ${motif.repeats?.length ? `
-        <details style="margin-top:8px;">
-          <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);">🎨 İmge haritası (${motif.items?.length || 0} imge tarandı)</summary>
-          ${motif.summary ? `<div style="font-size:12.5px;margin-top:4px;">${escapeHtml(motif.summary)}</div>` : ''}
-          ${motif.repeats.map(x => `
-            <div style="font-size:12.5px;margin-top:6px;border-left:3px solid ${x.kind === 'leitmotif' ? '#3f7a4f' : 'var(--danger)'};padding-left:8px;">
-              <b>${escapeHtml(x.image)}</b> <span style="font-size:11px;color:${({leitmotif:'#3f7a4f',tekrar:'var(--danger)',belirsiz:'var(--text-muted)'})[x.kind]};">${({leitmotif:'✓ leitmotif',tekrar:'⚠ tekrar',belirsiz:'? belirsiz'})[x.kind]}${x.confidence ? ' %' + Math.round(x.confidence * 100) : ''}</span>
-              <div style="color:var(--text-muted);">P${(x.paragraphs || []).join(', P')} · ${escapeHtml(x.reason || '')}</div>
-            </div>`).join('')}
-          ${motif.unused_senses?.length ? `<div style="font-size:12px;color:var(--text-muted);margin-top:6px;">Hiç kullanılmayan duyular: ${motif.unused_senses.map(escapeHtml).join(', ')}</div>` : ''}
-        </details>` : ''}
-      <details style="margin-top:10px;">
-        <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);">Edebî karne (10 ölçüt)</summary>
-        ${(literary.scores || []).slice().sort((a, b) => a.score - b.score).map(sc => `
-          <div style="display:flex;gap:8px;font-size:12.5px;padding:3px 0;">
-            <span style="color:${renk(sc.score)};font-size:11px;letter-spacing:1px;">${'●'.repeat(sc.score)}${'○'.repeat(5 - sc.score)}</span>
-            <b style="flex:1;">${escapeHtml(sc.label)}</b>
-          </div>`).join('')}
-      </details>
-      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin-top:12px;cursor:pointer;">
-        <input type="checkbox" id="wsSweep"> Süpürme modu: <b>tüm</b> paragrafları sırayla gez
-      </label>
-      <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">
-        Kapalıyken sadece bulgu çıkan paragraflar gezilir. Bulgu çıkmayan paragraflar
-        "sorunsuz" değil, sadece <b>işaretlenmemiş</b> demektir - süpürme modu hepsini gösterir.
-      </div>
-      <div style="display:flex;gap:8px;margin-top:16px;">
-        <button class="btn" id="wsBackPrep" style="flex:1;">← Hazırlık</button>
-        <button class="btn btn-primary" id="wsToParas" style="flex:2;">Paragraflara geç →</button>
-      </div>`;
-    document.getElementById('wsBackPrep').addEventListener('click', renderWorkshopPrep);
-    document.getElementById('wsToParas').addEventListener('click', () => {
-      if (document.getElementById('wsSweep').checked) {
-        // Tüm paragraflar sırayla; bulgusu olanlar zaten işaretli görünür
-        workshopState.order = (workshopState.chapter.paragraphs || [])
-          .filter(p => (p.text || '').trim()).map(p => p.number).sort((a, b) => a - b);
-      }
-      if (!workshopState.order.length) { alert('Gezilecek paragraf yok.'); return; }
-      renderWorkshopParagraph(0);
+    // İNCELEME HAFIZASI: sonuçlar saklanır - atölyeyi kapatıp açtığında
+    // ya da ertesi gün döndüğünde analiz baştan çalışmaz (hem zaman hem
+    // maliyet). "Yeniden incele" ile bilerek tazelenir.
+    saveReviewCache(ch.id, {
+      at: Date.now(), literary, findings: byPara, motif,
+      order: workshopState.order, roleKinds: workshopState.roleKinds || {},
     });
+
+    renderWorkshopReviewSummary(literary, motif, false, 0);
   } catch (err) {
     ov.querySelector('.workshop-body').innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>
       <button class="btn" id="wsRetry" style="margin-top:10px;">Tekrar dene</button>`;
@@ -6797,6 +6806,7 @@ async function renderWorkshopParagraph(idx) {
       <button class="btn btn-primary" id="wsFix" style="flex:1;font-size:12px;">✨ 3 öneri getir</button>
       <button class="btn" id="wsChat" style="flex:1;font-size:12px;">💬 Konuş</button>
     </div>
+    <div id="wsLongWarn"></div>
     <button class="btn btn-sm" id="wsNecessity" style="width:100%;margin-top:6px;font-size:11.5px;" title="Bu paragraf silinirse ne kaybolur? Edebî kalite ve anlatısal gereklilik ayrı ölçülür.">🧪 Silme testi / gereklilik</button>
     <div id="wsNecessityBox"></div>
     <div id="wsWork" style="margin-top:8px;"></div>
@@ -6808,6 +6818,8 @@ async function renderWorkshopParagraph(idx) {
     </div>`);
 
   document.getElementById('workshopClose').addEventListener('click', closeWorkshop);
+  wireMicroEdit(chapter, num);   // metinde ifade seçince mikro düzenleme çubuğu
+  wireMicroEdit(chapter, num);   // metinde ifade seçince mikro düzenleme çubuğu
   document.getElementById('wsPurpose').addEventListener('input', (e) => {
     paraPurposes[num] = e.target.value; saveParaState();
   });
@@ -6839,6 +6851,49 @@ async function renderWorkshopParagraph(idx) {
     const d = buildParagraphDirectives(num, kayitlar, para ? para.text : '');
     kutu.innerHTML = `<pre style="white-space:pre-wrap;font-size:11.5px;background:var(--paper-dim);padding:8px;border-radius:6px;margin:6px 0;">${escapeHtml(d)}</pre>`;
   });
+  // UZUN PARAGRAF UYARISI: 120+ kelimelik paragraf okuma temposunu düşürür
+  // ve düzenlemesi zorlaşır. Bölme önerisi AI ile yapılır - tek kelime bile
+  // değişmez, sadece nereye paragraf arası konacağına karar verilir.
+  const kelimeSayisi = (para ? para.text : '').split(/\s+/).filter(Boolean).length;
+  if (kelimeSayisi >= 120) {
+    document.getElementById('wsLongWarn').innerHTML = `
+      <div style="font-size:11.5px;color:#b08d3f;border-left:3px solid #b08d3f;padding-left:8px;margin-top:8px;">
+        ⚠ Bu paragraf ${kelimeSayisi} kelime - okuma temposunu düşürebilir.
+        <button class="btn btn-sm" id="wsSplitPara" style="font-size:11px;margin-top:4px;">✂ Bölmeyi öner</button>
+      </div>`;
+    document.getElementById('wsSplitPara').addEventListener('click', async (e2) => {
+      const b2 = e2.target; b2.disabled = true; b2.textContent = 'Bölünüyor…';
+      try {
+        const r = await api.post(`/chapters/${chapter.id}/split-preview`, { text: para.text });
+        const parcalar = (r.paragraphs || []).map(x => x.text);
+        const kutu = document.getElementById('wsLongWarn');
+        if (parcalar.length < 2) {
+          kutu.innerHTML = '<div style="font-size:11.5px;color:var(--text-muted);">Bölünecek doğal bir yer bulunamadı.</div>';
+          return;
+        }
+        kutu.innerHTML = `
+          <div class="panel" style="border-left:3px solid #b08d3f;margin-top:8px;">
+            <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">${parcalar.length} PARÇAYA BÖLÜNECEK - metin değişmez</div>
+            ${parcalar.map((x, i) => `<div style="font-size:12.5px;margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);"><b>${i + 1}.</b> ${escapeHtml(x)}</div>`).join('')}
+            <div class="form-actions">
+              <button class="btn btn-sm btn-primary" id="wsSplitApply">Böl ve kaydet</button>
+              <button class="btn btn-sm" id="wsSplitCancel">Vazgeç</button>
+            </div>
+          </div>`;
+        document.getElementById('wsSplitCancel').addEventListener('click', () => { kutu.innerHTML = ''; });
+        document.getElementById('wsSplitApply').addEventListener('click', async () => {
+          try {
+            await applyParagraphSplit(chapter, num, parcalar);
+            kutu.innerHTML = '<div style="font-size:12px;color:#3f7a4f;">✓ Bölündü.</div>';
+          } catch (err) { alert(err.message); }
+        });
+      } catch (err) {
+        document.getElementById('wsLongWarn').innerHTML = `<div class="error-text" style="font-size:11.5px;">${escapeHtml(err.message)}</div>`;
+      }
+      b2.disabled = false; b2.textContent = '✂ Bölmeyi öner';
+    });
+  }
+
   document.getElementById('wsNecessity').addEventListener('click', async (e) => {
     const b = e.target, kutu = document.getElementById('wsNecessityBox');
     b.disabled = true; b.textContent = 'Ölçülüyor…';
@@ -7682,5 +7737,203 @@ async function showFactForm(fact) {
       kap.innerHTML = '';
       await loadFactList();
     } catch (err) { document.getElementById('fk_err').textContent = err.message; }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// İNCELEME ÖZETİ: hem taze analiz sonrasında hem ÖNBELLEKTEN çağrılır.
+// Önbellek sayesinde atölyeyi kapatıp açtığında analiz baştan çalışmaz.
+// ---------------------------------------------------------------------------
+function renderWorkshopReviewSummary(literary, motif, onbellekten, gunFarki) {
+  const renk = (p) => p <= 2 ? 'var(--danger)' : (p === 3 ? '#b08d3f' : '#3f7a4f');
+  document.getElementById('workshopOverlay').querySelector('.workshop-body').innerHTML = `
+    <div style="text-align:center;padding:10px 0;">
+      <div style="font-size:30px;font-weight:700;color:${renk(Math.round(literary.average))}">${literary.average}<span style="font-size:16px;color:var(--text-muted);">/5</span></div>
+      <div style="font-size:12px;color:var(--text-muted);">edebî ortalama</div>
+    </div>
+    ${literary.strongest ? `<div style="font-size:12.5px;padding:8px;background:var(--paper-dim);border-radius:6px;">💪 ${escapeHtml(literary.strongest)}</div>` : ''}
+    <div style="font-size:12.5px;color:var(--text-muted);margin-top:10px;">
+      Kapsama: ${literary.total || 0} paragrafın ${literary.scanned || 0}'i tarandı${literary.chunks > 1 ? ` (${literary.chunks} parça)` : ''}.
+    </div>
+    <div style="font-size:13.5px;margin-top:10px;"><b>${workshopState.order.length}</b> paragrafta bulgu var.</div>
+    ${motif.repeats?.length ? `
+      <details style="margin-top:8px;">
+        <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);">🎨 İmge haritası (${motif.items?.length || 0} imge tarandı)</summary>
+        ${motif.summary ? `<div style="font-size:12.5px;margin-top:4px;">${escapeHtml(motif.summary)}</div>` : ''}
+        ${motif.repeats.map(x => `
+          <div style="font-size:12.5px;margin-top:6px;border-left:3px solid ${x.kind === 'leitmotif' ? '#3f7a4f' : 'var(--danger)'};padding-left:8px;">
+            <b>${escapeHtml(x.image)}</b> <span style="font-size:11px;color:${({leitmotif:'#3f7a4f',tekrar:'var(--danger)',belirsiz:'var(--text-muted)'})[x.kind]};">${({leitmotif:'✓ leitmotif',tekrar:'⚠ tekrar',belirsiz:'? belirsiz'})[x.kind]}${x.confidence ? ' %' + Math.round(x.confidence * 100) : ''}</span>
+            <div style="color:var(--text-muted);">P${(x.paragraphs || []).join(', P')} · ${escapeHtml(x.reason || '')}</div>
+          </div>`).join('')}
+        ${motif.unused_senses?.length ? `<div style="font-size:12px;color:var(--text-muted);margin-top:6px;">Hiç kullanılmayan duyular: ${motif.unused_senses.map(escapeHtml).join(', ')}</div>` : ''}
+      </details>` : ''}
+    <details style="margin-top:10px;">
+      <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);">Edebî karne (10 ölçüt)</summary>
+      ${(literary.scores || []).slice().sort((a, b) => a.score - b.score).map(sc => `
+        <div style="display:flex;gap:8px;font-size:12.5px;padding:3px 0;">
+          <span style="color:${renk(sc.score)};font-size:11px;letter-spacing:1px;">${'●'.repeat(sc.score)}${'○'.repeat(5 - sc.score)}</span>
+          <b style="flex:1;">${escapeHtml(sc.label)}</b>
+        </div>`).join('')}
+    </details>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin-top:12px;cursor:pointer;">
+      <input type="checkbox" id="wsSweep"> Süpürme modu: <b>tüm</b> paragrafları sırayla gez
+    </label>
+    <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">
+      Kapalıyken sadece bulgu çıkan paragraflar gezilir. Bulgu çıkmayan paragraflar
+      "sorunsuz" değil, sadece <b>işaretlenmemiş</b> demektir - süpürme modu hepsini gösterir.
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn" id="wsBackPrep" style="flex:1;">← Hazırlık</button>
+      <button class="btn btn-primary" id="wsToParas" style="flex:2;">Paragraflara geç →</button>
+    </div>`;
+  document.getElementById('wsBackPrep').addEventListener('click', renderWorkshopPrep);
+  document.getElementById('wsToParas').addEventListener('click', () => {
+    if (document.getElementById('wsSweep').checked) {
+      // Tüm paragraflar sırayla; bulgusu olanlar zaten işaretli görünür
+      workshopState.order = (workshopState.chapter.paragraphs || [])
+        .filter(p => (p.text || '').trim()).map(p => p.number).sort((a, b) => a - b);
+    }
+    if (!workshopState.order.length) { alert('Gezilecek paragraf yok.'); return; }
+    renderWorkshopParagraph(0);
+  });
+
+  // Önbellekten geldiyse tazeleme seçeneği sun
+  if (onbellekten) {
+    const govdeEl = document.getElementById('workshopOverlay').querySelector('.workshop-body');
+    govdeEl.insertAdjacentHTML('afterbegin', `
+      <div style="font-size:11.5px;color:var(--text-muted);background:var(--paper-dim);padding:6px 8px;border-radius:6px;margin-bottom:8px;">
+        📦 Kayıtlı inceleme gösteriliyor${gunFarki > 0 ? ` (${gunFarki} gün önce)` : ' (bugün)'} - analiz yeniden çalıştırılmadı.
+        <button class="btn btn-sm" id="wsRescan" style="font-size:11px;margin-left:6px;">🔄 Yeniden incele</button>
+      </div>`);
+    document.getElementById('wsRescan').addEventListener('click', () => {
+      workshopState.forceRescan = true;
+      renderWorkshopReview();
+    });
+  }
+}
+
+// İnceleme önbelleği (bölüm bazlı, tarayıcıda)
+function saveReviewCache(chapterId, veri) {
+  try { localStorage.setItem(`roman_review_${chapterId}`, JSON.stringify(veri)); }
+  catch (e) { /* depolama dolu - önbelleksiz devam */ }
+}
+function loadReviewCache(chapterId) {
+  try {
+    const raw = localStorage.getItem(`roman_review_${chapterId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+// Paragrafı parçalara böler: ilk parça mevcut numarada kalır, kalanlar
+// araya eklenir ve sonraki paragraflar kaydırılır. Metin DEĞİŞMEZ.
+async function applyParagraphSplit(chapter, number, parcalar) {
+  const hepsi = (chapter.paragraphs || []).slice().sort((a, b) => a.number - b.number);
+  const sonrakiler = hepsi.filter(p => p.number > number);
+  const kayma = parcalar.length - 1;
+  // Sondan başa kaydır (numara çakışması olmasın)
+  for (let i = sonrakiler.length - 1; i >= 0; i--) {
+    const p = sonrakiler[i];
+    await api.put(`/chapters/${chapter.id}/paragraphs/${p.number + kayma}`,
+      { number: p.number + kayma, text: p.text });
+  }
+  for (let i = 0; i < parcalar.length; i++) {
+    await api.put(`/chapters/${chapter.id}/paragraphs/${number + i}`,
+      { number: number + i, text: parcalar[i] });
+  }
+  const yeni = await api.get(`/chapters/${chapter.id}`);
+  currentChapter = yeni;
+  workshopState.chapter = yeni;
+}
+
+// ---------------------------------------------------------------------------
+// PUAN GÖSTERGELERİ: son incelemenin sonucu fihristte ve paragraf kenarında
+// görünür - "hangi bölüm zayıf, hangi paragrafta bulgu var" sorusu ekranı
+// açar açmaz cevaplanır. Veriler inceleme önbelleğinden okunur (ek istek yok).
+// ---------------------------------------------------------------------------
+function reviewScoreBadge(chapterId) {
+  const c = loadReviewCache(chapterId);
+  if (!c || !c.literary) return '';
+  const puan = c.literary.average || 0;
+  const renk = puan <= 2.5 ? 'var(--danger)' : (puan < 3.6 ? '#b08d3f' : '#3f7a4f');
+  const bulguSayisi = Object.keys(c.findings || {}).length;
+  const cozulen = Object.keys(c.findings || {}).filter(n => {
+    try {
+      const st = JSON.parse(localStorage.getItem(`roman_para_state_${chapterId}`) || '{}');
+      return (st.resolved || []).includes(String(n));
+    } catch (e) { return false; }
+  }).length;
+  return ` <span style="font-size:9.5px;color:${renk};font-weight:700;" title="Son inceleme: edebî ortalama ${puan}/5 · ${bulguSayisi} paragrafta bulgu, ${cozulen} çözüldü">${puan}${bulguSayisi ? ` ⚑${bulguSayisi - cozulen}` : ''}</span>`;
+}
+
+function paragraphStatusBadge(number) {
+  if (!currentChapter) return '';
+  const c = loadReviewCache(currentChapter.id);
+  if (!c || !c.findings) return '';
+  const bulgular = c.findings[number];
+  if (!bulgular || !bulgular.length) return '';
+  const cozuldu = resolvedParas.has(String(number));
+  return `<div style="font-size:9px;margin-top:2px;color:${cozuldu ? '#3f7a4f' : 'var(--danger)'};" title="${cozuldu ? 'Düzeltildi' : bulgular.length + ' bulgu'}">${cozuldu ? '✓' : '⚑' + bulgular.length}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// MİKRO DÜZENLEME ARAYÜZÜ: paragraf metninde bir ifadeyi SEÇ, sadece onu
+// değiştir. Tüm paragrafı yeniden yazdırmanın iki sakıncası vardı: iyi
+// cümleler kayboluyordu ve tek kelimelik bir takıntı için koca bir üretim
+// turu gerekiyordu.
+// ---------------------------------------------------------------------------
+function wireMicroEdit(chapter, num) {
+  const metinEl = document.getElementById('wsParaText');
+  const kutu = document.getElementById('wsWork');
+  if (!metinEl || !kutu) return;
+  metinEl.addEventListener('mouseup', () => {
+    const secim = (window.getSelection()?.toString() || '').trim();
+    if (secim.length < 3 || secim.length > 200) return;
+    const mevcut = document.getElementById('wsMicroBar');
+    if (mevcut) mevcut.remove();
+    const bar = document.createElement('div');
+    bar.id = 'wsMicroBar';
+    bar.style.cssText = 'margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11.5px;';
+    bar.innerHTML = `
+      <span style="color:var(--text-muted);">Seçili: "<b>${escapeHtml(truncate(secim, 40))}</b>"</span>
+      <input type="text" id="wsMicroReq" placeholder="ne olsun? (boş: güçlendir)" style="flex:1;min-width:140px;font-size:11.5px;">
+      <button class="btn btn-sm btn-primary" id="wsMicroGo" style="font-size:11.5px;">✂ Sadece bunu değiştir</button>`;
+    metinEl.insertAdjacentElement('afterend', bar);
+    document.getElementById('wsMicroGo').addEventListener('click', async (e) => {
+      const b = e.target; b.disabled = true; b.textContent = 'Alternatifler…';
+      kutu.dataset.mode = 'micro';
+      kutu.innerHTML = '<div class="empty-state">Sadece seçili parça için alternatifler…</div>';
+      try {
+        const r = await api.post('/ai/micro-edit', {
+          paragraph_text: metinEl.innerText.trim(),
+          target: secim,
+          request: document.getElementById('wsMicroReq').value.trim(),
+          purpose: effectiveParaPurpose(num).text,
+        });
+        if (!r.options.length) {
+          kutu.innerHTML = '<div class="error-text" style="font-size:12px;">Alternatif üretilemedi. Seçimi biraz genişletmeyi dene.</div>';
+          return;
+        }
+        kutu.innerHTML = `
+          <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">MİKRO DÜZENLEME - sadece seçili parça değişir</div>
+          ${r.options.map((o, i) => `
+            <div style="border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:6px;">
+              <div style="font-size:13px;"><span style="color:var(--gold);font-weight:600;">${escapeHtml(o.replacement)}</span></div>
+              ${o.why ? `<div style="font-size:11.5px;color:var(--text-muted);font-style:italic;margin-top:2px;">${escapeHtml(o.why)}</div>` : ''}
+              <button class="btn btn-sm btn-primary micro-apply" data-idx="${i}" style="margin-top:6px;width:100%;font-size:11.5px;">Uygula</button>
+            </div>`).join('')}`;
+        kutu.querySelectorAll('.micro-apply').forEach(mb => mb.addEventListener('click', async () => {
+          const o = r.options[parseInt(mb.dataset.idx, 10)];
+          await replaceParagraphText(chapter.id, num, o.preview);
+          const para = (chapter.paragraphs || []).find(p => p.number === num);
+          if (para) para.text = o.preview;
+          metinEl.textContent = o.preview;
+          document.getElementById('wsMicroBar')?.remove();
+          kutu.innerHTML = '<div style="font-size:12.5px;color:#3f7a4f;">✓ Sadece seçili parça değiştirildi.</div>';
+        }));
+      } catch (err) {
+        kutu.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+      }
+      b.disabled = false; b.textContent = '✂ Sadece bunu değiştir';
+    });
   });
 }

@@ -1180,3 +1180,25 @@ class KnowledgeFactOut(BaseModel):
     planned_payoff: str = ""
     # Türetilmiş: dramatik ironi var mı (okur bilir, karakterler bilmez)
     dramatic_irony: bool = False
+
+
+class PlanFromTextResponse(BaseModel):
+    """Yazılmış bölümden geriye dönük çıkarılan plan (öneri - kaydedilmez)."""
+    plan: str = ""
+
+
+class MicroEditRequest(BaseModel):
+    paragraph_text: str
+    target: str            # değiştirilecek TEK parça
+    request: str = ""      # ne istiyorsun
+    purpose: str = ""
+
+
+class MicroEditOption(BaseModel):
+    replacement: str = ""
+    why: str = ""
+    preview: str = ""      # değişikliğin uygulanmış tam paragraf hâli
+
+
+class MicroEditResponse(BaseModel):
+    options: List[MicroEditOption] = []
