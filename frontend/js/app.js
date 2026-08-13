@@ -1576,6 +1576,7 @@ function renderReader(chapter) {
       <button class="btn btn-sm" id="highlightNamesBtn" title="Metinde tanımlı kişi/mekan/nesne isimlerinin altını çizer ve tıklanabilir yapar. Bu moda geçince paragraflar okuma moduna alınır (metin bozulmasın diye) - kapatınca yazmaya devam edersin.">🔎 İsimleri Vurgula</button>
       <button class="btn btn-sm" id="ttsPlayBtn" title="Bölümü sesli okur (tarayıcının Türkçe sesi - ücretsiz, metin dışarı çıkmaz). Okunan paragraf vurgulanır; bir paragrafa tıklayıp oradan devam edebilirsin.">🔊 Sesli Oku</button>
 
+      ${chapterScoreStrip(chapter.id)}
       <button class="btn btn-sm btn-primary" id="workshopBtn" title="Bölümü paragraf paragraf, tek ekranda düzenle. Önce hazırlık (özet, zaman çizelgesi, plan) kontrol edilir, sonra inceleme çalışır, sonra her paragraf sırayla ele alınır. Mobilde tam ekran.">🛠 Bölüm Atölyesi</button>
       <button class="btn btn-sm" id="chapterReviewBtn" title="İKİ AŞAMALI İNCELEME: önce editör gözüyle 10 edebî ölçüt, sonra okur gözüyle düşürücü noktalar. Bulgular paragraf paragraf birleştirilir; her paragrafı AI ile konuşarak karara bağlarsın.">🔍 Bölüm İncelemesi</button>
       <button class="btn btn-sm" id="timelineTopBtn" title="Özetteki ZAMAN satırından olayları çıkarıp Zaman Çizelgesi'ne öneri getirir">🕐 Zaman Çizelgesi</button>
@@ -6594,11 +6595,19 @@ async function renderWorkshopPrep() {
     ${satir(olayVar, 'Zaman çizelgesi', olayVar ? 'Bu bölümden olaylar çizelgede işlenmiş.' : 'Bu bölümden çizelgeye olay işlenmemiş. Kronoloji hataları görünmez kalır.', 'wsMakeEvents', '🕐 Zaman çizelgesini güncelle')}
     ${satir(planVar, 'Bölüm planı', planVar ? 'Var - paragrafların işlevi buradan miras alınacak.' : 'Yok. Paragrafların "ne yapması gerektiği" tanımsız kalır.', 'wsMakePlan', '⚡ Metinden plan çıkar')}
     <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
-      <button class="btn btn-primary" id="wsToReview" style="flex:1;">İncelemeye geç →</button>
+      <button class="btn btn-primary" id="wsFullPass" style="flex:1;min-width:210px;">🔁 Bölümü tekrar değerlendir ve paragrafları düzenle</button>
+      <button class="btn" id="wsToReview" style="flex:1;">Sadece incele →</button>
     </div>
     <div id="wsPrepResult" style="margin-top:10px;"></div>`);
   document.getElementById('workshopClose').addEventListener('click', closeWorkshop);
   document.getElementById('wsToReview').addEventListener('click', renderWorkshopReview);
+  // TAM TUR: önbelleği yok sayıp analizi TAZELER, süpürme modunu açar ve
+  // doğrudan paragraf paragraf düzenlemeye geçer. Tek düğmeyle uçtan uca.
+  document.getElementById('wsFullPass').addEventListener('click', () => {
+    workshopState.forceRescan = true;
+    workshopState.autoSweep = true;
+    renderWorkshopReview();
+  });
 
   document.getElementById('wsMakeSummary')?.addEventListener('click', async (e) => {
     const b = e.target; b.disabled = true; b.textContent = 'Özet yazılıyor…';
@@ -7787,6 +7796,13 @@ function renderWorkshopReviewSummary(literary, motif, onbellekten, gunFarki) {
       <button class="btn btn-primary" id="wsToParas" style="flex:2;">Paragraflara geç →</button>
     </div>`;
   document.getElementById('wsBackPrep').addEventListener('click', renderWorkshopPrep);
+  // Tam tur seçildiyse: süpürme modunu işaretle ve beklemeden paragraflara geç
+  if (workshopState.autoSweep) {
+    workshopState.autoSweep = false;
+    const sweepEl = document.getElementById('wsSweep');
+    if (sweepEl) sweepEl.checked = true;
+    setTimeout(() => document.getElementById('wsToParas')?.click(), 400);
+  }
   document.getElementById('wsToParas').addEventListener('click', () => {
     if (document.getElementById('wsSweep').checked) {
       // Tüm paragraflar sırayla; bulgusu olanlar zaten işaretli görünür
@@ -7865,14 +7881,59 @@ function reviewScoreBadge(chapterId) {
   return ` <span style="font-size:9.5px;color:${renk};font-weight:700;" title="Son inceleme: edebî ortalama ${puan}/5 · ${bulguSayisi} paragrafta bulgu, ${cozulen} çözüldü">${puan}${bulguSayisi ? ` ⚑${bulguSayisi - cozulen}` : ''}</span>`;
 }
 
+// Paragraf kenarındaki durum: PUAN + bulgu sayısı. Puan, bulgu sayısı ve
+// ağırlığından türetilir (5 = bulgu yok, her bulgu düşürür; "tercih"
+// sınıfındaki teşhisler puanı düşürmez - onlar hata değil).
+function paragraphScore(number, cache) {
+  const bulgular = (cache?.findings || {})[number] || [];
+  if (!bulgular.length) return 5;
+  const agirlik = { editor: 0.8, okur: 1.0, imge: 0.6 };
+  const ceza = bulgular.reduce((t, b) => t + (agirlik[b.kaynak] ?? 0.8), 0);
+  return Math.max(1, Math.round((5 - ceza) * 10) / 10);
+}
+
 function paragraphStatusBadge(number) {
   if (!currentChapter) return '';
   const c = loadReviewCache(currentChapter.id);
   if (!c || !c.findings) return '';
-  const bulgular = c.findings[number];
-  if (!bulgular || !bulgular.length) return '';
+  const bulgular = c.findings[number] || [];
   const cozuldu = resolvedParas.has(String(number));
-  return `<div style="font-size:9px;margin-top:2px;color:${cozuldu ? '#3f7a4f' : 'var(--danger)'};" title="${cozuldu ? 'Düzeltildi' : bulgular.length + ' bulgu'}">${cozuldu ? '✓' : '⚑' + bulgular.length}</div>`;
+  if (!bulgular.length && !cozuldu) return '';
+  const puan = cozuldu ? 5 : paragraphScore(number, c);
+  const renk = cozuldu ? '#3f7a4f' : (puan <= 2.5 ? 'var(--danger)' : (puan < 4 ? '#b08d3f' : '#3f7a4f'));
+  return `<div style="font-size:9px;margin-top:2px;color:${renk};font-weight:700;"
+    title="${cozuldu ? 'Düzeltildi' : bulgular.length + ' bulgu: ' + bulgular.map(b => b.baslik).join(', ')}">
+    ${cozuldu ? '✓5' : puan}${bulgular.length && !cozuldu ? ' ⚑' + bulgular.length : ''}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// BÖLÜM PUAN ŞERİDİ: bölümü açar açmaz genel durum görünür - edebî ortalama,
+// kaç paragrafta bulgu var, kaçı çözüldü, en zayıf üç ölçüt. Son incelemenin
+// önbelleğinden okunur, ek istek yok.
+// ---------------------------------------------------------------------------
+function chapterScoreStrip(chapterId) {
+  const c = loadReviewCache(chapterId);
+  if (!c || !c.literary) {
+    return `<span style="font-size:11.5px;color:var(--text-muted);align-self:center;">Henüz incelenmedi</span>`;
+  }
+  const puan = c.literary.average || 0;
+  const renk = puan <= 2.5 ? 'var(--danger)' : (puan < 3.6 ? '#b08d3f' : '#3f7a4f');
+  const numaralar = Object.keys(c.findings || {});
+  let cozulen = 0;
+  try {
+    const st = JSON.parse(localStorage.getItem(`roman_para_state_${chapterId}`) || '{}');
+    cozulen = numaralar.filter(n => (st.resolved || []).includes(String(n))).length;
+  } catch (e) { /* yoksay */ }
+  const zayif = (c.literary.scores || []).slice().sort((a, b) => a.score - b.score).slice(0, 3);
+  const gun = Math.floor((Date.now() - (c.at || Date.now())) / 86400000);
+  return `
+    <span class="chapter-score-strip" style="display:inline-flex;align-items:center;gap:8px;font-size:11.5px;
+      border:1px solid var(--border);border-radius:999px;padding:2px 10px;align-self:center;"
+      title="Son inceleme ${gun > 0 ? gun + ' gün önce' : 'bugün'}${zayif.length ? ' · En zayıf: ' + zayif.map(z => z.label + ' ' + z.score).join(', ') : ''}">
+      <b style="color:${renk};font-size:13px;">${puan}</b><span style="color:var(--text-muted);">/5</span>
+      ${numaralar.length ? `<span style="color:${cozulen === numaralar.length ? '#3f7a4f' : 'var(--danger)'};">⚑ ${numaralar.length - cozulen}/${numaralar.length}</span>` : ''}
+      ${zayif.length ? `<span style="color:var(--text-muted);">zayıf: ${escapeHtml(zayif[0].label)}</span>` : ''}
+    </span>`;
 }
 
 // ---------------------------------------------------------------------------
