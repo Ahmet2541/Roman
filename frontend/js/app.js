@@ -6225,9 +6225,14 @@ const DENETIM_SEKMELERI = {
     render: (el) => renderStyleScanView(el),
   },
   workshop: {
-    label: '🛠 Atölye',
-    hint: 'Bir bölüm ya da kısım seç, paragraf paragraf elden geçir: hazırlık kontrolü → inceleme → düzeltme.',
+    label: '🛠 Bölüm Değerlendirme',
+    hint: 'Bir bölüm seç, elden geçir: hazırlık → derin analiz (edebî + okur + imge) → paragraf paragraf düzeltme.',
     render: (el) => renderWorkshopPicker(el),
+  },
+  length: {
+    label: '📏 Uzunluk Kontrolü',
+    hint: 'Sınırı aşan paragrafları bulur ve böler. Metin DEĞİŞMEZ - sadece nereye paragraf arası konacağına karar verilir.',
+    render: (el) => renderLengthCheckView(el),
   },
   structure: {
     label: '🏗️ Yapısal Akış',
@@ -6691,7 +6696,7 @@ async function renderWorkshopPrep() {
       <div style="flex:1;min-width:0;">
         <div style="font-weight:600;font-size:13.5px;">${baslik}</div>
         <div style="font-size:12.5px;color:var(--text-muted);">${aciklama}</div>
-        ${tamam ? '' : `<button class="btn btn-sm btn-primary" id="${dugmeId}" style="margin-top:6px;font-size:11.5px;">${dugmeMetin}</button>`}
+        <button class="btn btn-sm ${tamam ? '' : 'btn-primary'}" id="${dugmeId}" style="margin-top:6px;font-size:11.5px;">${tamam ? '↻ ' + dugmeMetin.replace(/^[⚡🕐]\s*/, '') : dugmeMetin}</button>
       </div>
     </div>`;
 
@@ -6751,7 +6756,8 @@ async function renderWorkshopPrep() {
       kutu.innerHTML = `
         <div class="panel" style="border-left:3px solid var(--gold);">
           <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">METİNDEN ÇIKARILAN PLAN - onaysız kaydedilmez</div>
-          <textarea id="wsPlanDraft" style="width:100%;min-height:130px;font-size:12.5px;margin-top:6px;box-sizing:border-box;">${escapeHtml(r.plan)}</textarea>
+          ${(r.plan || '').trim() ? '' : '<div class="error-text" style="font-size:12px;">Plan üretilemedi - bölümde yeterli metin olmayabilir.</div>'}
+          <textarea id="wsPlanDraft" style="width:100%;min-height:130px;font-size:12.5px;margin-top:6px;box-sizing:border-box;">${escapeHtml(r.plan || '')}</textarea>
           <div class="form-actions">
             <button class="btn btn-sm btn-primary" id="wsPlanSave">Planı kaydet</button>
             <button class="btn btn-sm" id="wsPlanCancel">Vazgeç</button>
@@ -6767,7 +6773,7 @@ async function renderWorkshopPrep() {
         } catch (err) { alert(err.message); }
       });
     } catch (err) { kutu.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; }
-    b.disabled = false; b.textContent = 'Plan yaz';
+    b.disabled = false; b.textContent = '⚡ Metinden plan çıkar';
   });
 }
 
@@ -8173,4 +8179,111 @@ function paragraphEntities(para) {
     out.push({ entity_type: m.entity_type, entity_id: m.entity_id });
   });
   return out.slice(0, 8);   // bağlamı şişirmesin
+}
+
+// ---------------------------------------------------------------------------
+// UZUNLUK KONTROLÜ (ayrı menü): bölümdeki SINIRI AŞAN paragrafları tek
+// ekranda listeler ve tek tek bölmeyi sunar. Atölyeyle karıştırmamak için
+// ayrıldı - bu tamamen mekanik bir iş, edebî değerlendirmeyle ilgisi yok.
+// ---------------------------------------------------------------------------
+async function renderLengthCheckView(el) {
+  el.innerHTML = '<div class="empty-state">Fihrist yükleniyor…</div>';
+  try {
+    const tumu = await api.get('/chapters/');
+    const hiyerarsi = buildChapterHierarchy(tumu);
+    const metinliler = hiyerarsi.filter(it => (it.chapter.paragraph_count || 0) > 0);
+    if (!metinliler.length) {
+      el.innerHTML = '<div class="empty-state">Henüz metin yazılmış bölüm yok.</div>';
+      return;
+    }
+    el.innerHTML = `
+      <p style="font-size:12.5px;color:var(--text-muted);max-width:680px;margin-top:0;">
+        Sınır: <b>${PARA_WORD_LIMIT} kelime</b>. Uzun paragraf okuma temposunu düşürür ve düzenlemesi zorlaşır.
+        Bölmede metnin kendisi <b>değişmez</b>; yalnızca nereye paragraf arası konacağına karar verilir ve
+        parçalar önce gösterilir.
+      </p>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px;">
+        <div class="field" style="margin:0;min-width:260px;flex:1;">
+          <label>Bölüm</label>
+          <select id="lcChapter">
+            ${metinliler.map(it => `<option value="${it.chapter.id}">#${it.displayNumber} ${escapeHtml(stripMarkdownArtifacts(it.chapter.title) || '(başlıksız)')} · ${it.chapter.paragraph_count} paragraf</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn btn-primary" id="lcScan">Uzun paragrafları bul</button>
+      </div>
+      <div id="lcResult"></div>`;
+    document.getElementById('lcScan').addEventListener('click', () => runLengthScan());
+  } catch (err) {
+    el.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function runLengthScan() {
+  const kutu = document.getElementById('lcResult');
+  const chapterId = parseInt(document.getElementById('lcChapter').value, 10);
+  kutu.innerHTML = '<div class="empty-state">Taranıyor…</div>';
+  try {
+    const ch = await api.get(`/chapters/${chapterId}`);
+    const uzunlar = (ch.paragraphs || [])
+      .filter(p => wordCount(p.text) >= PARA_WORD_LIMIT)
+      .sort((a, b) => wordCount(b.text) - wordCount(a.text));
+    const toplam = (ch.paragraphs || []).length;
+    if (!uzunlar.length) {
+      kutu.innerHTML = `<div class="panel" style="border-left:3px solid #3f7a4f;">
+        <b style="color:#3f7a4f;">✓ Temiz</b> — ${toplam} paragrafın hiçbiri ${PARA_WORD_LIMIT} kelimeyi aşmıyor.</div>`;
+      return;
+    }
+    kutu.innerHTML = `
+      <div class="panel">
+        <div style="font-size:13px;"><b>${uzunlar.length}</b> paragraf sınırı aşıyor (${toplam} paragraf içinde).
+          En uzunu <b>${wordCount(uzunlar[0].text)}</b> kelime.</div>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px;">Her biri için bölme önerisi ayrı ayrı gösterilir - onaysız değişmez.</div>
+      </div>
+      ${uzunlar.map(p => `
+        <div class="entity-row lc-row" data-num="${p.number}" style="flex-wrap:wrap;">
+          <div style="flex:1;min-width:240px;">
+            <div class="name">P${p.number} <span style="color:var(--danger);font-size:12px;">${wordCount(p.text)} kelime</span></div>
+            <div class="desc">${escapeHtml(truncate(p.text, 150))}</div>
+          </div>
+          <div class="actions"><button class="btn btn-sm btn-primary lc-split" data-num="${p.number}">✂ Böl</button></div>
+          <div class="lc-box" data-num="${p.number}" style="width:100%;"></div>
+        </div>`).join('')}`;
+
+    kutu.querySelectorAll('.lc-split').forEach(b => b.addEventListener('click', async () => {
+      const num = parseInt(b.dataset.num, 10);
+      const para = ch.paragraphs.find(x => x.number === num);
+      const box = kutu.querySelector(`.lc-box[data-num="${num}"]`);
+      b.disabled = true; b.textContent = 'Bölünüyor…';
+      try {
+        const r = await api.post(`/chapters/${chapterId}/split-preview`, { text: para.text });
+        const parcalar = (r.paragraphs || []).map(x => x.text).filter(Boolean);
+        if (parcalar.length < 2) {
+          box.innerHTML = '<div style="font-size:12px;color:var(--text-muted);margin-top:6px;">Bölünecek doğal bir yer bulunamadı.</div>';
+        } else {
+          box.innerHTML = `
+            <div class="panel" style="margin-top:8px;border-left:3px solid var(--gold);">
+              <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">${parcalar.length} PARÇA - metin değişmedi</div>
+              ${parcalar.map((x, i) => `<div style="font-size:12.5px;margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);"><b>${i + 1}.</b> ${escapeHtml(x)} <span style="color:var(--text-muted);">(${wordCount(x)} kelime)</span></div>`).join('')}
+              <div class="form-actions">
+                <button class="btn btn-sm btn-primary lc-apply">Böl ve kaydet</button>
+                <button class="btn btn-sm lc-cancel">Vazgeç</button>
+              </div>
+            </div>`;
+          box.querySelector('.lc-cancel').addEventListener('click', () => { box.innerHTML = ''; });
+          box.querySelector('.lc-apply').addEventListener('click', async () => {
+            try {
+              await applyParagraphSplit(ch, num, parcalar);
+              box.innerHTML = '<div style="font-size:12px;color:#3f7a4f;margin-top:6px;">✓ Bölündü. Listeyi tazelemek için tekrar tara.</div>';
+              b.remove();
+            } catch (err) { alert(err.message); }
+          });
+        }
+      } catch (err) {
+        box.innerHTML = `<div class="error-text" style="font-size:12px;">${escapeHtml(err.message)}</div>`;
+      }
+      b.disabled = false; b.textContent = '✂ Böl';
+    }));
+  } catch (err) {
+    kutu.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
 }
