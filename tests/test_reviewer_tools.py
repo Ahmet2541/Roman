@@ -1004,3 +1004,20 @@ def test_voice_scan_finds_pov_violations(client, headers):
     from app import models as m2
     bos_uid = 999999
     assert build_voice_layer(db, bos_uid) == ""
+
+
+def test_verify_rejects_identical_text(client, headers):
+    """YANILTICI ONAY: eski ve yeni hâl aynıysa doğrulanacak bir şey yoktur.
+    Eskiden AI çağrılıyor ve "öneri başarıyla uygulanmış" gibi bir onay
+    dönüyordu - kullanıcı hiç denetlenmemiş metni onaylanmış sanıyordu."""
+    metin = "İhtiyar, mendilini çıkardı. Alnını sildi."
+    with patch("app.qwen_client.get_client") as mc:
+        r = client.post("/ai/verify-rewrite", json={
+            "old_text": metin, "new_text": metin + "  ",   # sadece boşluk farkı
+            "proposal_goal": "Tekrarı azalt",
+        }, headers=headers)
+        mc.assert_not_called()                 # Qwen'e HİÇ gidilmez
+    d = r.json()
+    assert d["verdict"] == "duzelt"
+    assert "DEĞİŞMEMİŞ" in d["hard_issues"][0]
+    assert "yeniden üretmeyi" in d["note"]

@@ -464,6 +464,9 @@ app/
     entity_history.py - Varlık değişiklik geçmişi + anlık görüntüden geri yükleme
     factions.py       - Gruplar & Kurumlar: üyelik + rol yönetimi
     knowledge.py      - Bilgi/İfşa Haritası: kim ne biliyor, dramatik ironi
+    diagnostics.py    - HATA AJANI: tarayıcı hatalarını toplar, bağlamıyla
+                        (ekran + eylem) saklar, tekrarları birleştirir.
+                        Denetim > 🩺 Sistem Sağlığı panelinde görünür
     admin.py          - /admin/export, /admin/import (aktif romanı JSON olarak yedekle/geri yükle)
 frontend/
   index.html          - ana ekran iskeleti (hover ile açılan sol menü + sağ içerik alanı)
@@ -471,10 +474,20 @@ frontend/
   css/style.css       - tüm stiller
   js/api.js           - JWT token yönetimi + X-Novel-Id header'lı ortak fetch sarmalayıcı
   js/login.js         - giriş sayfası mantığı
-  js/app.js           - menüler, roman okuma/yazma, AI paneli (5 oda + sohbet/talimat),
-                        Plan Matrisi ızgarası, üslup ekranı, zaman çizelgesi,
-                        sesli okuma, paragraf AI paneli (öneri + paragraf sohbeti),
-                        @isim ve numara/paragraf atıf kodları
+  js/modules/         - arayüz modülleri (app.js 9.000 satıra ulaşınca bölündü).
+                        Modül SİSTEMİ yok: index.html'de SIRAYLA yüklenir ve
+                        tüm tanımlar global kapsamda kalır, davranış birebir
+                        korunur. Sıra önemlidir.
+    01-core.js        - sabitler, yardımcılar, güvenli eleman erişimi (el)
+    02-entities.js    - görünüm geçişi, varlık listeleri/formları, mekan ağacı
+    03-chapters.js    - roman görünümü, fihrist, okuyucu, paragraf düzenleme
+    04-ai-panel.js    - AI paneli, sohbet odaları, bağlam önizleme, içe aktarma
+    05-scans.js       - tutarlılık ve üslup taramaları
+    06-matrix.js      - Plan Matrisi: ızgara, hücreler, fihrist eşleştirme
+    07-tools.js       - gruplar, sesli okuma, isim vurgulama, zaman çizelgesi
+    08-review.js      - Denetim menüsü, bölüm incelemesi, teşhis füzyonu
+    09-workshop.js    - Bölüm Atölyesi: hazırlık, derin analiz, paragraf düzenleme
+    10-knowledge.js   - Bilgi/İfşa Haritası, tur değerlendirmesi, yapısal akış
 ```
 
 ## Temel akış
@@ -587,7 +600,7 @@ Kurallar:
 
 ## Testler
 
-**161 test** (17 dosya) - AI çağrıları `unittest.mock` ile sahte Qwen
+**185 test** (20 dosya) - AI çağrıları `unittest.mock` ile sahte Qwen
 yanıtlarıyla çalışır, gerçek bir `DASHSCOPE_API_KEY` gerekmez.
 
 Kapsam: evren/kitap paylaşımı, migration'lar, sections merge ve seçici
@@ -638,8 +651,17 @@ progression'da yanlış chapter_number) otomatik yakalar.
 
 **Teknik borç:**
 
-- `qwen_client.py` ve `frontend/js/app.js` çok büyüdü - bölünmeleri gerekiyor.
-- Frontend'in otomatik testi yok (yalnızca `node --check` sözdizimi kontrolü).
+- `qwen_client.py` çok büyüdü (4.400+ satır) - bölünmesi gerekiyor.
+  (`app.js` bölündü: `frontend/js/modules/`.)
+- Frontend davranış testi VAR ama dar kapsamlı: modüller Node'da minimal
+  bir DOM taklidiyle yüklenip kritik fonksiyonlar çalıştırılıyor
+  (tanımsız değişken, olmayan elemana yazma, ayrıştırma hataları
+  yakalanıyor). Tam kullanıcı akışları (tıkla → istek → ekran güncellensin)
+  hâlâ test edilmiyor.
+- **🩺 Hata ajanı**: tarayıcıda oluşan hatalar otomatik olarak sunucuya
+  bildirilir ve Denetim > Sistem Sağlığı'nda görünür - kullanıcının ekran
+  görüntüsü alması gerekmez. Metin içeriği gönderilmez, yalnızca hata
+  mesajı + bağlam.
 - CORS deploy'da `*` bırakılmamalı; rate limiter bellek-içi (tek worker
   varsayar); `logs/app.log` rotasyonsuz; `datetime.utcnow()` uyarıları.
 - Railway'de SQLite kalıcı DEĞİLDİR - PostgreSQL'e geçilmeli (bkz. DEPLOY.md).

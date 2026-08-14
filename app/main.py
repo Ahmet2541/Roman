@@ -17,6 +17,7 @@ from .routers.menus import ALL_MENU_ROUTERS
 from .routers.chapters import router as chapters_router
 from .routers.ai import router as ai_router
 from .routers.knowledge import router as knowledge_router
+from .routers.diagnostics import router as diagnostics_router
 from .routers.auth_router import router as auth_router
 from .routers.events import router as events_router
 from .routers.relationships import router as relationships_router
@@ -102,6 +103,7 @@ for r in ALL_MENU_ROUTERS:
     app.include_router(r)
 app.include_router(events_router)
 app.include_router(knowledge_router)
+app.include_router(diagnostics_router)
 app.include_router(relationships_router)
 app.include_router(progressions_router)
 app.include_router(faction_memberships_router)
