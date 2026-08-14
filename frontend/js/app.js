@@ -6772,7 +6772,11 @@ function renderVerifyResult(v, onApply, onDiscuss) {
 //   ADIM 3 PARAGRAF PARAGRAF: tek ekranda tek paragraf - metni, bulguları,
 //     3 seçenek, sohbet, kaydet ve ilerle. Çözülenler işaretlenir.
 // ---------------------------------------------------------------------------
-const workshopState = { chapter: null, findings: {}, order: [], idx: 0, literary: null };
+const workshopState = {
+  chapter: null, findings: {}, order: [], idx: 0, literary: null,
+  // Süpürme modunda bulgusu olmayan paragrafları atla (tercih hatırlanır)
+  onlyFlagged: (() => { try { return localStorage.getItem('roman_ws_only_flagged') === '1'; } catch (e) { return false; } })(),
+};
 
 function openChapterWorkshop(chapter) {
   loadBannedPatterns();          // üslup taramasındaki yasak kalıplar (kaçınma listesi)
@@ -7068,8 +7072,12 @@ async function renderWorkshopParagraph(idx) {
   const issue = kayitlar.map(k => `${k.baslik}: ${k.sorun} ${k.oneri || ''}`).join(' | ');
 
   ov.innerHTML = workshopShell(`P${num} · ${workshopState.idx + 1}/${sira.length}`, 3, `
-    <div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--text-muted);">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11.5px;color:var(--text-muted);flex-wrap:wrap;">
       <span>${cozuldu ? '<span style="color:#3f7a4f;font-weight:600;">✓ düzeltildi</span>' : `${kalan} paragraf kaldı`}</span>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Süpürme modunda bulgusu olmayan paragraflar da geziliyor. İşaretlersen sadece bulgulu paragraflarda durur.">
+        <input type="checkbox" id="wsOnlyFlagged" ${workshopState.onlyFlagged ? 'checked' : ''}>
+        sadece bulgulu (${(workshopState.order || []).filter(n => (workshopState.findings[n] || []).length).length})
+      </label>
       <span>${escapeHtml((effectiveParaPurpose(num).source) ? 'işlev: ' + effectiveParaPurpose(num).source : 'işlev tanımsız')}</span>
     </div>
 
@@ -7242,11 +7250,31 @@ async function renderWorkshopParagraph(idx) {
     } catch (err) { kutu.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; }
     b.disabled = false; b.textContent = '🧪 Silme testi / gereklilik';
   });
-  document.getElementById('wsPrev').addEventListener('click', () => renderWorkshopParagraph(workshopState.idx - 1));
-  document.getElementById('wsSkip').addEventListener('click', () => renderWorkshopParagraph(workshopState.idx + 1));
+  // SADECE BULGULU: süpürme modunda 109 paragrafın hepsi geziliyor; çoğunda
+  // yapacak bir şey yok. Bu kutu işaretliyse gezinme bulgusu olmayan
+  // paragrafları ATLAR - ama liste değişmez, istediğinde geri açarsın.
+  document.getElementById('wsOnlyFlagged').addEventListener('change', (e) => {
+    workshopState.onlyFlagged = e.target.checked;
+    try { localStorage.setItem('roman_ws_only_flagged', e.target.checked ? '1' : '0'); } catch (er) { /* yoksay */ }
+    if (e.target.checked && !(workshopState.findings[num] || []).length) {
+      const hedef = nextFlaggedIndex(workshopState.idx, 1);
+      if (hedef === null) { alert('Bulgulu başka paragraf yok.'); workshopState.onlyFlagged = false; e.target.checked = false; return; }
+      renderWorkshopParagraph(hedef);
+    }
+  });
+  document.getElementById('wsPrev').addEventListener('click', () => {
+    const h = workshopState.onlyFlagged ? nextFlaggedIndex(workshopState.idx, -1) : workshopState.idx - 1;
+    if (h !== null && h >= 0) renderWorkshopParagraph(h);
+  });
+  document.getElementById('wsSkip').addEventListener('click', () => {
+    const h = workshopState.onlyFlagged ? nextFlaggedIndex(workshopState.idx, 1) : workshopState.idx + 1;
+    if (h === null) { renderWorkshopDone(); return; }
+    renderWorkshopParagraph(h);
+  });
   document.getElementById('wsNext').addEventListener('click', () => {
-    if (workshopState.idx === sira.length - 1) { renderWorkshopDone(); return; }
-    renderWorkshopParagraph(workshopState.idx + 1);
+    const h = workshopState.onlyFlagged ? nextFlaggedIndex(workshopState.idx, 1) : workshopState.idx + 1;
+    if (h === null || h >= sira.length) { renderWorkshopDone(); return; }
+    renderWorkshopParagraph(h);
   });
 
   // Elle kaydet: atölyede metni doğrudan düzenleyip kaydedebilmek şart -
@@ -8887,4 +8915,14 @@ async function runArcReview(chapterId) {
       <div class="error-text">${escapeHtml(err.message)}</div>
       <button class="btn btn-sm" onclick="document.getElementById('createItemModalOverlay').style.display='none'" style="margin-top:8px;">Kapat</button></div>`;
   }
+}
+
+// Bulgusu OLAN sıradaki paragrafın indeksi (yön: +1 ileri, -1 geri).
+// Yoksa null döner. "Sadece bulgulu" modunda gezinme bunu kullanır.
+function nextFlaggedIndex(mevcut, yon) {
+  const sira = workshopState.order || [];
+  for (let i = mevcut + yon; i >= 0 && i < sira.length; i += yon) {
+    if ((workshopState.findings[sira[i]] || []).length) return i;
+  }
+  return null;
 }
