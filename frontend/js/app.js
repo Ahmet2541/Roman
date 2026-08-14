@@ -173,7 +173,7 @@ async function renderEntityView(type) {
     const items = await api.get(cfg.endpoint);
     renderEntityList(type, items);
   } catch (err) {
-    document.getElementById('entityList').innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+    el('entityList').innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -269,7 +269,7 @@ async function renderPlacesView() {
     const places = await api.get('/places/');
     renderPlaceTree(places);
   } catch (err) {
-    document.getElementById('placeTree').innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+    el('placeTree').innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -2428,7 +2428,7 @@ function showResult(text, extraHtml) {
   if (!box) return;
   box.style.display = 'block';
   document.getElementById('aiResultText').textContent = text;
-  document.getElementById('aiResultExtra').innerHTML = extraHtml || '';
+  el('aiResultExtra').innerHTML = extraHtml || '';
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -2437,7 +2437,7 @@ function clearResult() {
   if (!box) return;
   box.style.display = 'none';
   document.getElementById('aiResultText').textContent = '';
-  document.getElementById('aiResultExtra').innerHTML = '';
+  el('aiResultExtra').innerHTML = '';
 }
 
 let aiChatMessages = [];
@@ -3414,7 +3414,7 @@ async function renderSearchResults(q) {
   try {
     allResults = await api.get(`/chapters/search?q=${encodeURIComponent(q)}`);
   } catch (err) {
-    document.getElementById('searchResults').innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+    el('searchResults').innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
     return;
   }
 
@@ -3764,8 +3764,7 @@ function renderStyleScanView(container) {
     try {
       const report = await api.get('/style/report');
       if (report.scanned) renderStyleReport(report);
-      else document.getElementById('styleReport').innerHTML =
-        `<div class="empty-state">Henüz tarama yapılmadı - "Taramayı Başlat"a bas.</div>`;
+      else el('styleReport').innerHTML = `<div class="empty-state">Henüz tarama yapılmadı - "Taramayı Başlat"a bas.</div>`;
     } catch (e) { /* rapor yüklenemezse sessiz geç, buton hâlâ çalışır */ }
     await loadStylePatterns();
   })();
@@ -3877,7 +3876,7 @@ async function loadMatrixList() {
     document.getElementById('newMatrixBtn').addEventListener('click', openNewMatrixDialog);
     if (currentMatrixId && list.some(m => m.id === currentMatrixId)) await loadMatrixGrid();
     else if (list.length === 1) { currentMatrixId = list[0].id; await loadMatrixList(); }
-    else if (!list.length) document.getElementById('matrixGridArea').innerHTML = `<div class="empty-state">Henüz matris yok - "+ Yeni Matris" ile başla, sonra kolon ve satırları ekle.</div>`;
+    else if (!list.length) el('matrixGridArea').innerHTML = `<div class="empty-state">Henüz matris yok - "+ Yeni Matris" ile başla, sonra kolon ve satırları ekle.</div>`;
   } catch (err) {
     area.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   }
@@ -3885,7 +3884,7 @@ async function loadMatrixList() {
 
 async function loadMatrixGrid() {
   const area = document.getElementById('matrixGridArea');
-  document.getElementById('matrixCellEditor').innerHTML = '';
+  el('matrixCellEditor').innerHTML = '';
   try {
     const m = await api.get(`/matrix/${currentMatrixId}`);
     const cellMap = {};
@@ -4012,7 +4011,7 @@ async function loadMatrixGrid() {
     document.getElementById('mImport').addEventListener('click', () => openMatrixImporter(m));
     document.getElementById('mDelMatrix').addEventListener('click', async () => {
       if (!confirm('Matris ve TÜM hücre planları silinecek (bölümlere dokunulmaz). Emin misin?')) return;
-      try { await api.del(`/matrix/${m.id}`); currentMatrixId = null; await loadMatrixList(); document.getElementById('matrixGridArea').innerHTML = ''; }
+      try { await api.del(`/matrix/${m.id}`); currentMatrixId = null; await loadMatrixList(); el('matrixGridArea').innerHTML = ''; }
       catch (err) { alert(err.message); }
     });
     area.querySelectorAll('.m-col-edit').forEach(el => el.addEventListener('click', () => {
@@ -4846,10 +4845,17 @@ async function replaceParagraphText(chapterId, number, text) {
       const p = (currentChapter.paragraphs || []).find(x => x.number === number);
       if (p) p.text = text;
     }
-    if (!el) {   // paragraf ekranda yoksa (başka bölüm) tam tazele
+    // Paragraf ekranda yoksa bellekteki bölümü tazele. Okuyucuyu YALNIZCA
+    // gerçekten varsa yeniden çiz: atölye Denetim menüsünden açıldığında
+    // Roman görünümü hiç oluşturulmamış olur ve renderReader "Cannot set
+    // properties of null" ile patlıyordu.
+    if (!el) {
       const refreshed = await api.get(`/chapters/${chapterId}`);
       currentChapter = refreshed;
-      renderReader(refreshed);
+      if (workshopState && workshopState.chapter && workshopState.chapter.id === chapterId) {
+        workshopState.chapter = refreshed;   // atölye kendi kopyasını taze tutar
+      }
+      if (document.getElementById('readerPane')) renderReader(refreshed);
     }
   } catch (err) { alert(err.message); }
 }
@@ -5759,7 +5765,7 @@ function openBulkAddDialog(m) {
       for (let i = 0; i < nRows; i++) {
         await api.post(`/matrix/${m.id}/rows`, { label: `${rp} ${baseRows + i + 1}` });
       }
-      document.getElementById('matrixCellEditor').innerHTML = '';
+      el('matrixCellEditor').innerHTML = '';
       await loadMatrixGrid();
     } catch (err) {
       document.getElementById('baError').textContent = err.message;
@@ -6507,6 +6513,32 @@ async function renderStructureScan(el) {
 // Paragraf işlevleri (oturum boyunca bellekte): { "7": "Yangın yerini masum
 // göstermek..." }. Yeniden yazımın ÖLÇÜSÜ budur - talimatların en başına
 // konur ve kabul kontrolünde "işini yapıyor mu" sorusuna kaynak olur.
+
+// Eleman yoksa sessizce geçen güvenli yazım. Asenkron bir yanıt döndüğünde
+// kullanıcı çoktan başka ekrana geçmiş olabilir; o zaman hedef eleman DOM'da
+// olmaz ve doğrudan .innerHTML ataması "Cannot set properties of null" ile
+// çöker. Bu, düzenleme akışını kesen en sinsi hata türüydü.
+function setHtml(id, html) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = html;
+  return el;
+}
+
+
+// GÜVENLİ ELEMAN ERİŞİMİ: asenkron bir yanıt döndüğünde kullanıcı çoktan
+// başka ekrana geçmiş olabilir; hedef eleman DOM'da olmaz ve doğrudan
+// .innerHTML ataması "Cannot set properties of null" ile çöker - düzenleme
+// akışını kesen en sinsi hata türü buydu. el() her zaman bir nesne döner;
+// eleman yoksa yazımlar sessizce yok sayılır.
+const _NULL_EL = new Proxy({}, {
+  get: (t, k) => (k === 'style' || k === 'dataset' || k === 'classList') ? _NULL_EL
+    : (typeof k === 'string' && ['addEventListener', 'remove', 'scrollIntoView', 'focus',
+       'insertAdjacentHTML', 'insertAdjacentElement', 'querySelector', 'querySelectorAll',
+       'toggle', 'add', 'contains', 'closest'].includes(k) ? (() => _NULL_EL) : undefined),
+  set: () => true,
+});
+function el(id) { return document.getElementById(id) || _NULL_EL; }
+
 const paraPurposes = {};
 
 // PARAGRAF UZUNLUK SINIRI: bu eşiği aşan paragraf kaydedilmeden önce
@@ -7238,7 +7270,7 @@ async function renderWorkshopParagraph(idx) {
   // değişmez, sadece nereye paragraf arası konacağına karar verilir.
   const kelimeSayisi = (para ? para.text : '').split(/\s+/).filter(Boolean).length;
   if (kelimeSayisi >= 120) {
-    document.getElementById('wsLongWarn').innerHTML = `
+    el('wsLongWarn').innerHTML = `
       <div style="font-size:11.5px;color:#b08d3f;border-left:3px solid #b08d3f;padding-left:8px;margin-top:8px;">
         ⚠ Bu paragraf ${kelimeSayisi} kelime - okuma temposunu düşürebilir.
         <button class="btn btn-sm" id="wsSplitPara" style="font-size:11px;margin-top:4px;">✂ Bölmeyi öner</button>
@@ -7270,7 +7302,7 @@ async function renderWorkshopParagraph(idx) {
           } catch (err) { alert(err.message); }
         });
       } catch (err) {
-        document.getElementById('wsLongWarn').innerHTML = `<div class="error-text" style="font-size:11.5px;">${escapeHtml(err.message)}</div>`;
+        el('wsLongWarn').innerHTML = `<div class="error-text" style="font-size:11.5px;">${escapeHtml(err.message)}</div>`;
       }
       b2.disabled = false; b2.textContent = '✂ Bölmeyi öner';
     });
@@ -7617,7 +7649,8 @@ async function workshopFix(chapter, num, issue) {
         await replaceParagraphText(chapter.id, num, secilen);
         resolvedParas.add(String(num)); saveParaState();
         if (para) para.text = secilen;
-        document.getElementById('wsParaText').textContent = secilen;
+        const paraEl = document.getElementById('wsParaText');
+        if (paraEl) paraEl.textContent = secilen;
         box.innerHTML = `
           <div style="font-size:12.5px;color:#3f7a4f;">✓ Kaydedildi (denetimden geçmişti).</div>
           <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
@@ -7639,7 +7672,8 @@ async function workshopFix(chapter, num, issue) {
           await replaceParagraphText(chapter.id, num, secilen);
           resolvedParas.add(String(num)); saveParaState();
           if (para) para.text = secilen;
-          document.getElementById('wsParaText').textContent = secilen;
+          const paraEl = document.getElementById('wsParaText');
+        if (paraEl) paraEl.textContent = secilen;
           box.innerHTML = `
             <div style="font-size:12.5px;color:#3f7a4f;">✓ Kaydedildi.</div>
             <div id="wsRetest" style="margin-top:8px;font-size:12.5px;color:var(--text-muted);">Bulgular yeniden sınanıyor…</div>
@@ -7653,7 +7687,8 @@ async function workshopFix(chapter, num, issue) {
           document.getElementById('wsUndo').addEventListener('click', async () => {
             await replaceParagraphText(chapter.id, num, eski);
             if (para) para.text = eski;
-            document.getElementById('wsParaText').textContent = eski;
+            const paraEl3 = document.getElementById('wsParaText');
+            if (paraEl3) paraEl3.textContent = eski;
             resolvedParas.delete(String(num)); saveParaState();
             box.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted);">↩ Önceki hâline döndürüldü.</div>';
           });
