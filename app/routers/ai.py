@@ -7,7 +7,7 @@ from ..auth import get_current_user
 from .. import schemas, models
 from ..qwen_client import (
     build_context, ask_qwen, full_scan, chat_with_qwen, reader_test_chapter,
-    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite, retest_paragraph, motif_map, paragraph_roles, fuse_diagnoses, evaluate_tradeoff, paragraph_necessity, plan_from_text, micro_edit,
+    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite, retest_paragraph, motif_map, paragraph_roles, fuse_diagnoses, evaluate_tradeoff, paragraph_necessity, plan_from_text, micro_edit, extract_knowledge_map,
 )
 from ..entities import ENTITY_MODELS
 from ..sections import SECTIONS_BY_ENTITY_TYPE, _tr_lower
@@ -539,5 +539,20 @@ def micro_edit_endpoint(
             schemas.MicroEditOption(**o) for o in micro_edit(
                 db, payload.paragraph_text, payload.target, payload.request, payload.purpose)
         ])
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+
+
+@router.post("/knowledge-scan", response_model=schemas.KnowledgeScanResponse)
+def knowledge_scan(
+    db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=4, window_seconds=120, label="bilgi haritası taraması")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Bölüm ÖZETLERİNİ tarayarak bilgi haritasını önerir ve TUTARSIZLIKLARI
+    bildirir: bilgi sızması (karakter bilmediği şeye göre davranıyor), erken
+    ifşa, ödenmemiş kurulum (kurulup unutulmuş bilgi), çelişki. Kaydetmez."""
+    try:
+        return schemas.KnowledgeScanResponse(**extract_knowledge_map(db, novel_id))
     except Exception as exc:
         raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")

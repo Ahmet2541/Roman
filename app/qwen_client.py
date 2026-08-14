@@ -3964,3 +3964,111 @@ def micro_edit(db: Session, paragraph_text: str, target: str, request_text: str,
             "preview": paragraph_text.replace(target, yeni, 1),
         })
     return out[:4]
+
+
+# ---------------------------------------------------------------------------
+# BİLGİ HARİTASI OTOMATİK ÇIKARIMI: bölüm özetlerini tarayarak "kim ne
+# biliyor" tablosunu önerir ve TUTARSIZLIKLARI bildirir. Elle doldurmak
+# gerçekçi değildi; özetler zaten kimin neyi öğrendiğini içeriyor.
+# Kritik tutarsızlıklar: bir karakter bilmediği bir bilgiye göre davranıyor,
+# okura ifşa edilmemiş bir sır sanki biliniyormuş gibi anlatılıyor,
+# ifşa edilen bir bilgi sonradan tekrar sır muamelesi görüyor.
+# ---------------------------------------------------------------------------
+
+KNOWLEDGE_EXTRACT_PROMPT = """Sen bir yapı editörüsün. Sana bir romanın bölüm
+özetleri SIRAYLA verilecek. BİLGİ HARİTASI çıkar: romanın gerilimini taşıyan
+kritik bilgiler ve bunları kimin bildiği.
+
+Kurallar:
+1. Sadece GERİLİM TAŞIYAN bilgileri al (bir sır, bir gerçek, bir niyet).
+   Sıradan olayları ("karakter odaya girdi") bilgi sayma.
+2. Her bilgi için: hangi bölümde devreye girdi, hangi bölümde açığa çıktı
+   (belli değilse null), OKUR'un durumu ne (hayir/sezdirildi/evet).
+3. TUTARSIZLIK ara: bir karakter bilmemesi gereken bir şeye göre mi
+   davranıyor? Okura ifşa edilmemiş bilgi biliniyormuş gibi mi anlatılıyor?
+   Açığa çıkmış bir bilgi sonradan tekrar sır muamelesi mi görüyor?
+   Bir bilgi hiç ödenmiyor mu (kurulup unutulmuş)?
+4. Kanıt göster: hangi bölüm/özet cümlesi bu sonucu doğruluyor.
+   Kanıt yoksa o maddeyi YAZMA.
+5. En fazla 12 bilgi, en fazla 8 tutarsızlık.
+
+Yanıtın SADECE şu JSON olsun:
+{"facts": [{"information": "...", "introduced_chapter": 3, "reveal_chapter": 12,
+  "reader_state": "hayir|sezdirildi|evet", "characters": ["Başkan"],
+  "reveal_method": "...", "planned_payoff": "...", "evidence": "..."}],
+ "issues": [{"type": "bilgi_sizmasi|erken_ifsa|odenmemis_kurulum|celiski",
+  "information": "...", "chapters": [4,9], "problem": "...", "fix": "..."}]}"""
+
+
+def extract_knowledge_map(db: Session, novel_id: int, max_chars: int = 24000) -> dict:
+    """Bölüm özetlerinden bilgi haritası önerir ve tutarsızlıkları bulur.
+    Kaydetmez - kullanıcı onaylayınca kaydedilir."""
+    chapters = (
+        db.query(models.Chapter)
+        .filter(models.Chapter.novel_id == novel_id)
+        .order_by(models.Chapter.number)
+        .all()
+    )
+    ozetli = [c for c in chapters if (c.summary or "").strip()]
+    if len(ozetli) < 2:
+        return {"facts": [], "issues": [], "note": "Bilgi haritası için en az 2 özetli bölüm gerekir."}
+
+    bloklar, used = [], 0
+    for c in ozetli:
+        parca = f"--- Bölüm {c.number}{' - ' + c.title if c.title else ''} ---\n{c.summary.strip()}"
+        if used + len(parca) > max_chars:
+            bloklar.append("[... kalan bölümler kırpıldı ...]")
+            break
+        bloklar.append(parca)
+        used += len(parca)
+
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": KNOWLEDGE_EXTRACT_PROMPT},
+            {"role": "user", "content": "BÖLÜM ÖZETLERİ:\n\n" + "\n\n".join(bloklar)},
+        ],
+    )
+    data = _parse_json_lenient(response.choices[0].message.content) or {}
+
+    # Karakter adlarını kanona bağla (uydurma isim kaydedilmesin)
+    kanon = {}
+    for ch_kayit in db.query(models.Character).all():
+        kanon[_tr_lower(ch_kayit.name)] = ch_kayit.id
+        for takma in (ch_kayit.aliases or []):
+            kanon[_tr_lower(takma)] = ch_kayit.id
+
+    gecerli_durum = {"hayir", "sezdirildi", "evet"}
+    facts = []
+    for f in (data.get("facts") or []):
+        if not isinstance(f, dict) or not (f.get("information") or "").strip():
+            continue
+        if not (f.get("evidence") or "").strip():
+            continue        # kanıtsız madde alınmaz
+        ids = [kanon[_tr_lower(a)] for a in (f.get("characters") or [])
+               if isinstance(a, str) and _tr_lower(a) in kanon]
+        facts.append({
+            "information": f["information"].strip()[:300],
+            "introduced_chapter": f.get("introduced_chapter") if isinstance(f.get("introduced_chapter"), int) else None,
+            "reveal_chapter": f.get("reveal_chapter") if isinstance(f.get("reveal_chapter"), int) else None,
+            "reader_state": f.get("reader_state") if f.get("reader_state") in gecerli_durum else "hayir",
+            "known_by_characters": ids,
+            "character_names": [a for a in (f.get("characters") or []) if isinstance(a, str)][:8],
+            "reveal_method": (f.get("reveal_method") or "")[:200],
+            "planned_payoff": (f.get("planned_payoff") or "")[:200],
+            "evidence": (f.get("evidence") or "")[:300],
+        })
+
+    gecerli_tur = {"bilgi_sizmasi", "erken_ifsa", "odenmemis_kurulum", "celiski"}
+    issues = [
+        {
+            "type": i.get("type") if i.get("type") in gecerli_tur else "celiski",
+            "information": (i.get("information") or "")[:300],
+            "chapters": [n for n in (i.get("chapters") or []) if isinstance(n, int)],
+            "problem": (i.get("problem") or "")[:400],
+            "fix": (i.get("fix") or "")[:400],
+        }
+        for i in (data.get("issues") or []) if isinstance(i, dict) and (i.get("problem") or "").strip()
+    ][:8]
+    return {"facts": facts[:12], "issues": issues, "note": ""}

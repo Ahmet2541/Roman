@@ -1205,3 +1205,31 @@ class MicroEditOption(BaseModel):
 
 class MicroEditResponse(BaseModel):
     options: List[MicroEditOption] = []
+
+
+class KnowledgeFactSuggestion(BaseModel):
+    information: str = ""
+    introduced_chapter: Optional[int] = None
+    reveal_chapter: Optional[int] = None
+    reader_state: str = "hayir"
+    known_by_characters: List[int] = []
+    character_names: List[str] = []
+    reveal_method: str = ""
+    planned_payoff: str = ""
+    evidence: str = ""
+
+
+class KnowledgeIssue(BaseModel):
+    type: str = "celiski"
+    information: str = ""
+    chapters: List[int] = []
+    problem: str = ""
+    fix: str = ""
+
+
+class KnowledgeScanResponse(BaseModel):
+    """Bölüm özetlerinden çıkarılan bilgi haritası önerisi + tutarsızlıklar.
+    Kaydedilmez - kullanıcı onaylayınca kaydedilir."""
+    facts: List[KnowledgeFactSuggestion] = []
+    issues: List[KnowledgeIssue] = []
+    note: str = ""

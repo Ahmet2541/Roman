@@ -1768,7 +1768,7 @@ function renderReader(chapter) {
   readerPane.querySelectorAll('.mention-goto').forEach(el => el.addEventListener('click', () => {
     openEntityFromMention(el.dataset.type, parseInt(el.dataset.id, 10));
   }));
-  document.getElementById('ttsPlayBtn').addEventListener('click', () => startChapterTts(chapter));
+  document.getElementById('ttsPlayBtn').addEventListener('click', () => openTtsRangePicker(chapter));
 
   document.getElementById('workshopBtn').addEventListener('click', () => openChapterWorkshop(chapter));
   document.getElementById('chapterReviewBtn').addEventListener('click', () => runChapterReview(chapter));
@@ -3363,25 +3363,21 @@ function renderFullScanView(container) {
     <button class="btn btn-primary" id="startScanBtn">Taramayı Başlat</button>
     <div id="scanResult" style="margin-top:20px;"></div>`;
 
+  // Önceki tarama varsa göster (yeniden çalıştırmadan)
+  const oncekiTutarlilik = loadGlobalScan('fullscan');
+  if (oncekiTutarlilik) {
+    const el = (container || main()).querySelector('#scanResult');
+    if (el) el.innerHTML = `<div style="font-size:11.5px;color:var(--text-muted);background:var(--paper-dim);padding:6px 8px;border-radius:6px;">
+      📦 Kayıtlı tarama (${scanAgeLabel(oncekiTutarlilik)}) - yeniden çalıştırmak için düğmeye bas.</div>`
+      + renderScanIssues(oncekiTutarlilik.veri);
+  }
   document.getElementById('startScanBtn').addEventListener('click', async () => {
     const resultEl = document.getElementById('scanResult');
     resultEl.innerHTML = `<div class="empty-state">Qwen tüm romanı okuyor, bu biraz sürebilir…</div>`;
     try {
       const result = await api.post('/ai/full-scan', {});
-      let html = '';
-      if (result.summary) html += `<div class="panel">${escapeHtml(result.summary)}</div>`;
-      if (!result.issues.length) {
-        html += `<div class="success-text" style="margin-top:12px;">Herhangi bir tutarsızlık bulunamadı.</div>`;
-      } else {
-        const severityColor = { 'yüksek': 'var(--danger)', 'orta': '#a67c1e', 'düşük': 'var(--text-muted)' };
-        html += result.issues.map(issue => `
-          <div class="panel" style="margin-top:10px;border-left:4px solid ${severityColor[issue.severity] || 'var(--border)'};">
-            <strong style="text-transform:uppercase;font-size:11px;color:${severityColor[issue.severity] || 'var(--text-muted)'};">${escapeHtml(issue.severity)}</strong>
-            ${issue.chapter_number ? ` · Bölüm ${issue.chapter_number}${issue.paragraph_number ? ', Paragraf ' + issue.paragraph_number : ''}` : ''}
-            <div style="margin-top:6px;font-size:13.5px;">${escapeHtml(issue.description)}</div>
-          </div>`).join('');
-      }
-      resultEl.innerHTML = html;
+      saveGlobalScan('fullscan', result);   // sonuç saklanır - baştan çalışmasın
+      resultEl.innerHTML = renderScanIssues(result);
     } catch (err) {
       resultEl.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
     }
@@ -5448,14 +5444,80 @@ function ensureTtsBar(chapter) {
   return bar;
 }
 
-function startChapterTts(chapter, startIndex = 0) {
+// Sesli okuma başlangıç seçici: hangi paragraftan başlanacağı ve nerede
+// biteceği. 224 paragraflık bir bölümde baştan dinlemek zorunda kalmak
+// kullanışsızdı; artık aralık verip sadece o kısmı dinleyebiliyorsun.
+function openTtsRangePicker(chapter) {
+  const paras = (chapter.paragraphs || []).slice().sort((a, b) => a.number - b.number)
+    .filter(p => (p.text || '').trim());
+  if (!paras.length) { alert('Okunacak metin yok.'); return; }
+  if (paras.length <= 5) { startChapterTts(chapter, 0); return; }   // kısa bölümde soru sorma
+
+  const overlay = ensureModalOverlay();
+  const ilk = paras[0].number, son = paras[paras.length - 1].number;
+  overlay.innerHTML = `
+    <div class="panel" style="max-width:420px;width:92%;">
+      <b>🔊 Sesli Oku</b>
+      <div style="font-size:12.5px;color:var(--text-muted);margin-top:4px;">
+        ${paras.length} paragraf (P${ilk}–P${son}). Aralık seçebilirsin.
+      </div>
+      <div style="display:flex;gap:10px;margin-top:8px;">
+        <div class="field" style="flex:1;"><label>Başlangıç</label>
+          <input type="number" id="ttsFrom" value="${ilk}" min="${ilk}" max="${son}"></div>
+        <div class="field" style="flex:1;"><label>Bitiş</label>
+          <input type="number" id="ttsTo" value="${son}" min="${ilk}" max="${son}"></div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn btn-sm" id="ttsPresetAll" style="font-size:11.5px;">Tümü</button>
+        <button class="btn btn-sm" id="ttsPresetFirst" style="font-size:11.5px;">İlk 10</button>
+        <button class="btn btn-sm" id="ttsPresetLast" style="font-size:11.5px;">Son 10</button>
+        <button class="btn btn-sm" id="ttsPresetFlagged" style="font-size:11.5px;" title="İncelemede bulgu çıkan paragraflar">⚑ Bulgulular</button>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="ttsStart">Oku</button>
+        <button class="btn" id="ttsCancel">Vazgeç</button>
+      </div>
+    </div>`;
+  overlay.style.display = 'flex';
+  const kapat = () => { overlay.style.display = 'none'; overlay.innerHTML = ''; };
+  document.getElementById('ttsCancel').addEventListener('click', kapat);
+  document.getElementById('ttsPresetAll').addEventListener('click', () => {
+    document.getElementById('ttsFrom').value = ilk; document.getElementById('ttsTo').value = son;
+  });
+  document.getElementById('ttsPresetFirst').addEventListener('click', () => {
+    document.getElementById('ttsFrom').value = ilk;
+    document.getElementById('ttsTo').value = paras[Math.min(9, paras.length - 1)].number;
+  });
+  document.getElementById('ttsPresetLast').addEventListener('click', () => {
+    document.getElementById('ttsFrom').value = paras[Math.max(0, paras.length - 10)].number;
+    document.getElementById('ttsTo').value = son;
+  });
+  document.getElementById('ttsPresetFlagged').addEventListener('click', () => {
+    const c = loadReviewCache(chapter.id);
+    const numaralar = Object.keys(c?.findings || {}).map(Number).sort((a, b) => a - b);
+    if (!numaralar.length) { alert('Bu bölümde işaretli bulgu yok - önce incele.'); return; }
+    kapat();
+    startChapterTts(chapter, 0, numaralar);
+  });
+  document.getElementById('ttsStart').addEventListener('click', () => {
+    const bas = parseInt(document.getElementById('ttsFrom').value, 10) || ilk;
+    const bit = parseInt(document.getElementById('ttsTo').value, 10) || son;
+    const secili = paras.filter(p => p.number >= Math.min(bas, bit) && p.number <= Math.max(bas, bit))
+      .map(p => p.number);
+    kapat();
+    startChapterTts(chapter, 0, secili);
+  });
+}
+
+function startChapterTts(chapter, startIndex = 0, onlyNumbers = null) {
   if (!window.speechSynthesis) {
     alert('Tarayıcın sesli okumayı desteklemiyor. Chrome, Edge ya da Safari dene.');
     return;
   }
   window.speechSynthesis.cancel();
   ttsState.paragraphs = (chapter.paragraphs || []).slice().sort((a, b) => a.number - b.number)
-    .filter(p => (p.text || '').trim());
+    .filter(p => (p.text || '').trim())
+    .filter(p => !onlyNumbers || onlyNumbers.includes(p.number));
   if (!ttsState.paragraphs.length) { alert('Okunacak metin yok.'); return; }
 
   ttsState.voice = pickTurkishVoice();
@@ -6327,13 +6389,18 @@ async function renderStructureScan(el) {
       bahis yükseliyor mu, çıkarılsa fark edilmeyecek bölüm var mı. Bölüm ÖZETLERİ kullanılır.
     </p>
     <button class="btn btn-primary" id="startStructureScan">Yapısal Taramayı Başlat</button>
-    <div id="structureResult" style="margin-top:14px;"></div>`;
+    <div id="structureResult" style="margin-top:14px;">${(() => {
+      const onceki = loadGlobalScan('structure');
+      return onceki ? `<div style="font-size:11.5px;color:var(--text-muted);background:var(--paper-dim);padding:6px 8px;border-radius:6px;">
+        📦 Son tarama ${scanAgeLabel(onceki)}${onceki.veri.summary ? ' · ' + escapeHtml(truncate(onceki.veri.summary, 100)) : ''}</div>` : '';
+    })()}</div>`;
 
   el.querySelector('#startStructureScan').addEventListener('click', async () => {
     const box = el.querySelector('#structureResult');
     box.innerHTML = '<div class="empty-state">Bölüm zinciri inceleniyor…</div>';
     try {
       const r = await api.post('/ai/structure-scan', {});
+      saveGlobalScan('structure', r);   // sonuç saklanır
       const trendRenk = { 'yükseliyor': '#3f7a4f', 'sabit': '#b08d3f', 'düşüyor': 'var(--danger)' }[r.stakes?.trend] || 'var(--text-muted)';
       const blok = (baslik, icerik) => icerik ? `<div style="margin-top:12px;"><strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">${baslik}</strong>${icerik}</div>` : '';
       box.innerHTML = `
@@ -7849,10 +7916,15 @@ async function renderKnowledgeView() {
       üç ekseni ayrı tut: hangi karakterler biliyor, <b>okur</b> ne durumda, ne zaman ifşa olacak.
       Okur bilip hiçbir karakterin bilmediği bilgi = <b>dramatik ironi</b>.
     </p>
-    <div class="toolbar"><div></div><button class="btn btn-primary" id="addFactBtn">+ Yeni Bilgi</button></div>
+    <div class="toolbar">
+      <button class="btn" id="scanKnowledgeBtn" title="Bölüm özetlerini tarayıp bilgi haritasını önerir ve tutarsızlıkları bildirir">🔎 Bölümleri tara ve öner</button>
+      <button class="btn btn-primary" id="addFactBtn">+ Yeni Bilgi</button>
+    </div>
+    <div id="knowledgeScanBox"></div>
     <div id="factForm"></div>
     <div id="factList"><div class="empty-state">Yükleniyor…</div></div>`;
   document.getElementById('addFactBtn').addEventListener('click', () => showFactForm(null));
+  document.getElementById('scanKnowledgeBtn').addEventListener('click', runKnowledgeScan);
   await loadFactList();
 }
 
@@ -8042,6 +8114,34 @@ function renderWorkshopReviewSummary(literary, motif, onbellekten, gunFarki) {
 }
 
 // İnceleme önbelleği (bölüm bazlı, tarayıcıda)
+// ---------------------------------------------------------------------------
+// ROMAN GENELİ TARAMA HAFIZASI: tutarlılık, üslup ve yapısal akış sonuçları
+// da saklanır. Bölüm değerlendirmeleri zaten kaydediliyordu; bunlar her
+// seferinde baştan çalışıyor ve önceki sonuç kayboluyordu - oysa uzun
+// romanda bu taramalar dakikalar sürüyor ve karşılaştırma değerli.
+// ---------------------------------------------------------------------------
+function saveGlobalScan(tur, veri) {
+  try {
+    const novelId = getNovelId() || 0;
+    localStorage.setItem(`roman_scan_${tur}_${novelId}`, JSON.stringify({ at: Date.now(), veri }));
+  } catch (e) { /* depolama dolu - sessiz geç */ }
+}
+function loadGlobalScan(tur) {
+  try {
+    const novelId = getNovelId() || 0;
+    const raw = localStorage.getItem(`roman_scan_${tur}_${novelId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+function scanAgeLabel(kayit) {
+  if (!kayit) return '';
+  const dk = Math.floor((Date.now() - kayit.at) / 60000);
+  if (dk < 60) return `${dk} dakika önce`;
+  const saat = Math.floor(dk / 60);
+  if (saat < 24) return `${saat} saat önce`;
+  return `${Math.floor(saat / 24)} gün önce`;
+}
+
 function saveReviewCache(chapterId, veri) {
   try { localStorage.setItem(`roman_review_${chapterId}`, JSON.stringify(veri)); }
   catch (e) { /* depolama dolu - önbelleksiz devam */ }
@@ -8403,4 +8503,91 @@ async function runLengthScan() {
   } catch (err) {
     kutu.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   }
+}
+
+// Bilgi haritası otomatik taraması: özetlerden bilgi önerir, tutarsızlıkları
+// bildirir. Öneriler ONAYSIZ kaydedilmez - her biri tek tek eklenir.
+async function runKnowledgeScan() {
+  const kutu = document.getElementById('knowledgeScanBox');
+  kutu.innerHTML = '<div class="empty-state">Bölüm özetleri taranıyor…</div>';
+  try {
+    const r = await api.post('/ai/knowledge-scan', {});
+    if (r.note) { kutu.innerHTML = `<div class="panel" style="font-size:12.5px;">${escapeHtml(r.note)}</div>`; return; }
+    const turEtiket = {
+      bilgi_sizmasi: '🚨 Bilgi sızması', erken_ifsa: '⚠ Erken ifşa',
+      odenmemis_kurulum: '🔓 Ödenmemiş kurulum', celiski: '⚡ Çelişki',
+    };
+    const okurEtiket = { hayir: '🔒 bilmiyor', sezdirildi: '🔎 sezdirildi', evet: '👁 biliyor' };
+    kutu.innerHTML = `
+      ${r.issues.length ? `
+        <div class="panel" style="border-left:3px solid var(--danger);">
+          <div style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">TUTARSIZLIKLAR (${r.issues.length})</div>
+          ${r.issues.map(i => `
+            <div style="font-size:12.5px;margin-top:8px;border-left:2px solid var(--border);padding-left:8px;">
+              <b>${turEtiket[i.type] || i.type}</b>${i.chapters.length ? ` <span style="color:var(--text-muted);">Bölüm ${i.chapters.join(', ')}</span>` : ''}
+              ${i.information ? `<div style="font-style:italic;">"${escapeHtml(i.information)}"</div>` : ''}
+              <div style="color:var(--text-muted);">${escapeHtml(i.problem)}</div>
+              ${i.fix ? `<div>→ ${escapeHtml(i.fix)}</div>` : ''}
+            </div>`).join('')}
+        </div>` : '<div class="panel" style="border-left:3px solid #3f7a4f;font-size:12.5px;"><b style="color:#3f7a4f;">✓ Tutarsızlık bulunamadı</b></div>'}
+      ${r.facts.length ? `
+        <div class="panel" style="margin-top:10px;">
+          <div style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">ÖNERİLEN BİLGİLER (${r.facts.length}) - onaysız kaydedilmez</div>
+          ${r.facts.map((f, i) => `
+            <div class="entity-row" style="flex-wrap:wrap;">
+              <div style="flex:1;min-width:220px;">
+                <div class="name">${escapeHtml(f.information)}</div>
+                <div class="desc" style="display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;">
+                  <span>${okurEtiket[f.reader_state]}</span>
+                  ${f.character_names.length ? `<span>👤 ${f.character_names.map(escapeHtml).join(', ')}</span>` : ''}
+                  ${f.introduced_chapter ? `<span>giriş: B${f.introduced_chapter}</span>` : ''}
+                  ${f.reveal_chapter ? `<span>ifşa: B${f.reveal_chapter}</span>` : '<span style="color:var(--danger);">ifşa planlanmamış</span>'}
+                </div>
+                ${f.evidence ? `<div class="desc" style="font-style:italic;">kanıt: ${escapeHtml(f.evidence)}</div>` : ''}
+              </div>
+              <div class="actions"><button class="btn btn-sm btn-primary kfact-add" data-idx="${i}">+ Ekle</button></div>
+            </div>`).join('')}
+          <button class="btn btn-sm" id="kfactAddAll" style="margin-top:8px;">Hepsini ekle (${r.facts.length})</button>
+        </div>` : ''}`;
+
+    const ekle = async (f) => api.post('/knowledge/', {
+      information: f.information, introduced_chapter: f.introduced_chapter,
+      reveal_chapter: f.reveal_chapter, known_by_characters: f.known_by_characters,
+      reader_state: f.reader_state, reveal_method: f.reveal_method,
+      planned_payoff: f.planned_payoff,
+    });
+    kutu.querySelectorAll('.kfact-add').forEach(b => b.addEventListener('click', async () => {
+      b.disabled = true; b.textContent = 'Ekleniyor…';
+      try { await ekle(r.facts[parseInt(b.dataset.idx, 10)]); b.textContent = '✓ Eklendi'; await loadFactList(); }
+      catch (err) { b.disabled = false; b.textContent = '+ Ekle'; alert(err.message); }
+    }));
+    document.getElementById('kfactAddAll')?.addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      for (let i = 0; i < r.facts.length; i++) {
+        e.target.textContent = `Ekleniyor… ${i + 1}/${r.facts.length}`;
+        try { await ekle(r.facts[i]); } catch (err) { /* atla */ }
+      }
+      e.target.textContent = '✓ Hepsi eklendi';
+      await loadFactList();
+    });
+  } catch (err) {
+    kutu.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// Tutarlılık tarama sonucunu çizer - hem taze hem KAYITLI sonuç için.
+function renderScanIssues(result) {
+  let html = '';
+  if (result.summary) html += `<div class="panel">${escapeHtml(result.summary)}</div>`;
+  if (!result.issues || !result.issues.length) {
+    return html + '<div class="success-text" style="margin-top:12px;">Herhangi bir tutarsızlık bulunamadı.</div>';
+  }
+  const severityColor = { 'yüksek': 'var(--danger)', 'orta': '#a67c1e', 'düşük': 'var(--text-muted)' };
+  html += result.issues.map(issue => `
+    <div class="panel" style="margin-top:10px;border-left:4px solid ${severityColor[issue.severity] || 'var(--border)'};">
+      <strong style="text-transform:uppercase;font-size:11px;color:${severityColor[issue.severity] || 'var(--text-muted)'};">${escapeHtml(issue.severity)}</strong>
+      ${issue.chapter_number ? ` · Bölüm ${issue.chapter_number}${issue.paragraph_number ? ', Paragraf ' + issue.paragraph_number : ''}` : ''}
+      <div style="margin-top:6px;font-size:13.5px;">${escapeHtml(issue.description)}</div>
+    </div>`).join('');
+  return html;
 }

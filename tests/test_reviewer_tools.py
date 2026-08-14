@@ -878,3 +878,44 @@ def test_split_preview_does_not_save(client, headers):
     # Boş metin reddedilir
     r = client.post(f"/chapters/{ch['id']}/split-preview", json={"text": "   "}, headers=headers)
     assert r.status_code == 400
+
+
+def test_knowledge_scan_extracts_and_finds_issues(client, headers):
+    """Bilgi haritası otomatik çıkarımı: özetlerden bilgi önerir,
+    tutarsızlıkları bildirir. KANITSIZ öneri alınmaz (halüsinasyon
+    koruması) ve karakter adları KANONA bağlanır - uydurma isim geçmez."""
+    baskan = client.post("/characters/", json={"name": "Başkan"}, headers=headers).json()
+    for no, ozet in ((1, "OLAY: Başkan imzayı attı, kimse görmedi."),
+                     (2, "OLAY: Vicdan kaydı açar.")):
+        ch = client.post("/chapters/", json={"number": no, "kind": "chapter", "title": f"B{no}"}, headers=headers).json()
+        client.put(f"/chapters/{ch['id']}", json={"summary": ozet}, headers=headers)
+
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "facts": [
+                {"information": "Başkan imzayı attı", "introduced_chapter": 1, "reveal_chapter": 2,
+                 "reader_state": "sezdirildi", "characters": ["Başkan", "OlmayanKişi"],
+                 "reveal_method": "Kayıt", "planned_payoff": "Tur 1", "evidence": "Bölüm 1: imzayı attı"},
+                {"information": "Kanıtsız iddia", "reader_state": "evet", "characters": []},
+            ],
+            "issues": [
+                {"type": "bilgi_sizmasi", "information": "İmza", "chapters": [2],
+                 "problem": "Vicdan bilmediği kaydı açıyor.", "fix": "Önce ipucu ver."},
+                {"type": "uydurma_tur", "information": "x", "problem": "y"},
+            ],
+        })
+        r = client.post("/ai/knowledge-scan", headers=headers)
+    d = r.json()
+    assert len(d["facts"]) == 1, "kanıtsız öneri ayıklanmalı"
+    assert d["facts"][0]["known_by_characters"] == [baskan["id"]]   # kanona bağlandı
+    assert d["issues"][0]["type"] == "bilgi_sizmasi"
+    assert d["issues"][1]["type"] == "celiski"                       # geçersiz tür güvenli tarafa
+
+    # 2'den az özetli bölümde Qwen'e hiç gidilmez
+    h2 = dict(headers)
+    yeni = client.post("/novels/", json={"name": "Bos"}, headers=headers).json()
+    h2["X-Novel-Id"] = str(yeni["id"])
+    with patch("app.qwen_client.get_client") as mc:
+        r = client.post("/ai/knowledge-scan", headers=h2)
+        mc.assert_not_called()
+    assert "en az 2 özetli" in r.json()["note"]
