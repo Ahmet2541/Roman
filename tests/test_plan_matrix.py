@@ -532,3 +532,23 @@ def test_outline_tree_endpoint(client, headers):
     assert ust["display"] == "1" and ust["level"] == 0 and ust["child_count"] == 2
     alt = next(t for t in tree if t["title"] == "Kısım 2")
     assert alt["display"] == "1-2" and alt["level"] == 1
+
+
+def test_plan_for_chapter_returns_list(client, headers):
+    """REGRESYON: /matrix/plan-for-chapter LİSTE döndürür (bir bölüme
+    birden çok hücre bağlı olabilir). Frontend bunu tek nesne gibi
+    okuyordu - plan kaydedilse bile "plan yok" görünüyordu."""
+    ch = client.post("/chapters/", json={"number": 1, "kind": "chapter", "title": "B"}, headers=headers).json()
+    r = client.post("/matrix/quick-plan", json={"chapter_id": ch["id"], "content": "- Madde bir"}, headers=headers)
+    assert r.status_code == 200, r.text
+
+    okunan = client.get(f"/matrix/plan-for-chapter/{ch['id']}", headers=headers).json()
+    assert isinstance(okunan, list), "uç liste döndürmeli"
+    assert len(okunan) == 1
+    assert okunan[0]["content"] == "- Madde bir"
+    assert okunan[0]["matrix_name"] == "Hızlı Planlar"
+
+    # Aynı bölüme tekrar yazmak YENİ hücre açmaz, mevcudu günceller
+    client.post("/matrix/quick-plan", json={"chapter_id": ch["id"], "content": "- Güncellendi"}, headers=headers)
+    okunan2 = client.get(f"/matrix/plan-for-chapter/{ch['id']}", headers=headers).json()
+    assert len(okunan2) == 1 and okunan2[0]["content"] == "- Güncellendi"

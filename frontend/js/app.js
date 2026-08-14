@@ -1517,7 +1517,10 @@ function renderReader(chapter) {
   loadParaState(chapter.id);           // önceki oturumun işlev/karar kayıtları
   // Bölüm planı, paragraf işlevinin MİRAS kaynağıdır (bkz. effectiveParaPurpose)
   api.get(`/matrix/plan-for-chapter/${chapter.id}`)
-    .then(r => { window.__currentChapterPlan = (r && r.content) || ''; })
+    .then(r => {
+      const liste = Array.isArray(r) ? r : (r ? [r] : []);
+      window.__currentChapterPlan = liste.map(x => (x.content || '').trim()).filter(Boolean).join('\n');
+    })
     .catch(() => { window.__currentChapterPlan = ''; });
   const chapterEntryNumber = (buildChapterHierarchy(lastLoadedChapters)
     .find(it => String(it.chapter.id) === String(chapter.id)) || {}).displayNumber || '';
@@ -6682,8 +6685,12 @@ async function renderWorkshopPrep() {
   const ozetVar = !!(ch.summary || '').trim();
   let planVar = false, olayVar = false;
   try {
+    // Uç LİSTE döndürür (bir bölüme birden çok hücre bağlı olabilir).
+    // Eskiden tek nesne gibi okunuyordu; plan kaydedilse bile "yok"
+    // görünüyor ve "Planı kaydet" işe yaramamış gibi duruyordu.
     const plan = await api.get(`/matrix/plan-for-chapter/${ch.id}`);
-    planVar = !!(plan && (plan.content || '').trim());
+    const hucreler = Array.isArray(plan) ? plan : (plan ? [plan] : []);
+    planVar = hucreler.some(x => (x.content || '').trim());
   } catch (e) { /* plan yok */ }
   try {
     const olaylar = await api.get('/events/');
@@ -6709,14 +6716,28 @@ async function renderWorkshopPrep() {
     ${satir(olayVar, 'Zaman çizelgesi', olayVar ? 'Bu bölümden olaylar çizelgede işlenmiş.' : 'Bu bölümden çizelgeye olay işlenmemiş. Kronoloji hataları görünmez kalır.', 'wsMakeEvents', '🕐 Zaman çizelgesini güncelle')}
     ${satir(planVar, 'Bölüm planı', planVar ? 'Var - paragrafların işlevi buradan miras alınacak.' : 'Yok. Paragrafların "ne yapması gerektiği" tanımsız kalır.', 'wsMakePlan', '⚡ Metinden plan çıkar')}
     <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
-      <button class="btn btn-primary" id="wsFullPass" style="flex:1;min-width:210px;">🔁 Bölümü tekrar değerlendir ve paragrafları düzenle</button>
-      <button class="btn" id="wsToReview" style="flex:1;">Sadece incele →</button>
+      <button class="btn btn-primary" id="wsFullPass" style="flex:1;min-width:190px;">🔬 Bölümü değerlendir ve düzenle</button>
+      <button class="btn" id="wsLengthPass" style="flex:1;min-width:170px;">📏 Paragraf uzunluk kontrolü</button>
+      <button class="btn" id="wsToReview" style="flex:1;min-width:140px;">Sadece incele →</button>
     </div>
     <div id="wsPrepResult" style="margin-top:10px;"></div>`);
   document.getElementById('workshopClose').addEventListener('click', closeWorkshop);
   document.getElementById('wsToReview').addEventListener('click', renderWorkshopReview);
   // TAM TUR: önbelleği yok sayıp analizi TAZELER, süpürme modunu açar ve
   // doğrudan paragraf paragraf düzenlemeye geçer. Tek düğmeyle uçtan uca.
+  // UZUNLUK KONTROLÜ: tamamen mekanik iş - edebî değerlendirmeyle
+  // karışmasın diye ayrı düğme. Atölyeyi kapatıp Denetim > Uzunluk
+  // sekmesine geçer ve bu bölümü seçili getirir.
+  document.getElementById('wsLengthPass').addEventListener('click', () => {
+    const id = ch.id;
+    closeWorkshop();
+    currentDenetimTab = 'length';
+    switchView('denetim');
+    setTimeout(() => {
+      const sel = document.getElementById('lcChapter');
+      if (sel) { sel.value = String(id); document.getElementById('lcScan')?.click(); }
+    }, 500);
+  });
   document.getElementById('wsFullPass').addEventListener('click', () => {
     workshopState.forceRescan = true;
     workshopState.autoSweep = true;
@@ -6766,10 +6787,15 @@ async function renderWorkshopPrep() {
       document.getElementById('wsPlanCancel').addEventListener('click', () => { kutu.innerHTML = ''; });
       document.getElementById('wsPlanSave').addEventListener('click', async () => {
         try {
-          await api.post('/matrix/quick-plan', {
+          const kayitBtn = document.getElementById('wsPlanSave');
+          kayitBtn.disabled = true; kayitBtn.textContent = 'Kaydediliyor…';
+          const sonuc = await api.post('/matrix/quick-plan', {
             chapter_id: ch.id, content: document.getElementById('wsPlanDraft').value.trim(),
           });
-          renderWorkshopPrep();
+          kutu.innerHTML = `<div class="panel" style="border-left:3px solid #3f7a4f;">
+            <b style="color:#3f7a4f;">✓ Plan kaydedildi</b>
+            <div style="font-size:12px;color:var(--text-muted);">${escapeHtml(sonuc.matrix_name || 'Hızlı Planlar')} · kod ${escapeHtml(sonuc.code || '')}</div></div>`;
+          setTimeout(renderWorkshopPrep, 900);
         } catch (err) { alert(err.message); }
       });
     } catch (err) { kutu.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; }
