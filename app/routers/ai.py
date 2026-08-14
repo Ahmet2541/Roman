@@ -7,7 +7,7 @@ from ..auth import get_current_user
 from .. import schemas, models
 from ..qwen_client import (
     build_context, ask_qwen, full_scan, chat_with_qwen, reader_test_chapter,
-    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite, retest_paragraph, motif_map, paragraph_roles, fuse_diagnoses, evaluate_tradeoff, paragraph_necessity, plan_from_text, micro_edit, extract_knowledge_map, review_arc,
+    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite, retest_paragraph, motif_map, paragraph_roles, fuse_diagnoses, evaluate_tradeoff, paragraph_necessity, plan_from_text, micro_edit, extract_knowledge_map, review_arc, strip_tool_leaks,
 )
 from ..entities import ENTITY_MODELS
 from ..sections import SECTIONS_BY_ENTITY_TYPE, _tr_lower
@@ -117,7 +117,7 @@ def chat(
             detail=f"Qwen API'ye ulaşılamadı: {exc}. DASHSCOPE_API_KEY doğru mu ve internet bağlantısı var mı kontrol et.",
         )
     return schemas.AiChatResponse(
-        reply=reply, actions_taken=actions_taken,
+        reply=strip_tool_leaks(reply), actions_taken=actions_taken,
         pending_entity_updates=pending_entity_updates, draft_result=draft_result,
     )
 

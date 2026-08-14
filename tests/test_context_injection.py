@@ -309,3 +309,25 @@ def test_rewrite_context_has_own_summary_and_entity_profile(client, headers):
         "selected_entities": [], "chapter_number": 1, "instruction": "yaz",
     }, headers=headers).json()["context"]
     assert "ÜZERİNDE ÇALIŞILAN BÖLÜMÜN ÖZETİ" not in ctx2
+
+
+def test_tool_names_never_leak_to_user():
+    """Araç adları kullanıcıya SIZMAMALI: "set_draft_result ile
+    kaydedebilirim" gibi cümleler iç mekanizmadır, ekranda anlamsızdır ve
+    kullanıcıya gereksiz bir onay turu ekletir."""
+    from app.qwen_client import strip_tool_leaks, CHAT_SYSTEM_PROMPT
+
+    metin = ("Bu versiyon tematik bütünlüğü koruyor.\n\n"
+             "İstersen bu versiyonu doğrudan set_draft_result ile taslak olarak "
+             "kaydedebilirim — senin onayını bekliyorum.")
+    temiz = strip_tool_leaks(metin)
+    assert "set_draft_result" not in temiz
+    assert "tematik bütünlüğü koruyor" in temiz      # asıl içerik korunur
+
+    assert strip_tool_leaks("write_paragraph ile ekleyeyim mi?") .strip() == ""
+    assert strip_tool_leaks("") == ""
+    assert strip_tool_leaks("Normal cevap.") == "Normal cevap."
+
+    # Prompt seviyesinde de yasak
+    assert "ARAÇ ADLARINI KULLANICIYA ASLA SÖYLEME" in CHAT_SYSTEM_PROMPT
+    assert "İZİN İSTEME, ÜRET" in CHAT_SYSTEM_PROMPT

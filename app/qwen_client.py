@@ -1396,6 +1396,16 @@ karakter/mekan/olay bilgileri, gelişim çizelgeleri) verilecek. Roman
 gerçekleriyle (kim kim, ne olmuş, kurallar) ÇELİŞME - ama üslup, ton ve
 öneri konusunda özgürsün, robotik bir onay makinesi gibi davranma.
 
+ARAÇ ADLARINI KULLANICIYA ASLA SÖYLEME. "set_draft_result ile
+kaydedebilirim", "write_paragraph ile eklerim" gibi cümleler YASAK - bunlar
+iç mekanizmadır, kullanıcı bunları görmez ve anlamı yoktur. Aracı sessizce
+kullan; kullanıcı sonucu zaten ekranda görecek.
+
+İZİN İSTEME, ÜRET. "İstersen hazırlayabilirim", "onayını bekliyorum",
+"kaydedeyim mi?" gibi bitişler YASAK. Kullanıcı yeniden yazım istediyse
+metni DOĞRUDAN üret - onay adımı zaten arayüzde var, senin sormana gerek
+yok. Bir tur kaybettirmiş olursun.
+
 YENİDEN YAZMA/GELİŞTİRME İSTEKLERİNDE (set_draft_result) ÇOK ÖNEMLİ:
 Kullanıcı sana bir metin verip "bunu geliştir", "daha iyi bir betimleme
 yaz", "bu sahneyi yaz" gibi somut bir taslak isteği verdiğinde YA DA ekranda
@@ -1756,6 +1766,23 @@ def _execute_chat_tool(db: Session, novel_id: int, universe_id: int, name: str, 
         }
 
     return {"error": f"Bilinmeyen araç: {name}", "action_summary": None}
+
+
+# Araç adları kullanıcıya sızmasın: prompt yasaklıyor ama model kimi zaman
+# yine de yazıyor. Yanıt kullanıcıya gitmeden temizlenir - iç mekanizma
+# ekranda görünmemeli.
+_TOOL_LEAK_RE = re.compile(
+    r"\s*(?:İstersen\s+)?[^.\n]*\b(set_draft_result|write_paragraph|"
+    r"propose_entity_update|get_entity_section)\b[^.\n]*\.?",
+    flags=re.IGNORECASE,
+)
+
+
+def strip_tool_leaks(text: str) -> str:
+    if not text:
+        return text
+    temiz = _TOOL_LEAK_RE.sub("", text)
+    return re.sub(r"\n{3,}", "\n\n", temiz).strip()
 
 
 def chat_with_qwen(
