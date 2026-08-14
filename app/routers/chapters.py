@@ -623,12 +623,21 @@ def upsert_paragraph(
         # metin yazılırsa, o içerik fihristten hiç erişilemez hale
         # geliyordu (Kısım satırları "ilk alt bölüme git" davranışına
         # sahip, kendi paragrafını göstermiyordu).
-        if chapter.kind != "chapter":
+        # ÖLÇÜT TÜR DEĞİL İÇERİK: kural, boş bir başlığa yanlışlıkla metin
+        # yazılmasını önlemek içindi. Ama ZATEN paragrafı olan bir başlık
+        # girdisi (içe aktarılan romanlarda olağan; kullanıcı yapıyı
+        # sonradan da değiştirebiliyor) gerçekte metin taşıyor - oraya
+        # paragraf eklemek engellenirse PARAGRAF BÖLME, taşıma ve içe
+        # aktarma çalışmıyor. Yalnızca HİÇ paragrafı olmayan başlıklar
+        # korunur.
+        mevcut_paragraf_var = any((p.text or "").strip() for p in chapter.paragraphs)
+        if chapter.kind != "chapter" and not mevcut_paragraf_var:
             kind_label = "Kısım" if chapter.kind == "part" else "Alt Başlık"
             raise HTTPException(
                 400,
-                f"Bu bir {kind_label} - sadece yapısal bir ayraç, paragraf tutamaz. "
-                f"Metin yazmak için önce '+ Yeni' > 'Yeni Bölüm' ile gerçek bir bölüm oluştur.",
+                f"Bu bir {kind_label} - sadece yapısal bir ayraç, henüz metni yok. "
+                f"Metin yazmak için önce '+ Yeni' > 'Yeni Bölüm' ile gerçek bir bölüm oluştur "
+                f"(ya da bu girdinin türünü ✎ ile 'Metin Bölümü' yap).",
             )
         paragraph = models.Paragraph(chapter_id=chapter_id, number=number, text=payload.text)
         db.add(paragraph)
