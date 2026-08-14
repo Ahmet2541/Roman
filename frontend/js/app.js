@@ -6854,8 +6854,17 @@ async function renderWorkshopPrep() {
     ${satir(ozetVar, 'Bölüm özeti', ozetVar ? 'Var - ZAMAN/OLAY/MEKAN bilgisi incelemeye gidecek.' : 'Yok. AI bölümü tanımadan inceler; bulgular yüzeysel kalır.', 'wsMakeSummary', 'AI ile özet oluştur')}
     ${satir(olayVar, 'Zaman çizelgesi', olayVar ? 'Bu bölümden olaylar çizelgede işlenmiş.' : 'Bu bölümden çizelgeye olay işlenmemiş. Kronoloji hataları görünmez kalır.', 'wsMakeEvents', '🕐 Zaman çizelgesini güncelle')}
     ${satir(planVar, 'Bölüm planı', planVar ? 'Var - paragrafların işlevi buradan miras alınacak.' : 'Yok. Paragrafların "ne yapması gerektiği" tanımsız kalır.', 'wsMakePlan', '⚡ Metinden plan çıkar')}
+    ${(() => {
+      const c = loadReviewCache(ch.id);
+      if (!c) return '';
+      const gun = Math.floor((Date.now() - c.at) / 86400000);
+      const bulgu = Object.keys(c.findings || {}).length;
+      return `<div style="font-size:12px;color:var(--text-muted);background:var(--paper-dim);padding:6px 8px;border-radius:6px;margin-top:10px;">
+        📦 Kayıtlı inceleme var (${gun > 0 ? gun + ' gün önce' : 'bugün'}) · ${bulgu} paragrafta bulgu ·
+        edebî ortalama ${c.literary?.average ?? '?'}/5 — analiz baştan çalışmayacak.</div>`;
+    })()}
     <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
-      <button class="btn btn-primary" id="wsFullPass" style="flex:1;min-width:190px;">🔬 Bölümü değerlendir ve düzenle</button>
+      <button class="btn btn-primary" id="wsFullPass" style="flex:1;min-width:190px;" title="${loadReviewCache(ch.id) ? 'Kayıtlı inceleme kullanılır - analiz baştan çalışmaz' : 'Analiz çalıştırılır, sonra paragraf paragraf düzenleme'}">${loadReviewCache(ch.id) ? '▶ Düzenlemeye devam et' : '🔬 Bölümü değerlendir ve düzenle'}</button>
       <button class="btn" id="wsLengthPass" style="flex:1;min-width:170px;">📏 Paragraf uzunluk kontrolü</button>
       <button class="btn" id="wsToReview" style="flex:1;min-width:140px;">Sadece incele →</button>
     </div>
@@ -6878,7 +6887,10 @@ async function renderWorkshopPrep() {
     }, 500);
   });
   document.getElementById('wsFullPass').addEventListener('click', () => {
-    workshopState.forceRescan = true;
+    // ÖNBELLEĞİ KULLAN: kayıtlı inceleme varsa analizi TEKRAR ÇALIŞTIRMA -
+    // doğrudan paragraf düzenlemeye geç. Eskiden forceRescan=true idi ve
+    // her tıklamada dakikalar süren analiz baştan başlıyordu. Tazelemek
+    // isteyen "🔄 Yeniden incele" düğmesini kullanır.
     workshopState.autoSweep = true;
     renderWorkshopReview();
   });
@@ -6960,7 +6972,10 @@ async function renderWorkshopReview() {
   // Önbellek: daha önce incelenmişse sonuçları geri yükle, yeniden analiz
   // için kullanıcıya sor. Uzun bölümlerde analiz dakikalar sürüyor.
   const onbellek = loadReviewCache(ch.id);
-  if (onbellek && !workshopState.forceRescan) {
+  // Bozuk/eksik önbellek yeniden analize düşer - yarım veriyle çalışmak
+  // sessiz hatalara yol açar
+  const onbellekGecerli = onbellek && onbellek.literary && onbellek.findings;
+  if (onbellekGecerli && !workshopState.forceRescan) {
     const gun = Math.floor((Date.now() - onbellek.at) / 86400000);
     workshopState.literary = onbellek.literary;
     workshopState.findings = onbellek.findings;
