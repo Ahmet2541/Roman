@@ -8265,6 +8265,10 @@ async function runLengthScan() {
           En uzunu <b>${wordCount(uzunlar[0].text)}</b> kelime.</div>
         <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px;">Her biri için bölme önerisi ayrı ayrı gösterilir - onaysız değişmez.</div>
       </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;">
+        <button class="btn btn-primary" id="lcSplitAll">✂ Tümünü böl ve yeniden sırala (${uzunlar.length})</button>
+      </div>
+      <div id="lcAllBox"></div>
       ${uzunlar.map(p => `
         <div class="entity-row lc-row" data-num="${p.number}" style="flex-wrap:wrap;">
           <div style="flex:1;min-width:240px;">
@@ -8274,6 +8278,72 @@ async function runLengthScan() {
           <div class="actions"><button class="btn btn-sm btn-primary lc-split" data-num="${p.number}">✂ Böl</button></div>
           <div class="lc-box" data-num="${p.number}" style="width:100%;"></div>
         </div>`).join('')}`;
+
+    // TOPLU BÖLME: her paragrafın önerisi tek tek alınır, hepsi ÖNCE
+    // gösterilir, onaydan sonra SONDAN BAŞA uygulanır (numara çakışması
+    // olmasın) ve numaralar otomatik yeniden sıralanır.
+    document.getElementById('lcSplitAll').addEventListener('click', async (e) => {
+      const b = e.target, box = document.getElementById('lcAllBox');
+      b.disabled = true;
+      const plan = [];
+      for (let i = 0; i < uzunlar.length; i++) {
+        b.textContent = `Öneriler alınıyor… ${i + 1}/${uzunlar.length}`;
+        try {
+          const r = await api.post(`/chapters/${chapterId}/split-preview`, { text: uzunlar[i].text });
+          const parcalar = (r.paragraphs || []).map(x => x.text).filter(Boolean);
+          if (parcalar.length > 1) plan.push({ number: uzunlar[i].number, parcalar });
+        } catch (err) { /* bu paragraf atlanır */ }
+      }
+      b.disabled = false;
+      b.textContent = `✂ Tümünü böl ve yeniden sırala (${uzunlar.length})`;
+      if (!plan.length) {
+        box.innerHTML = '<div class="panel" style="font-size:12.5px;color:var(--text-muted);">Hiçbirinde bölünecek doğal bir yer bulunamadı.</div>';
+        return;
+      }
+      const yeniToplam = toplam + plan.reduce((t, x) => t + x.parcalar.length - 1, 0);
+      box.innerHTML = `
+        <div class="panel" style="border-left:3px solid var(--gold);">
+          <div style="font-size:13px;"><b>${plan.length}</b> paragraf bölünecek →
+            toplam <b>${toplam}</b> paragraf <b>${yeniToplam}</b> olacak. Metin DEĞİŞMEZ, numaralar yeniden sıralanır.</div>
+          <div style="max-height:300px;overflow-y:auto;margin-top:8px;">
+            ${plan.map(x => `
+              <div style="font-size:12.5px;margin-top:8px;padding-top:6px;border-top:1px dashed var(--border);">
+                <b style="color:var(--gold);">P${x.number}</b> → ${x.parcalar.length} parça
+                ${x.parcalar.map((t, i) => `<div style="margin-top:3px;">${i + 1}. ${escapeHtml(truncate(t, 90))} <span style="color:var(--text-muted);">(${wordCount(t)} kelime)</span></div>`).join('')}
+              </div>`).join('')}
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" id="lcAllApply">Hepsini uygula</button>
+            <button class="btn" id="lcAllCancel">Vazgeç</button>
+          </div>
+          <div id="lcAllProgress" style="font-size:12px;color:var(--text-muted);"></div>
+        </div>`;
+      document.getElementById('lcAllCancel').addEventListener('click', () => { box.innerHTML = ''; });
+      document.getElementById('lcAllApply').addEventListener('click', async (e2) => {
+        const ab = e2.target, ilerleme = document.getElementById('lcAllProgress');
+        ab.disabled = true;
+        // SONDAN BAŞA: önce büyük numaralar bölünür, böylece daha küçük
+        // numaralı paragrafların konumu bozulmaz
+        const sirali = plan.slice().sort((a, c) => c.number - a.number);
+        let guncelBolum = await api.get(`/chapters/${chapterId}`);
+        for (let i = 0; i < sirali.length; i++) {
+          ilerleme.textContent = `Uygulanıyor… ${i + 1}/${sirali.length} (P${sirali[i].number})`;
+          try {
+            await applyParagraphSplit(guncelBolum, sirali[i].number, sirali[i].parcalar);
+            guncelBolum = await api.get(`/chapters/${chapterId}`);
+          } catch (err) {
+            ilerleme.innerHTML = `<span class="error-text">P${sirali[i].number} bölünemedi: ${escapeHtml(err.message)}</span>`;
+            ab.disabled = false;
+            return;
+          }
+        }
+        box.innerHTML = `<div class="panel" style="border-left:3px solid #3f7a4f;">
+          <b style="color:#3f7a4f;">✓ ${sirali.length} paragraf bölündü</b>
+          <div style="font-size:12px;color:var(--text-muted);">Numaralar yeniden sıralandı. Toplam ${guncelBolum.paragraphs.length} paragraf.</div>
+          <button class="btn btn-sm" id="lcRescan" style="margin-top:8px;">Yeniden tara</button></div>`;
+        document.getElementById('lcRescan').addEventListener('click', () => runLengthScan());
+      });
+    });
 
     kutu.querySelectorAll('.lc-split').forEach(b => b.addEventListener('click', async () => {
       const num = parseInt(b.dataset.num, 10);
