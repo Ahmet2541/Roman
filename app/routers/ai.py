@@ -376,6 +376,7 @@ def verify_rewrite(
             db, universe_id, payload.old_text, payload.new_text,
             purpose=payload.purpose, neighbors=payload.neighbors,
             proposal_goal=payload.proposal_goal, expected_effect=payload.expected_effect,
+            accepted_changes=payload.accepted_changes,
         )
     except Exception as exc:
         raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")

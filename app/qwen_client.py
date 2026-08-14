@@ -3361,7 +3361,15 @@ Sonra kontrol et:
    motivasyon eklenmiş mi? Eklendiyse bu bir HATADIR.
 
 ÖNEMLİ: Cümle başındaki büyük harfli kelimeler ÖZEL İSİM DEĞİLDİR ("Ama",
-"Sonra", "Küçük"). Cümle yapısının değişmesi kayıp sayılmaz. Üslup tercihi
+"Sonra", "Küçük"). Cümle yapısının değişmesi kayıp sayılmaz.
+
+BİLEREK YAPILAN DEĞİŞİKLİKLER: "Yazarla kararlaştırılmış değişiklikler"
+verilmişse, o değişiklikleri SORUN OLARAK YAZMA. Yazar bir imgeyi bilerek
+çıkardıysa bunu "anlam kaybı" diye işaretlemek, düzeltmeyi imkânsız kılan
+bir DÖNGÜ kurar. Yalnızca kararlaştırılmamış YENİ sorunları bildir.
+
+TEK BİR SORUN İÇİN İKİ KEZ UYARMA: aynı kaybı hem "işlev" hem "anlam" hem
+"süreklilik" başlığı altında tekrar yazma - en uygun tek başlığı seç. Üslup tercihi
 farkını sorun olarak yazma. Metin daha iyi olmuşsa "kabul" de.
 
 Yanıtın SADECE şu JSON olsun:
@@ -3372,7 +3380,8 @@ gerçek bir kusur göremiyorsan "kabul" demek DOĞRU cevaptır."""
 
 def verify_paragraph_rewrite(db: Session, universe_id: int, old_text: str, new_text: str,
                              purpose: str = "", neighbors: str = "",
-                             proposal_goal: str = "", expected_effect: str = "") -> dict:
+                             proposal_goal: str = "", expected_effect: str = "",
+                             accepted_changes: str = "") -> dict:
     """Yeni versiyonu denetler. Deterministik bulgular + AI kararı döner."""
     hard_issues = []
 
@@ -3409,7 +3418,9 @@ def verify_paragraph_rewrite(db: Session, universe_id: int, old_text: str, new_t
     # 3) AI kararı (işlev, anlam, süreklilik, eylem sırası)
     korunacak = sorted(eski_isimler | eski_sayilar)
     user = (
-        (f"ÖNERİNİN AMACI: {proposal_goal}\n" if proposal_goal.strip() else "")
+        (f"YAZARLA KARARLAŞTIRILMIŞ DEĞİŞİKLİKLER (bunlar BİLEREK yapıldı - "
+         f"kayıp/sorun olarak YAZMA):\n{accepted_changes}\n\n" if accepted_changes.strip() else "")
+        + (f"ÖNERİNİN AMACI: {proposal_goal}\n" if proposal_goal.strip() else "")
         + (f"BEKLENEN ETKİ: {expected_effect}\n" if expected_effect.strip() else "")
         + ("\n" if (proposal_goal.strip() or expected_effect.strip()) else "")
         + (f"PARAGRAFIN İŞLEVİ: {purpose}\n\n" if purpose.strip() else "")

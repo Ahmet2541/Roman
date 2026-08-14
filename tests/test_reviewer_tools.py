@@ -919,3 +919,28 @@ def test_knowledge_scan_extracts_and_finds_issues(client, headers):
         r = client.post("/ai/knowledge-scan", headers=h2)
         mc.assert_not_called()
     assert "en az 2 özetli" in r.json()["note"]
+
+
+def test_verify_respects_accepted_changes(client, headers):
+    """DÖNGÜ KIRICI: yazarla kararlaştırılmış değişiklikler kontrole
+    bildirilir; kontrol bunları "anlam kaybı" diye YENİDEN işaretlerse
+    düzeltme imkânsız hale gelen bir sarmal kuruluyordu."""
+    from app.qwen_client import VERIFY_PROMPT
+    assert "BİLEREK YAPILAN DEĞİŞİKLİKLER" in VERIFY_PROMPT
+    assert "DÖNGÜ" in VERIFY_PROMPT
+    assert "İKİ KEZ UYARMA" in VERIFY_PROMPT
+
+    captured = {}
+    def fake_create(**kwargs):
+        captured["user"] = kwargs["messages"][1]["content"]
+        return _fake_qwen({"verdict": "kabul", "issues": [], "note": "Tamam."})
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.side_effect = fake_create
+        client.post("/ai/verify-rewrite", json={
+            "old_text": "Gökkuşağı doğuruyordu.", "new_text": "Küçük güneşler gibi kayıyor.",
+            "proposal_goal": "Alt metin: yargı sıfatlarını gözlemlenebilir detayla değiştir",
+            "accepted_changes": "gökkuşağını çıkaralım, teknolojik bir imge olsun",
+        }, headers=headers)
+    assert "KARARLAŞTIRILMIŞ DEĞİŞİKLİKLER" in captured["user"]
+    assert "gökkuşağını çıkaralım" in captured["user"]
+    assert "kayıp/sorun olarak YAZMA" in captured["user"]

@@ -1007,6 +1007,7 @@ class VerifyRewriteRequest(BaseModel):
     neighbors: str = ""
     proposal_goal: str = ""     # önerinin AMACI - "metin değişti mi" yetmez
     expected_effect: str = ""   # beklenen etki
+    accepted_changes: str = ""  # yazarla KARARLAŞTIRILMIŞ değişiklikler
 
 
 class VerifyRewriteResponse(BaseModel):

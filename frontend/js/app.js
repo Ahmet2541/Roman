@@ -6663,7 +6663,11 @@ async function verifyBeforeApply(chapterId, number, oldText, newText) {
       proposal_goal: (workshopState.lastGoal && workshopState.lastGoal[number]) || '',
       expected_effect: (workshopState.diagnoses?.[number] || [])
         .filter(d => d.cls === 'hata' || d.cls === 'zayif')
-        .map(d => d.title).join(' | '),
+        .map(d => `${d.title}${d.why ? ' — ' + d.why : ''}`).join(' | '),
+      // KABUL EDİLEN DEĞİŞİKLİKLER: sohbette varılan kararlar. Bunlar
+      // olmadan kontrol, bilerek yapılmış her çıkarmayı "anlam kaybı" diye
+      // yeniden işaretliyor ve sonsuz döngü kuruluyordu.
+      accepted_changes: acceptedChangesFor(number),
     });
   } catch (err) {
     return { verdict: 'kabul', hard_issues: [], issues: [], note: 'Kontrol yapılamadı: ' + err.message };
@@ -6726,13 +6730,18 @@ function renderQuickCheck(oldText, newText, onApply, onDeep, onDiscuss) {
     b.disabled = true; b.textContent = 'Kontrol ediliyor…';
     const v = await onDeep();
     b.disabled = false; b.textContent = '🔎 Derin kontrol';
-    div.insertAdjacentElement('afterend', renderVerifyResult(v, () => { div.remove(); onApply(); }, onDiscuss));
+    // Tur sayacı: aynı paragrafta kaçıncı derin kontrol
+    window.__verifyRounds = window.__verifyRounds || {};
+    const anahtar = (newText || '').slice(0, 40);
+    window.__verifyRounds[anahtar] = (window.__verifyRounds[anahtar] || 0) + 1;
+    const turSayisi = Object.values(window.__verifyRounds).reduce((a, b) => a + b, 0);
+    div.insertAdjacentElement('afterend', renderVerifyResult(v, () => { div.remove(); onApply(); }, onDiscuss, turSayisi));
     div.querySelector('.qc-deep').remove();
   });
   return div;
 }
 
-function renderVerifyResult(v, onApply, onDiscuss) {
+function renderVerifyResult(v, onApply, onDiscuss, tur) {
   const renk = { kabul: '#3f7a4f', duzelt: '#b08d3f', red: 'var(--danger)' }[v.verdict] || 'var(--text-muted)';
   const etiket = { kabul: '✓ Kabul edilebilir', duzelt: '⚠ Düzeltilmeli', red: '✕ Reddedildi' }[v.verdict] || v.verdict;
   const tumBulgular = [...(v.hard_issues || []), ...(v.issues || [])];
@@ -6742,8 +6751,12 @@ function renderVerifyResult(v, onApply, onDiscuss) {
     <div style="font-size:12.5px;color:${renk};font-weight:600;">${etiket}</div>
     ${v.note ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${escapeHtml(v.note)}</div>` : ''}
     ${tumBulgular.length ? `<ul style="margin:6px 0 0 16px;padding:0;font-size:12px;">${tumBulgular.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : ''}
+    ${(tur || 0) >= 2 ? `<div style="font-size:11.5px;color:#b08d3f;margin-top:6px;padding:6px 8px;background:var(--paper-dim);border-radius:6px;">
+      🔁 <b>${tur}. kontrol turu.</b> Kontrol aynı noktaları tekrar ediyor olabilir - her yeniden yazım
+      yeni "kayıp"lar üretir. Metin senin gözünde iyiyse <b>"Yine de yaz"</b> demek doğru karardır.
+    </div>` : ''}
     <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
-      <button class="btn btn-sm ${v.verdict === 'kabul' ? 'btn-primary' : ''} verify-apply" style="font-size:11.5px;">${v.verdict === 'kabul' ? 'Paragrafa yaz' : 'Yine de yaz'}</button>
+      <button class="btn btn-sm ${v.verdict === 'kabul' || (tur || 0) >= 2 ? 'btn-primary' : ''} verify-apply" style="font-size:11.5px;">${v.verdict === 'kabul' ? 'Paragrafa yaz' : 'Yine de yaz'}</button>
       ${onDiscuss && tumBulgular.length ? `<button class="btn btn-sm btn-primary verify-discuss" style="font-size:11.5px;" title="Kontrol uyarıları + seçtiğin metin + AI yorumu ile tartış">💬 AI ile sohbet et</button>` : ''}
       <button class="btn btn-sm verify-cancel" style="font-size:11.5px;">Vazgeç</button>
     </div>`;
@@ -7409,7 +7422,13 @@ async function workshopFix(chapter, num, issue) {
   workshopState.directives = workshopState.directives || {};
   workshopState.directives[num] = direktifler;
   workshopState.lastGoal = workshopState.lastGoal || {};
-  workshopState.lastGoal[num] = (kayitlar.map(k => k.baslik).join(', ') || issue).slice(0, 300);   // kelime bazlı istekler de bunu kullanır
+  // Amaç, ölçüt ANAHTARI değil TAM CÜMLE olmalı. Eskiden başlıklar
+  // yazılıyordu ve edebî ölçütlerde bu "yapi" gibi anlamsız bir etikete
+  // dönüşüyordu; kontrol de haklı olarak "amaç belirsiz" diye şikâyet
+  // edip aynı noktaları tekrar tekrar işaretliyordu.
+  workshopState.lastGoal[num] = (kayitlar.length
+    ? kayitlar.map(k => `${k.baslik}: ${(k.oneri || k.sorun || '').slice(0, 120)}`).join(' | ')
+    : issue).slice(0, 500);
   // Bölüm seçimi (derin profil) talimattaki anahtar kelimelere bakıyor;
   // paragrafın KENDİ metnini de talimata katarak doğru bölümlerin
   // seçilmesini sağlıyoruz (diyalog varsa konuşma tarzı, betimleme varsa
@@ -8925,4 +8944,17 @@ function nextFlaggedIndex(mevcut, yon) {
     if ((workshopState.findings[sira[i]] || []).length) return i;
   }
   return null;
+}
+
+// Sohbette varılan kararlar: kullanıcının kendi mesajları + "yeni versiyon"
+// üretimine yol açan talimatlar. Kontrol bunları BİLEREK YAPILMIŞ sayar.
+function acceptedChangesFor(number) {
+  const gecmis = paraChatHistories[number] || [];
+  return gecmis
+    .filter(m => m.role === 'user')
+    .map(m => (m.content || '').replace(/\s+/g, ' ').trim())
+    .filter(t => t && t.length < 400)
+    .slice(-4)
+    .join(' | ')
+    .slice(0, 600);
 }
