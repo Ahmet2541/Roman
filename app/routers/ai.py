@@ -7,7 +7,7 @@ from ..auth import get_current_user
 from .. import schemas, models
 from ..qwen_client import (
     build_context, ask_qwen, full_scan, chat_with_qwen, reader_test_chapter,
-    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite, retest_paragraph, motif_map, paragraph_roles, fuse_diagnoses, evaluate_tradeoff, paragraph_necessity, plan_from_text, micro_edit, extract_knowledge_map,
+    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite, retest_paragraph, motif_map, paragraph_roles, fuse_diagnoses, evaluate_tradeoff, paragraph_necessity, plan_from_text, micro_edit, extract_knowledge_map, review_arc,
 )
 from ..entities import ENTITY_MODELS
 from ..sections import SECTIONS_BY_ENTITY_TYPE, _tr_lower
@@ -554,5 +554,22 @@ def knowledge_scan(
     ifşa, ödenmemiş kurulum (kurulup unutulmuş bilgi), çelişki. Kaydetmez."""
     try:
         return schemas.KnowledgeScanResponse(**extract_knowledge_map(db, novel_id))
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+
+
+@router.post("/arc-review/{chapter_id}", response_model=schemas.ArcReviewResponse)
+def arc_review_endpoint(
+    chapter_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(rate_limit(max_calls=6, window_seconds=120, label="tur değerlendirmesi")),
+    novel_id: int = Depends(get_novel_id),
+):
+    """TUR DEĞERLENDİRMESİ: bir üst başlık altındaki tüm alt sahneleri bir
+    bütün olarak denetler - iç yay yükseliyor mu, sahne uzunlukları
+    işlevleriyle uyumlu mu, sahneler arası tekrar var mı, kapanış eşik
+    bırakıyor mu, hacim dengeli mi. Özetlerle çalışır (ucuz)."""
+    try:
+        return schemas.ArcReviewResponse(**review_arc(db, novel_id, chapter_id))
     except Exception as exc:
         raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")

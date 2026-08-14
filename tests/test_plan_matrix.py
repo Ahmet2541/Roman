@@ -565,3 +565,119 @@ def test_outline_tree_exposes_parent_id(client, headers):
     altlar = [t for t in tree if t["parent_id"] == ust["id"]]
     assert [t["title"] for t in altlar] == ["Kısım A", "Kısım B"]
     assert next(t for t in tree if t["id"] == ust["id"])["parent_id"] is None
+
+
+def test_plan_layer_inherits_unbound_subrows_as_scenes(client, headers):
+    """KRİTİK: kullanıcının çalışma biçiminde matris satırları hikâyeyi
+    SIRAYLA taşır - bölüm numarası verilen satır BÖLÜM, ondan sonraki
+    bağsız satırlar o bölümün SAHNELERİdir. Eskiden sadece bağlı hücre
+    AI'ya gidiyordu; sahne sahne plan tamamen görünmezdi."""
+    from app.qwen_client import build_plan_layer
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+
+    m = _make_matrix(client, headers, cols=("Tur 1",),
+                     rows=("1 HOLOGRAM (5 dk)", "↳ ÇERÇEVE", "↳ GÖRÜNTÜ 1", "2 KAMERA (10 dk)", "↳ GÖRÜNTÜ 2"))
+    col = m["columns"][0]
+    b13 = client.post("/chapters/", json={"number": 13, "kind": "chapter", "title": "Hologram"}, headers=headers).json()
+    b14 = client.post("/chapters/", json={"number": 14, "kind": "chapter", "title": "Kamera"}, headers=headers).json()
+
+    icerikler = ["Suçlular ilk kez bir arada", "Çerçeve kurulur", "Mahalle tablosu",
+                 "Kamera turu başlar", "Makam odası"]
+    for i, row in enumerate(m["rows"]):
+        veri = {"column_id": col["id"], "row_id": row["id"], "content": icerikler[i]}
+        if i == 0:
+            veri["chapter_id"] = b13["id"]      # BÖLÜM 13
+        if i == 3:
+            veri["chapter_id"] = b14["id"]      # BÖLÜM 14
+        client.put(f"/matrix/{m['id']}/cells", json=veri, headers=headers)
+
+    db = sessionmaker(bind=engine)()
+    novel_id = int(headers["X-Novel-Id"])
+    plan13 = build_plan_layer(db, novel_id, 13)
+
+    assert "Suçlular ilk kez bir arada" in plan13          # kendi planı
+    assert "BU BÖLÜMÜN SAHNELERİ" in plan13
+    assert "Çerçeve kurulur" in plan13                     # alt sahne 1 MİRAS
+    assert "Mahalle tablosu" in plan13                     # alt sahne 2 MİRAS
+    assert "Kamera turu başlar" not in plan13              # SONRAKİ bölümde durur
+    assert "Makam odası" not in plan13                     # onun alt sahnesi de girmez
+
+    # 14. bölüm kendi sahnesini alır
+    plan14 = build_plan_layer(db, novel_id, 14)
+    assert "Kamera turu başlar" in plan14 and "Makam odası" in plan14
+    assert "Çerçeve kurulur" not in plan14
+
+
+def test_parallel_layer_shows_same_stage_other_turns(client, headers):
+    """TURLAR ARASI PARALELLİK: aynı aşamanın diğer turlardaki hâlleri
+    bağlama girer. Matris haritası yalnızca EŞLEŞMEYİ veriyordu, içeriği
+    değil - sistem "bunu Tur 1'de şöyle yaptın, tekrarlama" diyemiyordu."""
+    from app.qwen_client import build_parallel_layer
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+
+    m = _make_matrix(client, headers, cols=("TUR 1: BAŞKAN", "TUR 2: JEOLOG"), rows=("Hologram", "Sorgu"))
+    c1, c2 = m["columns"]
+    b13 = client.post("/chapters/", json={"number": 13, "kind": "chapter", "title": "T1 Hologram"}, headers=headers).json()
+    b20 = client.post("/chapters/", json={"number": 20, "kind": "chapter", "title": "T2 Hologram"}, headers=headers).json()
+    client.put(f"/chapters/{b13['id']}", json={"summary": "OLAY: Mahalle yanıyor."}, headers=headers)
+
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": c1["id"], "row_id": m["rows"][0]["id"],
+        "content": "Başkanın mahallesi gösterilir", "chapter_id": b13["id"]}, headers=headers)
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": c2["id"], "row_id": m["rows"][0]["id"],
+        "content": "Jeologun ocağı gösterilir", "chapter_id": b20["id"]}, headers=headers)
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": c2["id"], "row_id": m["rows"][1]["id"],
+        "content": "BAŞKA AŞAMA - girmemeli"}, headers=headers)
+
+    db = sessionmaker(bind=engine)()
+    novel_id = int(headers["X-Novel-Id"])
+    kat = build_parallel_layer(db, novel_id, 20)     # Tur 2 yazılıyor
+
+    assert "AYNI AŞAMANIN DİĞER TURLARI" in kat
+    assert "Başkanın mahallesi" in kat               # Tur 1'in AYNI aşaması
+    assert "TUR 1: BAŞKAN" in kat                    # hangi tur olduğu belli
+    assert "Mahalle yanıyor" in kat                  # yazılmışsa ÖZETİ de gelir
+    assert "TEKRARLAMA" in kat                       # direktif var
+    assert "BAŞKA AŞAMA" not in kat                  # farklı satır girmez
+
+    # Matris hücresi olmayan bölümde katman hiç oluşmaz (maliyet yok)
+    assert build_parallel_layer(db, novel_id, 999) == ""
+
+
+def test_arc_review_evaluates_tur_as_whole(client, headers):
+    """TUR DEĞERLENDİRMESİ: üst başlık altındaki sahneler bir bütün olarak
+    denetlenir - iç yay, ritim, tekrar, kapanış, hacim."""
+    ust = client.post("/chapters/", json={"number": 1, "kind": "part", "title": "TUR 1: BAŞKAN"}, headers=headers).json()
+    for no, ozet, adet in ((2, "Hologram açılır.", 3), (3, "Sorgu başlar.", 2)):
+        ch = client.post("/chapters/", json={"number": no, "kind": "chapter", "title": f"Sahne {no}"}, headers=headers).json()
+        for i in range(adet):
+            client.put(f"/chapters/{ch['id']}/paragraphs/{i+1}", json={"number": i+1, "text": f"Metin {i}."}, headers=headers)
+        client.put(f"/chapters/{ch['id']}", json={"summary": ozet}, headers=headers)
+
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "arc": "yukseliyor", "arc_note": "Gerilim tırmanıyor.",
+            "rhythm": [{"scene": "1-1", "issue": "Açılış şişkin.", "fix": "Kısalt."},
+                       {"scene": "", "issue": "", "fix": "boş - ayıklanmalı"}],
+            "repeats": ["Aynı sessizlik imgesi iki sahnede"],
+            "closing": "Eşik bırakıyor.", "volume_note": "Dengeli.",
+            "summary": "Tur sağlam.",
+        })
+        r = client.post(f"/ai/arc-review/{ust['id']}", headers=headers)
+    d = r.json()
+    assert d["arc"] == "yukseliyor"
+    assert len(d["rhythm"]) == 1                     # boş madde ayıklandı
+    assert len(d["scenes"]) == 2
+    assert d["scenes"][0]["paragraphs"] == 3         # hacim dağılımı hesaplandı
+    assert "sessizlik imgesi" in d["repeats"][0]
+
+    # Alt sahnesi olmayan girdide Qwen'e gidilmez
+    yalniz = client.post("/chapters/", json={"number": 9, "kind": "chapter", "title": "Tek"}, headers=headers).json()
+    with patch("app.qwen_client.get_client") as mc:
+        r = client.post(f"/ai/arc-review/{yalniz['id']}", headers=headers)
+        mc.assert_not_called()
+    assert "alt sahnesi yok" in r.json()["summary"]

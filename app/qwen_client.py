@@ -490,6 +490,46 @@ def build_plan_layer(db: Session, novel_id: int, chapter_number: int | None, ins
             cells = db.query(models.MatrixCell).filter(models.MatrixCell.chapter_id == chapter.id).all()
             own_cell_ids = {c.id for c in cells}
             blocks = [b for b in (_cell_block(c) for c in cells) if b]
+
+            # ALT SAHNELER (hiyerarşik plan mirası): kullanıcının çalışma
+            # biçiminde matris satırları hikâyeyi SIRAYLA taşır; bölüm
+            # numarası verilen satır bir BÖLÜM, ondan sonra gelen bağsız
+            # satırlar o bölümün SAHNELERİ/paragraflarıdır. Eskiden yalnızca
+            # bağlı hücre gidiyordu - yani bölümün sahne sahne planı AI'ya
+            # hiç ulaşmıyor, "8 hücre bölüme bağlı değil" uyarısındaki
+            # planlar boşa yazılmış oluyordu.
+            for cell in cells:
+                matrix = db.query(models.PlanMatrix).filter(
+                    models.PlanMatrix.id == cell.matrix_id).first()
+                if not matrix:
+                    continue
+                sirali_satirlar = sorted(matrix.rows, key=lambda r: r.position)
+                try:
+                    baslangic = next(i for i, r in enumerate(sirali_satirlar) if r.id == cell.row_id)
+                except StopIteration:
+                    continue
+                alt_bloklar = []
+                for row in sirali_satirlar[baslangic + 1:]:
+                    komsu = next((c for c in matrix.cells
+                                  if c.column_id == cell.column_id and c.row_id == row.id), None)
+                    if komsu is None:
+                        continue
+                    # Başka bir bölüme bağlı satıra gelindi -> bu bölüm biter
+                    if komsu.chapter_id:
+                        break
+                    icerik = (komsu.content or "").strip()
+                    if not icerik:
+                        continue
+                    kod = f"{komsu.code}: " if komsu.code else ""
+                    alt_bloklar.append(f"[{kod}{row.label}]\n{icerik}")
+                    own_cell_ids.add(komsu.id)
+                    if (row.instructions or "").strip():
+                        alt_bloklar.append(f"  ↳ KISIT: {row.instructions.strip()}")
+                if alt_bloklar:
+                    blocks.append(
+                        "--- BU BÖLÜMÜN SAHNELERİ (sırayla yazılacak) ---\n"
+                        + "\n\n".join(alt_bloklar)
+                    )
             if blocks:
                 parts.append(
                     "=== BÖLÜM PLANI (bu bölümde OLACAKLAR - plana sadık kal) ===\n"
@@ -551,6 +591,8 @@ def build_context(
     forward = build_forward_layer(db, novel_id, chapter_number)
     # Bilgi durumu: okur ne biliyor, ne sızdırılmamalı (dramatik ironi koruması)
     knowledge = build_knowledge_layer(db, universe_id, chapter_number)
+    # Turlar arası paralellik: aynı aşamanın diğer turlardaki hâlleri
+    parallel = build_parallel_layer(db, novel_id, chapter_number)
     # ÜZERİNDE ÇALIŞILAN BÖLÜMÜN KENDİ ÖZETİ: fihrist katmanı bunu bilerek
     # dışlıyor (yeni bölüm YAZILIRKEN model kendi özetini kopyalamasın diye).
     # Ama var olan bir paragrafı DÜZENLERKEN tam tersi gerekli: ZAMAN,
@@ -591,7 +633,7 @@ def build_context(
     style_warnings = build_style_warning_layer(db, universe_id)
     plan = build_plan_layer(db, novel_id, chapter_number, instruction_text=instruction_text)
     dynamic = build_dynamic_layer(db, universe_id, selected_entities, instruction_text=instruction_text, include_hidden=include_hidden)
-    return "\n\n".join(part for part in [fixed, index, outline, matrix_map, referenced, style, style_warnings, plan, forward, knowledge, own_summary, chapter_text, dynamic] if part)
+    return "\n\n".join(part for part in [fixed, index, outline, matrix_map, referenced, style, style_warnings, plan, parallel, forward, knowledge, own_summary, chapter_text, dynamic] if part)
 
 
 # ---------------------------------------------------------------------------
@@ -4072,3 +4114,159 @@ def extract_knowledge_map(db: Session, novel_id: int, max_chars: int = 24000) ->
         for i in (data.get("issues") or []) if isinstance(i, dict) and (i.get("problem") or "").strip()
     ][:8]
     return {"facts": facts[:12], "issues": issues, "note": ""}
+
+
+# ---------------------------------------------------------------------------
+# TURLAR ARASI PARALELLİK: aynı matris SATIRININ diğer kolonlardaki (turlardaki)
+# hücreleri. Kullanıcının yapısında aynı iskelet 8 kez tekrarlanıyor; sistem
+# "bu aşamayı Tur 1'de şöyle işledin, tekrarlama" diyemiyordu - matris
+# haritası yalnızca EŞLEŞMEYİ veriyordu, İÇERİĞİ değil. Monotoni riskinin
+# ölçülebilir hale gelmesi buna bağlı.
+# ---------------------------------------------------------------------------
+
+def build_parallel_layer(db: Session, novel_id: int, chapter_number: int | None,
+                         max_chars: int = 6000) -> str:
+    if chapter_number is None:
+        return ""
+    chapter = (
+        db.query(models.Chapter)
+        .filter(models.Chapter.novel_id == novel_id, models.Chapter.number == chapter_number)
+        .first()
+    )
+    if not chapter:
+        return ""
+    cells = db.query(models.MatrixCell).filter(models.MatrixCell.chapter_id == chapter.id).all()
+    if not cells:
+        return ""
+
+    bloklar, used = [], 0
+    for cell in cells:
+        matrix = db.query(models.PlanMatrix).filter(models.PlanMatrix.id == cell.matrix_id).first()
+        if not matrix:
+            continue
+        row = next((r for r in matrix.rows if r.id == cell.row_id), None)
+        if not row:
+            continue
+        kendi_kolon = next((c for c in matrix.columns if c.id == cell.column_id), None)
+        parcalar = []
+        for komsu in matrix.cells:
+            if komsu.row_id != row.id or komsu.column_id == cell.column_id:
+                continue
+            icerik = (komsu.content or "").strip()
+            if not icerik:
+                continue
+            kolon = next((c for c in matrix.columns if c.id == komsu.column_id), None)
+            etiket = kolon.label if kolon else "?"
+            # Yazılmışsa ÖZETİ de ver - plan "ne olacak", özet "ne oldu"
+            ozet = ""
+            if komsu.chapter_id:
+                ch = db.query(models.Chapter).filter(models.Chapter.id == komsu.chapter_id).first()
+                if ch and (ch.summary or "").strip():
+                    ozet = f"\n  YAZILDI (Bölüm {ch.number}): {ch.summary.strip()[:400]}"
+            parca = f"[{etiket}] {icerik[:400]}{ozet}"
+            if used + len(parca) > max_chars:
+                break
+            parcalar.append(parca)
+            used += len(parca)
+        if parcalar:
+            bloklar.append(f"AŞAMA: {row.label}\n" + "\n\n".join(parcalar))
+
+    if not bloklar:
+        return ""
+    return (
+        "=== AYNI AŞAMANIN DİĞER TURLARI (paralellik denetimi) ===\n"
+        "Bu aşama başka turlarda da işleniyor. Aşağıdakileri OKU ve:\n"
+        "- Aynı çözümü, aynı imgeyi, aynı cümle kalıbını TEKRARLAMA.\n"
+        "- Aynı işlevi FARKLI bir yoldan gerçekleştir (başka duyu, başka açı,\n"
+        "  başka tempo). Yapı aynı kalabilir, ifade aynı kalamaz.\n"
+        "- Bahis yükselmeli: bu tur öncekinden daha ileri gitmeli.\n\n"
+        + "\n\n".join(bloklar)
+    )
+
+
+# ---------------------------------------------------------------------------
+# TUR (ÜST BAŞLIK) DEĞERLENDİRMESİ: bir üst başlık altındaki tüm alt
+# girdileri BİR BÜTÜN olarak denetler. Bölüm incelemesi tek girdiye,
+# yapısal tarama roman geneline bakıyordu; arada "tur" seviyesi boştu -
+# oysa kullanıcının yapısında asıl anlamlı birim bu.
+# ---------------------------------------------------------------------------
+
+TUR_REVIEW_PROMPT = """Sen bir gelişim editörüsün. Sana bir romanın TEK BİR
+BÖLÜMÜNÜN (bir "tur") alt sahneleri, özetleri ve paragraf sayıları sırayla
+verilecek. Bu turu BİR BÜTÜN olarak değerlendir.
+
+Bak:
+1. İÇ YAY: tur kendi içinde yükseliyor mu? Açılış → gelişme → dönüş →
+   kapanış var mı, yoksa düz mü gidiyor?
+2. RİTİM DENGESİ: sahne uzunlukları (paragraf sayıları) işlevleriyle uyumlu
+   mu? Kısa olması gereken bir geçiş şişmiş mi, ağırlık taşıması gereken
+   sahne cılız mı kalmış?
+3. TEKRAR: sahneler arasında aynı hamle/imge/çözüm tekrarlanıyor mu?
+4. KAPANIŞ: tur bir eşik bırakıyor mu, yoksa çözülüp bitiyor mu?
+5. HACİM: bu turun toplam hacmi dengeli mi (çok mu şişkin, çok mu ince)?
+
+Kurallar: sahne numaralarıyla konuş, somut düzeltme öner, sağlamsa sağlam de.
+
+Yanıtın SADECE şu JSON olsun:
+{"arc": "yukseliyor|duz|dusuyor", "arc_note": "...",
+ "rhythm": [{"scene": "3-2", "issue": "...", "fix": "..."}],
+ "repeats": ["..."], "closing": "...", "volume_note": "...",
+ "summary": "iki cümlelik genel değerlendirme"}"""
+
+
+def review_arc(db: Session, novel_id: int, parent_chapter_id: int, max_chars: int = 18000) -> dict:
+    """Bir üst başlık (tur) altındaki alt girdileri bütün olarak denetler."""
+    from .outline import build_hierarchy
+
+    chapters = db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).all()
+    items = build_hierarchy(chapters)
+    numara = {it["chapter"].id: it["display"] for it in items}
+    parent = next((it for it in items if it["chapter"].id == parent_chapter_id), None)
+    if not parent:
+        return {"summary": "Girdi bulunamadı.", "rhythm": [], "repeats": []}
+
+    # Doğrudan VE dolaylı alt girdiler (sıralı)
+    alt = [it for it in items if it["parent_id"] == parent_chapter_id]
+    if not alt:
+        return {"summary": "Bu girdinin alt sahnesi yok - tur değerlendirmesi için "
+                           "altında alt başlıklar olmalı.", "rhythm": [], "repeats": []}
+
+    bloklar, used = [], 0
+    for it in alt:
+        c = it["chapter"]
+        p_sayisi = len([p for p in c.paragraphs if (p.text or "").strip()])
+        ozet = (c.summary or "").strip() or "(özet yok - bu sahne körlemesine değerlendiriliyor)"
+        parca = f"--- Sahne {numara.get(c.id, '?')} - {c.title or ''} ({p_sayisi} paragraf) ---\n{ozet}"
+        if used + len(parca) > max_chars:
+            bloklar.append("[... kalan sahneler kırpıldı ...]")
+            break
+        bloklar.append(parca)
+        used += len(parca)
+
+    client = get_client()
+    baslik = parent["chapter"].title or f"Bölüm {parent['chapter'].number}"
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": TUR_REVIEW_PROMPT},
+            {"role": "user", "content": f"TUR: {baslik}\n\n" + "\n\n".join(bloklar)},
+        ],
+    )
+    data = _parse_json_lenient(response.choices[0].message.content) or {}
+    return {
+        "arc": data.get("arc") if data.get("arc") in ("yukseliyor", "duz", "dusuyor") else "duz",
+        "arc_note": (data.get("arc_note") or "")[:400],
+        "rhythm": [
+            {"scene": str(r.get("scene", ""))[:20], "issue": (r.get("issue") or "")[:300],
+             "fix": (r.get("fix") or "")[:300]}
+            for r in (data.get("rhythm") or []) if isinstance(r, dict) and (r.get("issue") or "").strip()
+        ][:8],
+        "repeats": [str(x)[:300] for x in (data.get("repeats") or [])][:6],
+        "closing": (data.get("closing") or "")[:400],
+        "volume_note": (data.get("volume_note") or "")[:300],
+        "summary": (data.get("summary") or "")[:400],
+        "scenes": [{"display": numara.get(it["chapter"].id, "?"),
+                    "title": it["chapter"].title or "",
+                    "paragraphs": len([p for p in it["chapter"].paragraphs if (p.text or "").strip()])}
+                   for it in alt],
+    }

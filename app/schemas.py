@@ -1234,3 +1234,29 @@ class KnowledgeScanResponse(BaseModel):
     facts: List[KnowledgeFactSuggestion] = []
     issues: List[KnowledgeIssue] = []
     note: str = ""
+
+
+class ArcRhythmItem(BaseModel):
+    scene: str = ""
+    issue: str = ""
+    fix: str = ""
+
+
+class ArcSceneInfo(BaseModel):
+    display: str = ""
+    title: str = ""
+    paragraphs: int = 0
+
+
+class ArcReviewResponse(BaseModel):
+    """TUR (üst başlık) değerlendirmesi: alt sahneler BİR BÜTÜN olarak.
+    Bölüm incelemesi tek girdiye, yapısal tarama roman geneline bakar;
+    arada bu seviye boştu."""
+    arc: str = "duz"          # yukseliyor | duz | dusuyor
+    arc_note: str = ""
+    rhythm: List[ArcRhythmItem] = []
+    repeats: List[str] = []
+    closing: str = ""
+    volume_note: str = ""
+    summary: str = ""
+    scenes: List[ArcSceneInfo] = []

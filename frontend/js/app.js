@@ -982,6 +982,7 @@ function renderChapterListDOM() {
       // başlıklarda anlamlı - altı boş bir Kısım'da tarayacak bölüm yok.
       const bulkScanBtn = item.hasChildren
         ? `<button class="btn-icon-sm bulk-scan-btn" data-id="${c.id}" title="Bu ${isPart ? 'Kısımdaki' : 'Alt Başlıktaki'} TÜM bölümleri tara - yeni varlık ve gelişim notu önerileri">🔍</button>`
+          + `<button class="btn-icon-sm arc-review-btn" data-id="${c.id}" title="TUR DEĞERLENDİRMESİ: alt sahnelerin tamamını BİR BÜTÜN olarak denetler - iç yay, ritim dengesi, sahneler arası tekrar, kapanış, hacim">📈</button>`
         : '';
       // Kısım/Alt Başlık normalde sadece bir ayraç, paragraf tutmaz - ama
       // eski bir veri/yanlış tıklama sonucu KENDİSİNE paragraf yazılmışsa
@@ -1111,6 +1112,10 @@ function renderChapterListDOM() {
       renderChapterListDOM();
     });
   }
+  listEl.querySelectorAll('.arc-review-btn').forEach(btn => btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    runArcReview(parseInt(btn.dataset.id, 10));
+  }));
   listEl.querySelectorAll('.bulk-scan-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -3894,6 +3899,7 @@ async function loadMatrixGrid() {
         <button class="btn btn-sm" id="mAddCol">+ Kolon</button>
         <button class="btn btn-sm" id="mAddRow">+ Satır</button>
         <button class="btn btn-sm" id="mBulkAdd" title="Tek seferde birden çok kolon/satır ekle">⊞ Toplu ekle</button>
+        <button class="btn btn-sm" id="mCollapseAll" title="Bölüm satırlarını kapat - uzun listede gezinmeyi kolaylaştırır">⊟ Tümünü daralt</button>
         <button class="btn btn-sm" id="mFromChapter" title="Bir bölümün yapısından (alt girdileri ya da planı) satırları otomatik oluştur">⚡ Bölümden satır oluştur</button>
         <button class="btn btn-sm btn-primary" id="mGenChapters" title="Her kolon bir Kısım, her hücre bir Bölüm olur - fihristin sonuna eklenir, hücreler otomatik bağlanır">⚡ Fihristi Oluştur</button>
         <button class="btn btn-sm" id="mAiFill" title="Üstte işaretlediğin kolonların BOŞ hücrelerini, dolu hücrelerdeki kalıbı izleyerek AI taslaklar - hiçbiri onaysız kaydedilmez">🤖 Seçili Kolonların Eksiklerini AI Doldursun</button>
@@ -3912,12 +3918,26 @@ async function loadMatrixGrid() {
               <button class="btn-icon-sm m-col-del" data-id="${c.id}" title="Kolonu sil (hücreleriyle)">✕</button>
             </th>`).join('')}
           </tr>
-          ${m.rows.map((r, ri) => `<tr>
+          ${m.rows.map((r, ri) => {
+            // GRUPLAMA: bağlı hücresi olan satır bir BÖLÜM başlığıdır;
+            // ondan sonraki bağsız satırlar o bölümün sahneleridir ve
+            // katlanabilir. 8 tur x 10 satır = çok uzun liste oluyordu.
+            const bagliMi = (m.cells || []).some(c => c.row_id === r.id && c.chapter_id);
+            let ustBolum = null;
+            for (let k = ri; k >= 0; k--) {
+              if ((m.cells || []).some(c => c.row_id === m.rows[k].id && c.chapter_id)) { ustBolum = m.rows[k].id; break; }
+            }
+            const gizli = !bagliMi && ustBolum && collapsedMatrixRows.has(String(ustBolum));
+            const altSayisi = bagliMi ? m.rows.slice(ri + 1).findIndex(x => (m.cells || []).some(c => c.row_id === x.id && c.chapter_id)) : 0;
+            const gercekAlt = bagliMi ? (altSayisi === -1 ? m.rows.length - ri - 1 : altSayisi) : 0;
+            return `<tr data-row-id="${r.id}" style="${gizli ? 'display:none;' : ''}${bagliMi ? 'background:var(--paper-dim);' : ''}">
             <th style="${th}${r.kind === 'sub' ? 'font-style:italic;font-weight:400;padding-left:22px;' : ''}">
+              ${bagliMi && gercekAlt > 0 ? `<button class="btn-icon-sm m-row-collapse" data-id="${r.id}" title="${gercekAlt} sahneyi göster/gizle">${collapsedMatrixRows.has(String(r.id)) ? '▸' : '▾'}</button>` : ''}
               <span style="font-size:10px;color:var(--text-muted);font-weight:700;margin-right:4px;" title="Satır sırası">${ri + 1}</span>
               <span class="m-row-edit" data-id="${r.id}" style="cursor:pointer;" title="Adı, türü ve TALİMAT KASASI'nı düzenle">${r.kind === 'sub' ? '↳ ' : ''}${escapeHtml(r.label)}</span>${(r.instructions || '').trim() ? ` <span style="font-size:10px;color:var(--gold);" title="Bu aşamanın yazım kısıtları kayıtlı - bölümlere otomatik gider">📌</span>` : ''}
               <button class="btn-icon-sm m-row-ins" data-id="${r.id}" title="Bu satırın ALTINA yeni satır ekle">⊕</button>
               <button class="btn-icon-sm m-row-del" data-id="${r.id}" title="Satırı sil (hücreleriyle)">✕</button>
+              ${bagliMi && gercekAlt > 0 ? `<span style="font-size:10px;color:var(--text-muted);">${gercekAlt} sahne</span>` : ''}
             </th>
             ${m.columns.map(c => {
               const cell = cellMap[`${c.id}:${r.id}`];
@@ -3931,7 +3951,8 @@ async function loadMatrixGrid() {
                 <div style="white-space:pre-wrap;">${preview}</div>
               </td>`;
             }).join('')}
-          </tr>`).join('')}
+          </tr>`;
+          }).join('')}
         </table>
       </div>`;
 
@@ -3962,6 +3983,23 @@ async function loadMatrixGrid() {
     });
     document.getElementById('mBulkAdd').addEventListener('click', () => openBulkAddDialog(m));
     document.getElementById('mFromChapter').addEventListener('click', () => openRowsFromChapterDialog(m));
+    document.querySelectorAll('.m-row-collapse').forEach(b => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = String(b.dataset.id);
+      if (collapsedMatrixRows.has(id)) collapsedMatrixRows.delete(id); else collapsedMatrixRows.add(id);
+      saveCollapsedMatrixRows();
+      loadMatrixGrid();
+    }));
+    document.getElementById('mCollapseAll').addEventListener('click', () => {
+      const bolumSatirlari = m.rows.filter(r => (m.cells || []).some(c => c.row_id === r.id && c.chapter_id));
+      const hepsiKapali = bolumSatirlari.every(r => collapsedMatrixRows.has(String(r.id)));
+      bolumSatirlari.forEach(r => {
+        if (hepsiKapali) collapsedMatrixRows.delete(String(r.id));
+        else collapsedMatrixRows.add(String(r.id));
+      });
+      saveCollapsedMatrixRows();
+      loadMatrixGrid();
+    });
     // Bağlı bölüm rozetleri: tıklayınca o bölüme git
     document.querySelectorAll('.mx-goto-ch').forEach(b => b.addEventListener('click', async () => {
       const no = parseInt(b.dataset.num, 10);
@@ -8717,5 +8755,84 @@ async function openRowsFromChapterDialog(m) {
     });
   } catch (err) {
     editor.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// Matriste kapalı bölüm satırları (kalıcı): 8 tur x 10 satırlık ızgarada
+// gezinmek için bölümler katlanabilir olmalı.
+const collapsedMatrixRows = new Set(
+  (() => { try { return JSON.parse(localStorage.getItem('roman_matrix_collapsed') || '[]'); } catch (e) { return []; } })()
+);
+function saveCollapsedMatrixRows() {
+  try { localStorage.setItem('roman_matrix_collapsed', JSON.stringify([...collapsedMatrixRows])); }
+  catch (e) { /* yoksay */ }
+}
+
+// ---------------------------------------------------------------------------
+// TUR DEĞERLENDİRMESİ: bir üst başlık altındaki sahneleri bütün olarak
+// denetler. Bölüm incelemesi tek girdiye, yapısal tarama roman geneline
+// bakıyordu - kullanıcının yapısında asıl anlamlı birim (bir TUR) arada
+// denetimsiz kalıyordu.
+// ---------------------------------------------------------------------------
+async function runArcReview(chapterId) {
+  const overlay = ensureModalOverlay();
+  overlay.innerHTML = '<div class="panel" style="max-width:560px;width:92%;"><div class="empty-state">Tur bütün olarak değerlendiriliyor…</div></div>';
+  overlay.style.display = 'flex';
+  try {
+    const r = await api.post(`/ai/arc-review/${chapterId}`, {});
+    const yayRenk = { yukseliyor: '#3f7a4f', duz: '#b08d3f', dusuyor: 'var(--danger)' }[r.arc];
+    const yayEtiket = { yukseliyor: '↗ Yükseliyor', duz: '→ Düz', dusuyor: '↘ Düşüyor' }[r.arc];
+    const enUzun = Math.max(1, ...(r.scenes || []).map(s => s.paragraphs));
+    overlay.innerHTML = `
+      <div class="panel" style="max-width:560px;width:92%;max-height:88vh;overflow-y:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <b>📈 Tur Değerlendirmesi</b>
+          <button class="btn btn-sm" id="arcClose">✕</button>
+        </div>
+        ${r.summary ? `<div style="font-size:13px;margin-top:8px;">${escapeHtml(r.summary)}</div>` : ''}
+        <div style="font-size:13px;margin-top:10px;">
+          <b style="color:${yayRenk};">${yayEtiket}</b>
+          ${r.arc_note ? `<span style="color:var(--text-muted);"> — ${escapeHtml(r.arc_note)}</span>` : ''}
+        </div>
+
+        ${(r.scenes || []).length ? `
+          <div style="margin-top:10px;">
+            <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">HACİM DAĞILIMI</div>
+            ${r.scenes.map(sc => `
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:3px;">
+                <span style="min-width:44px;color:var(--gold);font-weight:600;">${escapeHtml(sc.display)}</span>
+                <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(sc.title)}</span>
+                <span style="width:${Math.round((sc.paragraphs / enUzun) * 90)}px;height:7px;background:var(--gold);opacity:0.7;border-radius:3px;"></span>
+                <span style="color:var(--text-muted);min-width:34px;text-align:right;">${sc.paragraphs}</span>
+              </div>`).join('')}
+            ${r.volume_note ? `<div style="font-size:12px;color:var(--text-muted);margin-top:6px;">${escapeHtml(r.volume_note)}</div>` : ''}
+          </div>` : ''}
+
+        ${r.rhythm.length ? `
+          <div style="margin-top:12px;">
+            <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">RİTİM SORUNLARI</div>
+            ${r.rhythm.map(x => `
+              <div style="font-size:12.5px;margin-top:6px;border-left:3px solid #b08d3f;padding-left:8px;">
+                <b>${escapeHtml(x.scene)}</b>
+                <div style="color:var(--text-muted);">${escapeHtml(x.issue)}</div>
+                ${x.fix ? `<div>→ ${escapeHtml(x.fix)}</div>` : ''}
+              </div>`).join('')}
+          </div>` : ''}
+
+        ${r.repeats.length ? `
+          <div style="margin-top:12px;">
+            <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">SAHNELER ARASI TEKRAR</div>
+            ${r.repeats.map(x => `<div style="font-size:12.5px;margin-top:4px;border-left:3px solid var(--danger);padding-left:8px;">${escapeHtml(x)}</div>`).join('')}
+          </div>` : ''}
+
+        ${r.closing ? `<div style="margin-top:12px;font-size:12.5px;"><b>Kapanış:</b> <span style="color:var(--text-muted);">${escapeHtml(r.closing)}</span></div>` : ''}
+      </div>`;
+    document.getElementById('arcClose').addEventListener('click', () => {
+      overlay.style.display = 'none'; overlay.innerHTML = '';
+    });
+  } catch (err) {
+    overlay.innerHTML = `<div class="panel" style="max-width:480px;width:92%;">
+      <div class="error-text">${escapeHtml(err.message)}</div>
+      <button class="btn btn-sm" onclick="document.getElementById('createItemModalOverlay').style.display='none'" style="margin-top:8px;">Kapat</button></div>`;
   }
 }
