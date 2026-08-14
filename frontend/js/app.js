@@ -6925,8 +6925,12 @@ async function renderWorkshopParagraph(idx) {
       <button class="btn" id="wsChat" style="flex:1;font-size:12px;">💬 Konuş</button>
     </div>
     <div id="wsLongWarn"></div>
-    <button class="btn btn-sm" id="wsNecessity" style="width:100%;margin-top:6px;font-size:11.5px;" title="Bu paragraf silinirse ne kaybolur? Edebî kalite ve anlatısal gereklilik ayrı ölçülür.">🧪 Silme testi / gereklilik</button>
-    <div id="wsNecessityBox"></div>
+    <button class="btn btn-sm" id="wsChecksToggle" style="width:100%;margin-top:6px;font-size:11.5px;" title="Bu paragrafa uygulanabilecek kontroller">🔬 Paragraf kontrolleri</button>
+    <div id="wsChecksPanel" style="display:none;">
+      <button class="btn btn-sm" id="wsNecessity" style="width:100%;margin-top:6px;font-size:11.5px;" title="Bu paragraf silinirse ne kaybolur? Edebî kalite ve anlatısal gereklilik ayrı ölçülür.">🧪 Silme testi / gereklilik</button>
+      <button class="btn btn-sm" id="wsShowDirectives2" style="width:100%;margin-top:6px;font-size:11.5px;" title="AI'ya giden kural listesi">📋 Direktifleri göster</button>
+      <div id="wsNecessityBox"></div>
+    </div>
     <div id="wsWork" style="margin-top:8px;"></div>
 
     <div style="display:flex;gap:6px;margin-top:16px;position:sticky;bottom:0;background:var(--paper);padding-top:8px;">
@@ -6936,8 +6940,7 @@ async function renderWorkshopParagraph(idx) {
     </div>`);
 
   document.getElementById('workshopClose').addEventListener('click', closeWorkshop);
-  wireMicroEdit(chapter, num);   // metinde ifade seçince mikro düzenleme çubuğu
-  wireMicroEdit(chapter, num);   // metinde ifade seçince mikro düzenleme çubuğu
+  wireMicroEdit(ch, num);   // metinde ifade seçince mikro düzenleme çubuğu
   document.getElementById('wsPurpose').addEventListener('input', (e) => {
     paraPurposes[num] = e.target.value; saveParaState();
   });
@@ -6982,7 +6985,7 @@ async function renderWorkshopParagraph(idx) {
     document.getElementById('wsSplitPara').addEventListener('click', async (e2) => {
       const b2 = e2.target; b2.disabled = true; b2.textContent = 'Bölünüyor…';
       try {
-        const r = await api.post(`/chapters/${chapter.id}/split-preview`, { text: para.text });
+        const r = await api.post(`/chapters/${ch.id}/split-preview`, { text: para.text });
         const parcalar = (r.paragraphs || []).map(x => x.text);
         const kutu = document.getElementById('wsLongWarn');
         if (parcalar.length < 2) {
@@ -7001,7 +7004,7 @@ async function renderWorkshopParagraph(idx) {
         document.getElementById('wsSplitCancel').addEventListener('click', () => { kutu.innerHTML = ''; });
         document.getElementById('wsSplitApply').addEventListener('click', async () => {
           try {
-            await applyParagraphSplit(chapter, num, parcalar);
+            await applyParagraphSplit(ch, num, parcalar);
             kutu.innerHTML = '<div style="font-size:12px;color:#3f7a4f;">✓ Bölündü.</div>';
           } catch (err) { alert(err.message); }
         });
@@ -7012,11 +7015,26 @@ async function renderWorkshopParagraph(idx) {
     });
   }
 
+  // KONTROLLER PANELİ: ekran kalabalıklaşmıştı - ana akış (öneri/konuş)
+  // üstte, denetim araçları bu düğmenin arkasında.
+  document.getElementById('wsChecksToggle').addEventListener('click', (e) => {
+    const panel = document.getElementById('wsChecksPanel');
+    const acik = panel.style.display !== 'none';
+    panel.style.display = acik ? 'none' : 'block';
+    e.target.textContent = acik ? '🔬 Paragraf kontrolleri' : '🔬 Kontrolleri gizle';
+  });
+  document.getElementById('wsShowDirectives2').addEventListener('click', () => {
+    const kutu = document.getElementById('wsNecessityBox');
+    if (kutu.dataset.mode === 'dir') { kutu.innerHTML = ''; kutu.dataset.mode = ''; return; }
+    kutu.dataset.mode = 'dir';
+    const d = buildParagraphDirectives(num, kayitlar, para ? para.text : '');
+    kutu.innerHTML = `<pre style="white-space:pre-wrap;font-size:11px;background:var(--paper-dim);padding:8px;border-radius:6px;margin:6px 0;">${escapeHtml(d)}</pre>`;
+  });
   document.getElementById('wsNecessity').addEventListener('click', async (e) => {
     const b = e.target, kutu = document.getElementById('wsNecessityBox');
     b.disabled = true; b.textContent = 'Ölçülüyor…';
     try {
-      const n = await api.post(`/ai/necessity/${chapter.id}`, {
+      const n = await api.post(`/ai/necessity/${ch.id}`, {
         paragraph_text: para ? para.text : '', purpose: effectiveParaPurpose(num).text,
       });
       const kararRenk = { korunmali: '#3f7a4f', guclendirilmeli: '#b08d3f',
@@ -7054,7 +7072,7 @@ async function renderWorkshopParagraph(idx) {
     if (!yeni) return;
     const durum = document.getElementById('wsSaveState');
     // UZUNLUK KAPISI: sınırı aşan paragraf önce bölme teklifinden geçer
-    const devam = await paragraphLengthGate(chapter, num, yeni, document.getElementById('wsParaText'));
+    const devam = await paragraphLengthGate(ch, num, yeni, document.getElementById('wsParaText'));
     if (!devam) { durum.textContent = '✓ bölündü ve kaydedildi'; return; }
     durum.textContent = 'kaydediliyor…';
     await replaceParagraphText(ch.id, num, yeni);
