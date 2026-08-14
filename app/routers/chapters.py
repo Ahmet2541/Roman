@@ -956,7 +956,8 @@ def split_paragraph_preview(
         logger.exception("Paragraf bölme önizlemesi başarısız")
         raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
     return schemas.AiSplitParagraphsResponse(
-        created=0, paragraphs=[schemas.ParagraphOut(
+        created=0, paragraph_count=len(parcalar),
+        paragraphs=[schemas.ParagraphOut(
             id=0, number=i + 1, text=t, mentions=[], is_style_sample=False)
             for i, t in enumerate(parcalar)],
     )

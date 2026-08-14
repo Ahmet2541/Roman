@@ -273,3 +273,39 @@ def test_verify_knows_proposal_goal(client, headers):
     assert "BEKLENEN ETKİ" in captured["user"]
     assert "HEDEFİ gerçekleşti mi" in captured["system"]
     assert "KANON" in captured["system"]          # kanon dışı ekleme kontrolü
+
+
+def test_rewrite_context_has_own_summary_and_entity_profile(client, headers):
+    """PARAGRAF YENİDEN YAZIM BAĞLAMI - iki kritik boşluk kapatıldı:
+    (1) bölümün KENDİ özeti (ZAMAN/ATMOSFER/DUYGU) gelmiyordu; fihrist
+    katmanı onu bilerek dışlıyor (yeni bölüm yazarken doğru, düzenlerken
+    yanlış). (2) paragrafta geçen karakterlerin profili gelmiyordu -
+    Vicdan'ın konuşma tarzını bilmeden onun sahnesi yeniden yazılıyordu."""
+    v = client.post("/characters/", json={
+        "name": "Vicdan", "description": "Yargıç değil arşiv.",
+        "sections": {"konusma_tarzi": "Sakin, kısa cümleler. Bağırmaz."},
+    }, headers=headers).json()
+    ch = client.post("/chapters/", json={"number": 1, "kind": "chapter", "title": "Salon"}, headers=headers).json()
+    client.put(f"/chapters/{ch['id']}/paragraphs/1", json={"number": 1, "text": "Vicdan konuştu."}, headers=headers)
+    client.put(f"/chapters/{ch['id']}", json={
+        "summary": "ZAMAN: 2030. ATMOSFER: Zifiri karanlık. KAPANIŞ TONU: tedirginlik.",
+    }, headers=headers)
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [{"entity_type": "character", "entity_id": v["id"]}],
+        "chapter_number": 1,
+        "instruction": "P1'i yeniden yaz. Diyalog: alt metin yok bulgusunu gider.",
+        "include_own_summary": True,
+    }, headers=headers).json()["context"]
+
+    assert "ÜZERİNDE ÇALIŞILAN BÖLÜMÜN ÖZETİ" in ctx
+    assert "ATMOSFER: Zifiri karanlık" in ctx      # ton bilgisi geldi
+    assert "Bağırmaz" in ctx                        # konuşma tarzı (diyalog anahtarı)
+    assert "Yargıç değil arşiv" in ctx              # kısa tanım
+
+    # Bayrak KAPALIYKEN kendi özeti GELMEZ - yeni bölüm yazarken model
+    # kendi özetini kopyalamasın diye bu davranış korunmalı
+    ctx2 = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 1, "instruction": "yaz",
+    }, headers=headers).json()["context"]
+    assert "ÜZERİNDE ÇALIŞILAN BÖLÜMÜN ÖZETİ" not in ctx2

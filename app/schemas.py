@@ -417,6 +417,8 @@ class AiAssistRequest(BaseModel):
     # Alt-metin modu: seçili varlıkların 'gizli' katmanı, sızdırmama
     # direktifiyle context'e girer (varsayılan: hiç girmez).
     include_hidden: bool = False
+    # Bölümün KENDİ özeti bağlama girsin mi (paragraf düzenlerken şart)
+    include_own_summary: bool = False
 
 
 class AiSuggestion(BaseModel):
@@ -533,6 +535,7 @@ class ContextPreviewRequest(BaseModel):
     include_hidden: bool = False
     text_scope: str = "chapter"
     include_chapter_text: bool = False
+    include_own_summary: bool = False
 
 
 class ContextPreviewResponse(BaseModel):

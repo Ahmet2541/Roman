@@ -528,7 +528,7 @@ def build_context(
     db: Session, novel_id: int, universe_id: int, selected_entities: list,
     chapter_number: int | None = None, instruction_text: str = "",
     include_hidden: bool = False, include_chapter_text: bool = False,
-    text_scope: str = "chapter",
+    text_scope: str = "chapter", include_own_summary: bool = False,
 ) -> str:
     """chapter_number verilirse (o an üzerinde çalışılan bölüm), fihrist
     katmanında o bölüm dışlanır - bir bölümün kendi özetini kendi context'i
@@ -551,6 +551,25 @@ def build_context(
     forward = build_forward_layer(db, novel_id, chapter_number)
     # Bilgi durumu: okur ne biliyor, ne sızdırılmamalı (dramatik ironi koruması)
     knowledge = build_knowledge_layer(db, universe_id, chapter_number)
+    # ÜZERİNDE ÇALIŞILAN BÖLÜMÜN KENDİ ÖZETİ: fihrist katmanı bunu bilerek
+    # dışlıyor (yeni bölüm YAZILIRKEN model kendi özetini kopyalamasın diye).
+    # Ama var olan bir paragrafı DÜZENLERKEN tam tersi gerekli: ZAMAN,
+    # ATMOSFER, DUYGU ve KAPANIŞ TONU bilgisi olmadan yeniden yazım kör
+    # kalıyordu - sahnenin tonunu bilmeden "güçlendirme" yapılıyordu.
+    own_summary = ""
+    if include_own_summary and chapter_number is not None:
+        ch = (
+            db.query(models.Chapter)
+            .filter(models.Chapter.novel_id == novel_id, models.Chapter.number == chapter_number)
+            .first()
+        )
+        if ch and (ch.summary or "").strip():
+            baslik = f" - {ch.title}" if ch.title else ""
+            own_summary = (
+                f"=== ÜZERİNDE ÇALIŞILAN BÖLÜMÜN ÖZETİ (Bölüm {ch.number}{baslik}) ===\n"
+                "Yeniden yazım bu tona, zamana ve atmosfere UYMALI:\n"
+                + ch.summary.strip()
+            )
     # Kısayol kodlarıyla ("1BLM", "1-2KSM") anılan girdilerin İÇERİĞİ
     referenced = build_referenced_entries_layer(db, universe_id, novel_id, instruction_text)
     # Sohbet modunda çalışılan bölümün METNİ de gider (include_chapter_text);
@@ -572,7 +591,7 @@ def build_context(
     style_warnings = build_style_warning_layer(db, universe_id)
     plan = build_plan_layer(db, novel_id, chapter_number, instruction_text=instruction_text)
     dynamic = build_dynamic_layer(db, universe_id, selected_entities, instruction_text=instruction_text, include_hidden=include_hidden)
-    return "\n\n".join(part for part in [fixed, index, outline, matrix_map, referenced, style, style_warnings, plan, forward, knowledge, chapter_text, dynamic] if part)
+    return "\n\n".join(part for part in [fixed, index, outline, matrix_map, referenced, style, style_warnings, plan, forward, knowledge, own_summary, chapter_text, dynamic] if part)
 
 
 # ---------------------------------------------------------------------------

@@ -1523,9 +1523,10 @@ function renderReader(chapter) {
     .find(it => String(it.chapter.id) === String(chapter.id)) || {}).displayNumber || '';
   const paragraphsHtml = chapter.paragraphs.map(p => `
     <div class="paragraph-block" id="para-global-${p.id}">
-      <div class="paragraph-number para-ref-code" data-num="${p.number}"
+      <div class="paragraph-number para-ref-code" data-num="${p.number}" data-pnum="${p.number}"
            title="Atıf kodu. Bu bölümdeyken sohbette 'P${p.number}' yeter; başka bir girdiden atıf yaparken '${chapterEntryNumber}P${p.number}' yaz. Tıkla: tam kodu kopyala.">
         <div style="font-size:11px;color:var(--gold,#b08d3f);font-weight:700;cursor:pointer;">P${p.number}</div>
+        ${paragraphStatusBadge(p.number)}
       </div>
       <div style="flex:1;">
         <div class="paragraph-text" contenteditable="true" data-number="${p.number}">${escapeHtml(p.text)}</div>
@@ -1870,8 +1871,14 @@ function renderReader(chapter) {
       el.classList.toggle('dirty', dirty);
     };
     el.addEventListener('input', () => setDirty(el.innerText.trim() !== el.dataset.original));
-    el.addEventListener('blur', () => {
+    el.addEventListener('blur', async () => {
       if (el.innerText.trim() === el.dataset.original) return; // değişmedi -> istek yok
+      // Uzunluk kapısı: sınırı aşan paragrafta önce bölme teklif edilir
+      const metin = el.innerText.trim();
+      if (wordCount(metin) >= PARA_WORD_LIMIT) {
+        const devam = await paragraphLengthGate(chapter, parseInt(number, 10), metin, el);
+        if (!devam) return;   // bölünerek kaydedildi
+      }
       autoSaveParagraph(chapter, parseInt(number, 10), el, state, saveBtn);
     });
   });
@@ -4616,7 +4623,9 @@ async function runParagraphAi(chapter, number, mode) {
   try {
     const result = await api.post('/ai/assist', {
       chapter_number: chapter.number, instruction: fullInstruction,
-      selected_entities: selected, existing_text: text,
+      selected_entities: selected.length ? selected : paragraphEntities(
+        (chapter.paragraphs || []).find(x => x.number === parseInt(number, 10))),
+      existing_text: text, include_own_summary: true,
     });
     const notes = (result.consistency_notes && result.consistency_notes.length)
       ? `<div style="font-size:12px;color:var(--danger);margin-top:6px;">⚠ ${result.consistency_notes.map(escapeHtml).join(' · ')}</div>` : '';
@@ -4636,7 +4645,10 @@ async function runParagraphAi(chapter, number, mode) {
         <div class="para-ai-col-left">
           <div class="field" style="margin:0 0 8px;">
             <label style="font-size:10.5px;letter-spacing:0.4px;color:var(--text-muted);">🎯 BU PARAGRAFIN İŞİ <span style="font-weight:400;text-transform:none;letter-spacing:0;">(bir cümle - yeniden yazımın ölçüsü olur)</span></label>
-            <input type="text" class="para-purpose" data-number="${number}" value="${escapeHtml(paraPurposes[number] || '')}" placeholder="ör. Yangın yerini masum göstermek - okur sonradan anlamalı" style="font-size:12.5px;">
+            <div style="display:flex;gap:6px;">
+              <input type="text" class="para-purpose" data-number="${number}" value="${escapeHtml(paraPurposes[number] || '')}" placeholder="ör. Yangın yerini masum göstermek" style="flex:1;font-size:12.5px;">
+              <button class="btn btn-sm find-purpose" data-number="${number}" style="font-size:11px;white-space:nowrap;" title="Bölüm özeti ve planından bu paragrafın görevini çıkar">🎯 İşlevi bul</button>
+            </div>
           </div>
           <strong style="font-size:11px;color:var(--text-muted);letter-spacing:0.4px;">${mode === 'suggest' ? '✨ ÖNERİLEN VERSİYON - onaysız değişmez' : '🔍 EDİTÖR ELEŞTİRİSİ - metne dokunulmadı'}</strong>
           ${degismedi ? `<div style="margin-top:6px;padding:8px;border:1px solid var(--danger);border-radius:6px;font-size:12.5px;color:var(--danger);">
@@ -4673,6 +4685,28 @@ async function runParagraphAi(chapter, number, mode) {
     panel.querySelector('#retryStronger')?.addEventListener('click', () => {
       window.__forceStrongRewrite = true;
       runParagraphAi(chapter, number, 'suggest');
+    });
+    // İŞLEVİ BUL: atölyeden geçmemiş bölümlerde de tek paragrafın görevini
+    // çıkarabilmek için. Bölümün TAMAMI taranır ama sadece bu paragrafın
+    // sonucu alınır - özet+plan bağlamı olduğu için isabet yüksek.
+    panel.querySelector('.find-purpose')?.addEventListener('click', async (e) => {
+      const b = e.target;
+      b.disabled = true; b.textContent = 'Bulunuyor…';
+      try {
+        const r = await api.post(`/ai/paragraph-roles/${chapter.id}`, {});
+        const benimki = (r.roles || []).find(x => x.p === parseInt(number, 10));
+        (r.roles || []).forEach(x => { if (!paraPurposes[x.p]) paraPurposes[x.p] = x.role; });
+        saveParaState();
+        if (benimki) {
+          paraPurposes[number] = benimki.role;
+          panel.querySelector('.para-purpose').value = benimki.role;
+          saveParaState();
+        } else {
+          b.textContent = 'Bulunamadı';
+        }
+      } catch (err) { alert(err.message); }
+      b.disabled = false;
+      if (b.textContent === 'Bulunuyor…') b.textContent = '🎯 İşlevi bul';
     });
     const purposeInput = panel.querySelector('.para-purpose');
     if (purposeInput) purposeInput.addEventListener('input', () => {
@@ -5872,7 +5906,8 @@ async function runInlineFix(chapter, paragraphNumber, issue, btn) {
   try {
     const result = await api.post('/ai/assist', {
       chapter_number: chapter.number, instruction,
-      selected_entities: selected, existing_text: hedef.text,
+      selected_entities: selected.length ? selected : paragraphEntities(hedef),
+      existing_text: hedef.text, include_own_summary: true,
     });
     // Yanıt JSON ise üç seçenek, değilse tek metin (geriye dönük uyumlu)
     let secenekler = [];
@@ -5974,6 +6009,13 @@ async function runChapterReview(chapter) {
     else genel.push(kayit);
   });
 
+  // Bölüm İncelemesi de ÖNBELLEĞE yazar - puan rozetleri (fihrist, bölüm
+  // şeridi, paragraf kenarı) bu önbellekten okunuyor. Eskiden yalnızca
+  // Atölye yazıyordu, bu yüzden incelemeden sonra puanlar görünmüyordu.
+  saveReviewCache(chapter.id, {
+    at: Date.now(), literary, findings: byPara, motif: workshopState.motif || {},
+    order: paraNumaralari,
+  });
   const renk = (p) => p <= 2 ? 'var(--danger)' : (p === 3 ? '#b08d3f' : '#3f7a4f');
   const bar = (p) => '●'.repeat(p) + '○'.repeat(5 - p);
   const zayif = (literary.scores || []).slice().sort((a, b) => a.score - b.score);
@@ -6311,6 +6353,70 @@ async function renderStructureScan(el) {
 // konur ve kabul kontrolünde "işini yapıyor mu" sorusuna kaynak olur.
 const paraPurposes = {};
 
+// PARAGRAF UZUNLUK SINIRI: bu eşiği aşan paragraf kaydedilmeden önce
+// bölünmesi istenir. Sert engel DEĞİL (yazının kaybolması en kötüsüdür)
+// ama geçmek için bilinçli bir onay gerekir - "farkında olmadan 300
+// kelimelik blok yazmak" böylece imkânsızlaşır.
+const PARA_WORD_LIMIT = 150;
+
+function wordCount(t) {
+  return (t || '').trim().split(/\s+/).filter(Boolean).length;
+}
+
+// Uzun paragrafı bölme kapısı: sınır aşıldıysa önce bölmeyi teklif eder.
+// Kullanıcı "yine de kaydet" derse geçer. true dönerse kaydetme DEVAM eder.
+async function paragraphLengthGate(chapter, number, text, anchorEl) {
+  const n = wordCount(text);
+  if (n < PARA_WORD_LIMIT) return true;
+  return new Promise((resolve) => {
+    const kutu = document.createElement('div');
+    kutu.style.cssText = 'margin-top:8px;border:1px solid #b08d3f;border-left:3px solid #b08d3f;'
+      + 'border-radius:6px;padding:8px;font-size:12.5px;background:#fffdf6;';
+    kutu.innerHTML = `
+      <div style="color:#b08d3f;font-weight:600;">⚠ ${n} kelime - sınır ${PARA_WORD_LIMIT}</div>
+      <div style="color:var(--text-muted);margin-top:2px;">
+        Uzun paragraf okuma temposunu düşürür ve düzenlemesi zorlaşır.
+        Bölme önerisinde metin DEĞİŞMEZ, sadece nereye paragraf arası konacağına karar verilir.
+      </div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+        <button class="btn btn-sm btn-primary lg-split" style="font-size:11.5px;">✂ Böl ve kaydet</button>
+        <button class="btn btn-sm lg-keep" style="font-size:11.5px;">Yine de tek paragraf kaydet</button>
+      </div>
+      <div class="lg-result"></div>`;
+    (anchorEl || document.body).insertAdjacentElement('afterend', kutu);
+    kutu.querySelector('.lg-keep').addEventListener('click', () => { kutu.remove(); resolve(true); });
+    kutu.querySelector('.lg-split').addEventListener('click', async (e) => {
+      const b = e.target; b.disabled = true; b.textContent = 'Bölünüyor…';
+      const sonuc = kutu.querySelector('.lg-result');
+      try {
+        const r = await api.post(`/chapters/${chapter.id}/split-preview`, { text });
+        const parcalar = (r.paragraphs || []).map(x => x.text).filter(Boolean);
+        if (parcalar.length < 2) {
+          sonuc.innerHTML = '<div style="color:var(--text-muted);margin-top:6px;">Bölünecek doğal bir yer bulunamadı - tek paragraf kaydedilecek.</div>';
+          setTimeout(() => { kutu.remove(); resolve(true); }, 1200);
+          return;
+        }
+        sonuc.innerHTML = `
+          <div style="margin-top:8px;">
+            <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">${parcalar.length} PARÇA - metin değişmedi</div>
+            ${parcalar.map((x, i) => `<div style="margin-top:4px;padding-top:4px;border-top:1px dashed var(--border);"><b>${i + 1}.</b> ${escapeHtml(truncate(x, 110))} <span style="color:var(--text-muted);">(${wordCount(x)} kelime)</span></div>`).join('')}
+            <button class="btn btn-sm btn-primary lg-apply" style="margin-top:8px;width:100%;font-size:11.5px;">Bu şekilde kaydet</button>
+          </div>`;
+        sonuc.querySelector('.lg-apply').addEventListener('click', async () => {
+          try {
+            await applyParagraphSplit(chapter, number, parcalar);
+            kutu.remove();
+            resolve(false);   // kaydetme zaten bölme sırasında yapıldı
+          } catch (err) { alert(err.message); }
+        });
+      } catch (err) {
+        sonuc.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+        b.disabled = false; b.textContent = '✂ Böl ve kaydet';
+      }
+    });
+  });
+}
+
 // İŞLEV MİRASI: 100 paragraflık bölümde her paragrafa elle işlev yazmak
 // gerçekçi değil. Paragrafın kendi işlevi boşsa SAHNENİN işlevi (bölüm
 // planı) kullanılır - plan zaten "bu bölümde ne olacak" diyor. Sadece
@@ -6332,6 +6438,9 @@ const resolvedParas = new Set();
 function markParagraphResolved(number) {
   resolvedParas.add(String(number));
   saveParaState();
+  // Okuyucudaki puan rozetini anında tazele (tam yeniden çizim olmadan)
+  const rozet = document.querySelector(`.paragraph-number[data-pnum="${number}"] .para-score`);
+  if (rozet) { rozet.textContent = '✓5'; rozet.style.color = '#3f7a4f'; }
   const kart = document.querySelector(`.finding-card[data-num="${number}"]`);
   if (kart) {
     kart.dataset.resolved = '1';
@@ -6944,6 +7053,9 @@ async function renderWorkshopParagraph(idx) {
     const yeni = document.getElementById('wsParaText').innerText.trim();
     if (!yeni) return;
     const durum = document.getElementById('wsSaveState');
+    // UZUNLUK KAPISI: sınırı aşan paragraf önce bölme teklifinden geçer
+    const devam = await paragraphLengthGate(chapter, num, yeni, document.getElementById('wsParaText'));
+    if (!devam) { durum.textContent = '✓ bölündü ve kaydedildi'; return; }
     durum.textContent = 'kaydediliyor…';
     await replaceParagraphText(ch.id, num, yeni);
     resolvedParas.add(String(num)); saveParaState();
@@ -7068,8 +7180,13 @@ async function workshopFix(chapter, num, issue) {
   workshopState.directives[num] = direktifler;
   workshopState.lastGoal = workshopState.lastGoal || {};
   workshopState.lastGoal[num] = (kayitlar.map(k => k.baslik).join(', ') || issue).slice(0, 300);   // kelime bazlı istekler de bunu kullanır
+  // Bölüm seçimi (derin profil) talimattaki anahtar kelimelere bakıyor;
+  // paragrafın KENDİ metnini de talimata katarak doğru bölümlerin
+  // seçilmesini sağlıyoruz (diyalog varsa konuşma tarzı, betimleme varsa
+  // fiziksel yapı gelsin).
   const instruction =
     `P${num} paragrafını aşağıdaki DİREKTİFLERE göre yeniden yaz.\n${direktifler}\n`
+    + `PARAGRAFIN MEVCUT HÂLİ (bağlam): ${(para ? para.text : '').slice(0, 300)}\n`
     + (issue && !kayitlar.length ? `EK NOT: ${issue}\n` : '')
     + 'BETİMLEME MATEMATİĞİ: geniş plan (en fazla iki nitelik) → orta plan → MİKRO DETAY (anlamı taşısın) '
     + '→ bir duyu (görme dışında) → anlamı SÖYLEME. Bütçe: en fazla bir benzetme, "sanki/gibi/adeta" ile '
@@ -7085,15 +7202,20 @@ async function workshopFix(chapter, num, issue) {
     + 'Yeni hâli bunun %70-140 aralığında kalsın - her turda uzayıp komşu paragrafların '
     + 'ritmini bozmasın.\n'
     + 'BİÇİM (kesin): her seçeneği şöyle yaz, arada başka hiçbir şey olmasın:\n'
-    + '###YAKLAŞIM: mikro detay | NEDEN: tek cümlelik gerekçe\n<paragrafın tam yeni hâli>\n'
-    + '###YAKLAŞIM: ses ve sessizlik | NEDEN: ...\n<paragrafın tam yeni hâli>\n'
-    + '###YAKLAŞIM: hareket | NEDEN: ...\n<paragrafın tam yeni hâli>\n'
+    + '### mikro detay | NEDEN: tek cümlelik gerekçe\n<paragrafın tam yeni hâli>\n'
+    + '### ses ve sessizlik | NEDEN: ...\n<paragrafın tam yeni hâli>\n'
+    + '### hareket | NEDEN: ...\n<paragrafın tam yeni hâli>\n'
     + 'Açıklama, başlık, tırnak, madde işareti EKLEME. Her seçenek paragrafın '
     + 'TAMAMI olsun - kısmi cümle değil.';
   try {
     const result = await api.post('/ai/assist', {
       chapter_number: chapter.number, instruction,
-      selected_entities: [], existing_text: para ? para.text : '',
+      // Paragrafta GEÇEN varlıkların profilleri bağlama girsin: Vicdan'ın
+      // konuşma tarzını bilmeden onun sahnesini yeniden yazmak körlemesine
+      // iş. Eskiden boş liste gidiyordu - hiçbir karakter profili yoktu.
+      selected_entities: paragraphEntities(para),
+      existing_text: para ? para.text : '',
+      include_own_summary: true,   // bölümün ZAMAN/ATMOSFER/DUYGU bilgisi
     });
     const secenekler = parseOptionBlocks(result.generated_text || '');
     // Üretilenleri belleğe al (sonraki turda dışlanacak - son 6 tanesi yeter)
@@ -7388,7 +7510,12 @@ function wireOptionSwiper(box) {
 function parseOptionBlocks(raw) {
   const metin = (raw || '').trim();
   if (!metin) return [];
-  const parcalar = metin.split(/^###\s*YAKLAŞIM\s*:?\s*/im).filter(x => x.trim());
+  // AYRAÇ: ### ile başlayan HER satır seçenek ayracıdır. Neden bu kadar
+  // gevşek: eskiden "^###\s*YAKLAŞIM" aranıyordu ama JavaScript'te büyük
+  // "I" ile küçük "ı" case-insensitive EŞLEŞMEZ - model doğal biçimde
+  // "###Yaklaşım:" yazınca ayrıştırma tamamen düşüyor ve "3 öneri getir"
+  // çalışmıyordu. Artık başlık metni ne olursa olsun bölme çalışır.
+  const parcalar = metin.split(/^\s*#{2,}\s*/m).filter(x => x.trim());
   if (parcalar.length <= 1) {
     // Ayraç yok - tek seçenek olarak ele al (JSON geldiyse temizle)
     const temiz = metin.replace(/^```(?:json)?|```$/gm, '').trim();
@@ -7401,9 +7528,10 @@ function parseOptionBlocks(raw) {
   }
   return parcalar.map(p => {
     const satirlar = p.split('\n');
-    const bas = satirlar[0].trim();
-    // "yaklaşım | NEDEN: gerekçe" biçimini ayır
-    const m = bas.match(/^(.*?)\s*\|\s*NEDEN\s*:?\s*(.*)$/i);
+    // Başlık satırı: "YAKLAŞIM: mikro detay | NEDEN: gerekçe" ya da sadece
+    // "mikro detay". Başındaki etiket kelimesi (yaklaşım/approach) atılır.
+    let bas = satirlar[0].trim().replace(/^(yakla[şs][iı]m|approach)\s*:?\s*/i, '');
+    const m = bas.match(/^(.*?)\s*\|\s*(?:NEDEN|WHY)\s*:?\s*(.*)$/i);
     const approach = (m ? m[1] : bas).trim().slice(0, 40);
     const reason = (m ? m[2] : '').trim().slice(0, 160);
     const text = satirlar.slice(1).join('\n').trim();
@@ -7784,6 +7912,18 @@ function renderWorkshopReviewSummary(literary, motif, onbellekten, gunFarki) {
           <b style="flex:1;">${escapeHtml(sc.label)}</b>
         </div>`).join('')}
     </details>
+      ${Object.keys(paraPurposes).length ? `
+        <details style="margin-top:8px;">
+          <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);">🎯 İşlev haritası (${Object.keys(paraPurposes).length} paragrafın görevi)</summary>
+          <div style="max-height:220px;overflow-y:auto;margin-top:4px;">
+            ${Object.keys(paraPurposes).map(Number).sort((a, b) => a - b).map(n => `
+              <div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--border);">
+                <b style="color:var(--gold);">P${n}</b>
+                ${(workshopState.roleKinds || {})[n] ? `<span style="font-size:10px;color:var(--text-muted);">[${escapeHtml(workshopState.roleKinds[n])}]</span>` : ''}
+                ${escapeHtml(paraPurposes[n])}
+              </div>`).join('')}
+          </div>
+        </details>` : ''}
     <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin-top:12px;cursor:pointer;">
       <input type="checkbox" id="wsSweep"> Süpürme modu: <b>tüm</b> paragrafları sırayla gez
     </label>
@@ -7796,13 +7936,6 @@ function renderWorkshopReviewSummary(literary, motif, onbellekten, gunFarki) {
       <button class="btn btn-primary" id="wsToParas" style="flex:2;">Paragraflara geç →</button>
     </div>`;
   document.getElementById('wsBackPrep').addEventListener('click', renderWorkshopPrep);
-  // Tam tur seçildiyse: süpürme modunu işaretle ve beklemeden paragraflara geç
-  if (workshopState.autoSweep) {
-    workshopState.autoSweep = false;
-    const sweepEl = document.getElementById('wsSweep');
-    if (sweepEl) sweepEl.checked = true;
-    setTimeout(() => document.getElementById('wsToParas')?.click(), 400);
-  }
   document.getElementById('wsToParas').addEventListener('click', () => {
     if (document.getElementById('wsSweep').checked) {
       // Tüm paragraflar sırayla; bulgusu olanlar zaten işaretli görünür
@@ -7812,6 +7945,15 @@ function renderWorkshopReviewSummary(literary, motif, onbellekten, gunFarki) {
     if (!workshopState.order.length) { alert('Gezilecek paragraf yok.'); return; }
     renderWorkshopParagraph(0);
   });
+
+  // TAM TUR: dinleyiciler bağlandıktan SONRA otomatik geç. Eskiden bu blok
+  // wsToParas dinleyicisinden ÖNCE çalışıyordu - tıklama boşa gidiyordu.
+  if (workshopState.autoSweep) {
+    workshopState.autoSweep = false;
+    const sweepEl = document.getElementById('wsSweep');
+    if (sweepEl) sweepEl.checked = true;
+    setTimeout(() => document.getElementById('wsToParas')?.click(), 300);
+  }
 
   // Önbellekten geldiyse tazeleme seçeneği sun
   if (onbellekten) {
@@ -7901,7 +8043,7 @@ function paragraphStatusBadge(number) {
   if (!bulgular.length && !cozuldu) return '';
   const puan = cozuldu ? 5 : paragraphScore(number, c);
   const renk = cozuldu ? '#3f7a4f' : (puan <= 2.5 ? 'var(--danger)' : (puan < 4 ? '#b08d3f' : '#3f7a4f'));
-  return `<div style="font-size:9px;margin-top:2px;color:${renk};font-weight:700;"
+  return `<div class="para-score" style="font-size:9px;margin-top:2px;color:${renk};font-weight:700;"
     title="${cozuldu ? 'Düzeltildi' : bulgular.length + ' bulgu: ' + bulgular.map(b => b.baslik).join(', ')}">
     ${cozuldu ? '✓5' : puan}${bulgular.length && !cozuldu ? ' ⚑' + bulgular.length : ''}</div>`;
 }
@@ -7997,4 +8139,20 @@ function wireMicroEdit(chapter, num) {
       b.disabled = false; b.textContent = '✂ Sadece bunu değiştir';
     });
   });
+}
+
+// Paragrafta GEÇEN varlıklar (mention'lardan): profilleri bağlama girsin.
+// Vicdan'ın konuşma tarzını, mekânın kurallarını bilmeden o paragrafı
+// yeniden yazmak körlemesine iş - eskiden boş liste gidiyordu.
+function paragraphEntities(para) {
+  if (!para || !para.mentions) return [];
+  const gorulen = new Set();
+  const out = [];
+  para.mentions.forEach(m => {
+    const anahtar = `${m.entity_type}:${m.entity_id}`;
+    if (gorulen.has(anahtar)) return;
+    gorulen.add(anahtar);
+    out.push({ entity_type: m.entity_type, entity_id: m.entity_id });
+  });
+  return out.slice(0, 8);   // bağlamı şişirmesin
 }

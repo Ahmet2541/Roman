@@ -210,6 +210,23 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   çok hızlı) anında uygulanır. Amaç güzel seslendirme değil, kendi metnini
   DİNLEYEREK tekrar ve ritim bozukluklarını yakalamak - üslup taramasının
   kulakla yapılan hâli. Bölüm değişince okuma otomatik durur.
+- **🧠 Teşhis Füzyonu ve sınıflandırma (Eleştirmen v2)**: farklı testler aynı
+  soruna üç ayrı isimle işaret edebiliyor ("alt metin zayıf" + "bilgi
+  doğrudan veriliyor" + "profiliyle uyumsuz" aslında TEK teşhistir). Bu
+  katman bulguları birleştirir ve her teşhisi sınıflandırır: **⛔ HATA**
+  (nesnel kusur), **⚠ ZAYIF** (düzeltilebilir), **✎ YAZAR TERCİHİ**
+  (bilinçli olabilir - ÖNERİ ÜRETİLMEZ, sadece "karakter panikliyor,
+  bilinçli tempo olabilir" notu düşülür), **? BELİRSİZ** (kanıt yetersiz).
+  Temel ilke: *bir edebî normdan sapma otomatik olarak hata değildir.*
+  Kanıtsız teşhis kod düzeyinde "belirsiz"e çekilir.
+- **⚖ Kazanç-kayıp ve karşı argüman**: öneri sadece kazandırdığını değil
+  KAYBETTİRDİĞİNİ de ölçer ("tempo +2, atmosfer −3 → net −1, reddet") ve
+  sistem kendi önerisine karşı argüman üretir ("bu yavaşlık karakterin
+  zihinsel donmasını taşıyor olabilir").
+- **🧪 Silme testi + kalite/gereklilik ayrımı**: edebî kalite ile anlatısal
+  gereklilik AYRI ölçülür - "iyi yazılmış ama gereksiz" ile "zayıf yazılmış
+  ama zorunlu" farklı müdahale ister. Karakter değişimi ya da ön sezdirme
+  taşıyan paragraf için silme önerisi kod düzeyinde engellenir.
 - **🎯 Paragrafın işlevi + kabul kontrolü (zincirin kapanması)**: Paragraf
   AI panelinde "BU PARAGRAFIN İŞİ" alanı var (bir cümle: "Yangın yerini
   masum göstermek - okur sonradan anlamalı"). Bu cümle TÜM yeniden yazım
@@ -230,6 +247,15 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   dese bile karar "düzeltilmeli"ye çekilir. Her noktada ÜÇ yön açıktır:
   uygula, "♻ Yeniden yaz" (bulguları hesaba katıp yeniden üret) ya da vazgeç -
   çıkmaz sokak yok.
+- **🗺 Bilgi / İfşa Haritası**: duruşma-gerilim romanında gerilimi olay
+  değil, **kim ne biliyor** farkı üretir. Her kritik bilgi için üç eksen
+  ayrı tutulur: hangi karakterler biliyor, OKUR ne durumda (bilmiyor /
+  sezdirildi / biliyor), ne zaman ve nasıl ifşa olacak, planlanan ödeme ne.
+  Okur bilip hiçbir karakterin bilmediği bilgi **dramatik ironi** olarak
+  işaretlenir. Bu tablo AI BAĞLAMINA da girer: "SIZDIRMA YASAĞI - bunlar
+  sonraki bölümlerde ifşa edilecek, burada ima bile etme", "okur henüz
+  bilmiyor, gizemi koru", "dramatik ironi: karakterlerin davranışı bu
+  bilgisizlikle tutarlı olmalı".
 - **🏗️ Yapısal Akış Taraması (bölümler arası)**: diğer denetimler tek
   bölüme ya da cümlelere bakar; bu, ancak bölümler ARASI okununca görünen
   sorunları arar. Editörlerin klasik testleri: NEDENSELLİK ("bu yüzden"
@@ -261,6 +287,25 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   otomatik sıradakine geçer. Hangi bölüm/kısım üzerinde çalışılacağı Denetim →
   **🛠 Atölye** sekmesinden seçilir (durum göstergeleriyle: kaç paragraf,
   özet var mı, kaç paragraf elden geçmiş).
+- **🛠 Bölüm Atölyesi - ek yetenekler**: **🔁 tek düğmeyle tam tur**
+  (önbelleği tazeler + süpürme modunu açar + doğrudan paragraf düzenlemeye
+  geçer); **⚡ metinden plan çıkarma** (yazılmış bölümden geriye dönük plan -
+  önce yazıp sonra planlayan akış için); **✂ uzun paragraf bölme** (120+
+  kelimede uyarı, parçalar ÖNCE gösterilir, metin değişmez, numaralar
+  otomatik kayar); **✂ mikro düzenleme** (metinde bir ifadeyi SEÇ, sadece
+  onu değiştir - paragrafın gerisine tek kelime dokunulmaz; tek takıntı
+  için koca bir üretim turu gerekmiyor, iyi cümleler kaybolmuyor);
+  **📦 inceleme hafızası** (analiz sonuçları saklanır, atölye kapatılıp
+  açıldığında baştan çalışmaz - "🔄 Yeniden incele" ile bilerek tazelenir);
+  **otomatik paragraf işlevleri** (her paragrafın görevi özet+plan+metinden
+  çıkarılır: "olay mahalli tanıtılıyor", "dijital doğum hazırlığı" - 100
+  paragrafa elle yazmak gerekmez, üzerine yazılabilir).
+- **📊 Puan göstergeleri (üç yerde)**: son incelemenin sonucu fihristte
+  (bölüm yanında `3.4 ⚑7`), bölümün üstünde şerit (`3.4/5 · ⚑ 7/12 ·
+  zayıf: alt metin`) ve her paragrafın kenarında kendi puanı (`2.8 ⚑2`,
+  düzeltilmişse `✓5`). Puan bulgu sayısı ve ağırlığından türetilir;
+  "tercih" sınıfı teşhisler puanı düşürmez. Hepsi inceleme önbelleğinden
+  okunur - ek AI isteği yok, sayfa açılışında anında görünür.
 - **🔍 Bölüm İncelemesi (birleşik denetim)**: iki aşama tek akışta.
   (1) EDİTÖR gözü - 10 edebî ölçüt karnesi, (2) OKUR gözü - düşürücü
   noktalar. Sonra bulgular PARAGRAF PARAGRAF birleştirilir: bir paragraf
@@ -418,6 +463,7 @@ app/
     universes.py      - Evren (seri) yönetimi - kitaplar arası paylaşılan dünya
     entity_history.py - Varlık değişiklik geçmişi + anlık görüntüden geri yükleme
     factions.py       - Gruplar & Kurumlar: üyelik + rol yönetimi
+    knowledge.py      - Bilgi/İfşa Haritası: kim ne biliyor, dramatik ironi
     admin.py          - /admin/export, /admin/import (aktif romanı JSON olarak yedekle/geri yükle)
 frontend/
   index.html          - ana ekran iskeleti (hover ile açılan sol menü + sağ içerik alanı)
@@ -541,7 +587,7 @@ Kurallar:
 
 ## Testler
 
-**149 test** (17 dosya) - AI çağrıları `unittest.mock` ile sahte Qwen
+**161 test** (17 dosya) - AI çağrıları `unittest.mock` ile sahte Qwen
 yanıtlarıyla çalışır, gerçek bir `DASHSCOPE_API_KEY` gerekmez.
 
 Kapsam: evren/kitap paylaşımı, migration'lar, sections merge ve seçici
@@ -577,9 +623,15 @@ progression'da yanlış chapter_number) otomatik yakalar.
   denk gelirse işle" diye girer, metne girince emekli olur.
 - **Açılış karşılaması**: "Kaldığın yer: 1-2 (planlı, metin yok)" gibi tek
   satırlık, AI'sız bir durum özeti.
-- **Karar hafızası (kalıcı)**: paragraf işlevleri ve sohbet kararları şu an
-  yalnızca TARAYICIDA saklanıyor (localStorage). Başka bir cihazdan
-  bakıldığında görünmüyor - sunucuya taşınmalı.
+- **Karar hafızası (kalıcı)**: paragraf işlevleri, çözülmüş bulgular ve
+  inceleme önbelleği yalnızca TARAYICIDA saklanıyor (localStorage). Başka
+  bir cihazdan bakıldığında görünmüyor - sunucuya taşınmalı. İki makinede
+  çalışıyorsan puanlar ve kararlar ayrışır.
+- **Anlatıcı / odak katmanı**: kimin gözünden, hangi mesafeden anlatıldığı
+  denetlenmiyor. Bakış açısı kayması (aynı sahnede iki karakterin içine
+  girme) yakalanmıyor.
+- **Duygusal eğri**: özetlerdeki KAPANIŞ TONU satırları toplanıp bölümler
+  arası duygusal seyir çıkarılmıyor (ham veri var, birleştirilmiyor).
 - **Grup adları mention taramasında yok**: "İçişleri Bakanlığı" metinde
   geçse bile rozet çıkmaz; mention tespiti kişi/mekan/nesne/olay/ipucu/terime
   bakıyor, gruplara bakmıyor.

@@ -854,3 +854,27 @@ def test_plan_from_text(client, headers):
         r = client.post(f"/ai/plan-from-text/{bos['id']}", headers=headers)
         mc.assert_not_called()
     assert r.json()["plan"] == ""
+
+
+def test_split_preview_does_not_save(client, headers):
+    """Bölme ÖNİZLEMESİ: parçaları döner ama KAYDETMEZ - yazar bölmeyi
+    görmeden onaylamak istemiyor. (Mevcut ai-split-paragraphs doğrudan
+    kaydediyor, o içe aktarma içindir.)"""
+    ch = _chapter_with_text(client, headers, ["Tek uzun paragraf."])
+    uzun = "Birinci cümle. " * 60
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen(
+            {"paragraphs": ["Birinci parça metni.", "İkinci parça metni."]})
+        r = client.post(f"/chapters/{ch['id']}/split-preview", json={"text": uzun}, headers=headers)
+    assert r.status_code == 200, r.text
+    parcalar = r.json()["paragraphs"]
+    assert len(parcalar) == 2
+    assert r.json()["paragraph_count"] == 2              # sadece öneri
+
+    # Bölüm hâlâ TEK paragraf - önizleme veriye dokunmadı
+    guncel = client.get(f"/chapters/{ch['id']}", headers=headers).json()
+    assert len(guncel["paragraphs"]) == 1
+
+    # Boş metin reddedilir
+    r = client.post(f"/chapters/{ch['id']}/split-preview", json={"text": "   "}, headers=headers)
+    assert r.status_code == 400
