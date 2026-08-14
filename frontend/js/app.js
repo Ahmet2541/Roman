@@ -1576,15 +1576,26 @@ function renderReader(chapter) {
       <button class="btn btn-sm" id="editTitleBtn">Başlığı düzenle</button>
     </div>
     <div id="chapterHealthStrip" style="margin-top:8px;"></div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
-      <button class="btn btn-sm" id="highlightNamesBtn" title="Metinde tanımlı kişi/mekan/nesne isimlerinin altını çizer ve tıklanabilir yapar. Bu moda geçince paragraflar okuma moduna alınır (metin bozulmasın diye) - kapatınca yazmaya devam edersin.">🔎 İsimleri Vurgula</button>
-      <button class="btn btn-sm" id="ttsPlayBtn" title="Bölümü sesli okur (tarayıcının Türkçe sesi - ücretsiz, metin dışarı çıkmaz). Okunan paragraf vurgulanır; bir paragrafa tıklayıp oradan devam edebilirsin.">🔊 Sesli Oku</button>
-
+    <!-- ARAÇ ÇUBUĞU: 8 düğme iki satıra yayılıp hangisinin ne işe yaradığı
+         belirsizleşmişti. Artık tek birincil eylem (Atölye) + puan şeridi
+         görünür; gerisi iki başlık altında toplanıp katlanıyor. -->
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center;">
+      <button class="btn btn-sm btn-primary" id="workshopBtn" title="Bölümü paragraf paragraf elden geçir: hazırlık → derin analiz → düzeltme">🛠 Bölüm Atölyesi</button>
       ${chapterScoreStrip(chapter.id)}
-      <button class="btn btn-sm btn-primary" id="workshopBtn" title="Bölümü paragraf paragraf, tek ekranda düzenle. Önce hazırlık (özet, zaman çizelgesi, plan) kontrol edilir, sonra inceleme çalışır, sonra her paragraf sırayla ele alınır. Mobilde tam ekran.">🛠 Bölüm Atölyesi</button>
-      <button class="btn btn-sm" id="chapterReviewBtn" title="İKİ AŞAMALI İNCELEME: önce editör gözüyle 10 edebî ölçüt, sonra okur gözüyle düşürücü noktalar. Bulgular paragraf paragraf birleştirilir; her paragrafı AI ile konuşarak karara bağlarsın.">🔍 Bölüm İncelemesi</button>
-      <button class="btn btn-sm" id="timelineTopBtn" title="Özetteki ZAMAN satırından olayları çıkarıp Zaman Çizelgesi'ne öneri getirir">🕐 Zaman Çizelgesi</button>
-      <button class="btn btn-sm" id="finishChapterBtn" title="Özet + Roman Haritası taramasını birlikte çalıştırır - bölümü AI'nın hafızasına işler">✅ Bölümü Kapat</button>
+      <button class="btn btn-sm" id="toolsToggle" title="Diğer araçlar">⋯ Araçlar</button>
+    </div>
+    <div id="chapterToolsPanel" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:8px;padding:10px;">
+      <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">DENETİM</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
+        <button class="btn btn-sm" id="chapterReviewBtn" title="Editör gözü (10 edebî ölçüt) + okur gözü; bulgular paragraf paragraf birleştirilir">🔍 Bölüm İncelemesi</button>
+        <button class="btn btn-sm" id="timelineTopBtn" title="Özetteki ZAMAN satırından olayları çıkarıp Zaman Çizelgesi'ne öneri getirir">🕐 Zaman Çizelgesi</button>
+        <button class="btn btn-sm" id="finishChapterBtn" title="Özet + Roman Haritası taramasını birlikte çalıştırır - bölümü AI'nın hafızasına işler">✅ Bölümü Kapat</button>
+      </div>
+      <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;margin-top:10px;">OKUMA</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
+        <button class="btn btn-sm" id="ttsPlayBtn" title="Bölümü tarayıcının Türkçe sesiyle okur; okunan paragraf vurgulanır">🔊 Sesli Oku</button>
+        <button class="btn btn-sm" id="highlightNamesBtn" title="Tanımlı kişi/mekan/nesne isimlerinin altını çizer ve tıklanabilir yapar (okuma moduna alır)">🔎 İsimleri Vurgula</button>
+      </div>
     </div>
     <div id="readerTestResult"></div>
     <div class="chapter-summary-box" style="margin-top:10px;">
@@ -1743,6 +1754,16 @@ function renderReader(chapter) {
   });
 
   renderChapterHealthStrip(chapter);
+  // Araçlar paneli aç/kapa - tercih hatırlanır
+  const toolsPanel = document.getElementById('chapterToolsPanel');
+  if (localStorage.getItem('roman_tools_open') === '1') toolsPanel.style.display = 'block';
+  document.getElementById('toolsToggle').addEventListener('click', (e) => {
+    const acik = toolsPanel.style.display !== 'none';
+    toolsPanel.style.display = acik ? 'none' : 'block';
+    e.target.textContent = acik ? '⋯ Araçlar' : '⋯ Araçları gizle';
+    localStorage.setItem('roman_tools_open', acik ? '0' : '1');
+  });
+  if (toolsPanel.style.display === 'block') document.getElementById('toolsToggle').textContent = '⋯ Araçları gizle';
   document.getElementById('highlightNamesBtn').addEventListener('click', () => toggleNameHighlight(chapter));
   readerPane.querySelectorAll('.mention-goto').forEach(el => el.addEventListener('click', () => {
     openEntityFromMention(el.dataset.type, parseInt(el.dataset.id, 10));
