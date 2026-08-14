@@ -7087,23 +7087,12 @@ async function renderWorkshopParagraph(idx) {
     ${kayitlar.length ? `
       <div style="margin-top:12px;">
         <div style="display:flex;justify-content:space-between;align-items:baseline;">
-          <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">BULGULAR (${kayitlar.length})</div>
+          <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">BULGULAR (${kayitlar.length}) — dokun, detayı açılsın</div>
           <button class="btn btn-sm" id="wsShowDirectives" style="font-size:10.5px;padding:1px 6px;" title="Bu bulgulardan çıkarılan ve AI'ya giden kural listesi">📋 Direktifler</button>
         </div>
         <div id="wsDirectiveBox"></div>
         <div id="wsDiagnosisBox"></div>
-        ${kayitlar.map((k, ki) => `
-          <details class="finding-detail" ${ki === 0 ? 'open' : ''} style="margin-top:6px;border-left:3px solid ${k.kaynak === 'editor' ? 'var(--gold)' : (k.kaynak === 'imge' ? '#7a5fb0' : 'var(--danger)')};padding-left:8px;">
-            <summary style="cursor:pointer;font-size:12.5px;list-style:none;">
-              ${k.kaynak === 'editor' ? '📊' : (k.kaynak === 'imge' ? '🎨' : '🎯')} <b>${escapeHtml(k.baslik)}</b>
-              <span style="color:var(--text-muted);font-weight:400;">· ${escapeHtml(truncate((k.sorun || '').replace(/\s+/g, ' '), 40))}</span>
-            </summary>
-            <div style="font-size:12.5px;padding-top:4px;">
-              ${k.alinti ? `<div style="font-style:italic;color:var(--text-muted);">"${escapeHtml(k.alinti)}"</div>` : ''}
-              <div style="color:var(--text-muted);">${escapeHtml(k.sorun || '')}</div>
-              ${k.oneri ? `<div style="margin-top:2px;">→ ${escapeHtml(k.oneri)}</div>` : ''}
-            </div>
-          </details>`).join('')}
+        <div id="wsRawChips"></div>
       </div>` : ''}
 
     <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap;">
@@ -7152,6 +7141,15 @@ async function renderWorkshopParagraph(idx) {
     renderDiagnoses(num, workshopState.diagnoses[num]);
   }
 
+  // Teşhis gelene kadar HAM bulguları rozet olarak göster; teşhis gelince
+  // renderDiagnoses bunları değiştirir (aynı şeyi iki kez yazmamak için).
+  renderFindingChips('wsRawChips', kayitlar.map(k => ({
+    icon: k.kaynak === 'editor' ? '📊' : (k.kaynak === 'imge' ? '🎨' : '🎯'),
+    label: k.baslik, renk: k.kaynak === 'editor' ? 'var(--gold)' : (k.kaynak === 'imge' ? '#7a5fb0' : 'var(--danger)'),
+    detay: `${k.alinti ? `<div style="font-style:italic;color:var(--text-muted);">"${escapeHtml(k.alinti)}"</div>` : ''}
+      <div style="color:var(--text-muted);">${escapeHtml(k.sorun || '')}</div>
+      ${k.oneri ? `<div style="margin-top:2px;">→ ${escapeHtml(k.oneri)}</div>` : ''}`,
+  })));
   document.getElementById('wsShowDirectives')?.addEventListener('click', () => {
     const kutu = document.getElementById('wsDirectiveBox');
     if (kutu.innerHTML) { kutu.innerHTML = ''; return; }
@@ -7940,6 +7938,10 @@ function renderDiagnoses(num, teshisler) {
   const kutu = document.getElementById('wsDiagnosisBox');
   if (!kutu) return;
   if (!teshisler || !teshisler.length) { kutu.innerHTML = ''; return; }
+  // Teşhis geldi: HAM bulgu rozetlerini kaldır - aynı şey iki kez
+  // yazılıyordu (üstte ham, altta birleştirilmiş).
+  const ham = document.getElementById('wsRawChips');
+  if (ham) ham.innerHTML = '';
   const stil = {
     hata: { renk: 'var(--danger)', etiket: '⛔ HATA', not: 'Nesnel kusur - düzeltilmeli.' },
     zayif: { renk: '#b08d3f', etiket: '⚠ ZAYIF', not: 'Tartışılabilir zayıflık.' },
@@ -7948,24 +7950,59 @@ function renderDiagnoses(num, teshisler) {
   };
   const siraDegeri = { hata: 0, zayif: 1, belirsiz: 2, tercih: 3 };
   const sirali = teshisler.slice().sort((a, b) => (siraDegeri[a.cls] ?? 9) - (siraDegeri[b.cls] ?? 9));
-  kutu.innerHTML = `
-    <div style="margin-top:8px;">
-      <div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">TEŞHİS (bulgular birleştirildi)</div>
-      ${sirali.map(d => {
-        const st = stil[d.cls] || stil.belirsiz;
-        return `
-        <div style="border-left:3px solid ${st.renk};padding-left:8px;margin-top:6px;font-size:12.5px;">
-          <span style="color:${st.renk};font-weight:600;font-size:10.5px;">${st.etiket}</span>
-          ${d.sources?.length ? `<span style="font-size:10.5px;color:var(--text-muted);">· ${d.sources.length} test birleşti</span>` : ''}
-          ${d.confidence ? `<span style="font-size:10.5px;color:var(--text-muted);">· güven %${Math.round(d.confidence * 100)}</span>` : ''}
-          <div><b>${escapeHtml(d.title)}</b></div>
-          ${d.evidence ? `<div style="font-style:italic;color:var(--text-muted);">"${escapeHtml(d.evidence)}"</div>` : ''}
-          ${d.why ? `<div style="color:var(--text-muted);">${escapeHtml(d.why)}</div>` : ''}
-          ${d.cls === 'tercih' && d.intent_note ? `<div style="color:#3f7a4f;">💡 ${escapeHtml(d.intent_note)}</div>` : ''}
-          <div style="font-size:10.5px;color:var(--text-muted);">${st.not}</div>
-        </div>`;
-      }).join('')}
-    </div>`;
+  kutu.innerHTML = `<div style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;margin-top:8px;">TEŞHİS (${sirali.length}) - dokun, detayı açılsın</div><div id="wsDiagChips"></div>`;
+  renderFindingChips('wsDiagChips', sirali.map(d => {
+    const st = stil[d.cls] || stil.belirsiz;
+    return {
+      icon: st.etiket.split(' ')[0],
+      label: d.title,
+      renk: st.renk,
+      detay: `
+        <div style="font-size:10.5px;color:${st.renk};font-weight:600;">${st.etiket}
+          ${d.sources?.length ? `<span style="color:var(--text-muted);font-weight:400;">· ${d.sources.length} test birleşti</span>` : ''}
+          ${d.confidence ? `<span style="color:var(--text-muted);font-weight:400;">· güven %${Math.round(d.confidence * 100)}</span>` : ''}</div>
+        ${d.evidence ? `<div style="font-style:italic;color:var(--text-muted);margin-top:2px;">"${escapeHtml(d.evidence)}"</div>` : ''}
+        ${d.why ? `<div style="color:var(--text-muted);margin-top:2px;">${escapeHtml(d.why)}</div>` : ''}
+        ${d.cls === 'tercih' && d.intent_note ? `<div style="color:#3f7a4f;margin-top:2px;">💡 ${escapeHtml(d.intent_note)}</div>` : ''}
+        <div style="font-size:10.5px;color:var(--text-muted);margin-top:3px;">${st.not}</div>`,
+    };
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// BULGU ROZETLERİ: uzun uzun alt alta metin yerine dokunmatik rozetler.
+// Mobilde bulguları okumak için sürekli kaydırmak gerekiyordu; artık
+// hepsi tek satırda görünüyor, dokunulan açılıyor. Aynı anda tek detay
+// açık kalır - ekran temiz durur.
+// ---------------------------------------------------------------------------
+function renderFindingChips(kapsayiciId, ogeler) {
+  const kap = document.getElementById(kapsayiciId);
+  if (!kap) return;
+  if (!ogeler || !ogeler.length) { kap.innerHTML = ''; return; }
+  kap.innerHTML = `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+      ${ogeler.map((o, i) => `
+        <button class="btn btn-sm finding-chip" data-idx="${i}"
+          style="font-size:11.5px;padding:3px 9px;border-left:3px solid ${o.renk};max-width:100%;
+                 white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+          ${o.icon} ${escapeHtml(truncate(o.label, 34))}
+        </button>`).join('')}
+    </div>
+    <div class="chip-detail" style="font-size:12.5px;"></div>`;
+  const detayEl = kap.querySelector('.chip-detail');
+  const goster = (i) => {
+    kap.querySelectorAll('.finding-chip').forEach((b, j) => b.classList.toggle('btn-primary', j === i));
+    detayEl.innerHTML = i === null ? '' : `
+      <div style="border-left:3px solid ${ogeler[i].renk};padding:6px 8px;margin-top:6px;background:var(--paper-dim);border-radius:0 6px 6px 0;">
+        <b>${escapeHtml(ogeler[i].label)}</b>
+        ${ogeler[i].detay}
+      </div>`;
+  };
+  kap.querySelectorAll('.finding-chip').forEach((b, i) => b.addEventListener('click', () => {
+    const acikMi = b.classList.contains('btn-primary');
+    goster(acikMi ? null : i);   // ikinci dokunuş kapatır
+  }));
+  goster(0);   // ilki açık başlasın
 }
 
 // ---------------------------------------------------------------------------
