@@ -3894,11 +3894,13 @@ async function loadMatrixGrid() {
         <button class="btn btn-sm" id="mAddCol">+ Kolon</button>
         <button class="btn btn-sm" id="mAddRow">+ Satır</button>
         <button class="btn btn-sm" id="mBulkAdd" title="Tek seferde birden çok kolon/satır ekle">⊞ Toplu ekle</button>
+        <button class="btn btn-sm" id="mFromChapter" title="Bir bölümün yapısından (alt girdileri ya da planı) satırları otomatik oluştur">⚡ Bölümden satır oluştur</button>
         <button class="btn btn-sm btn-primary" id="mGenChapters" title="Her kolon bir Kısım, her hücre bir Bölüm olur - fihristin sonuna eklenir, hücreler otomatik bağlanır">⚡ Fihristi Oluştur</button>
         <button class="btn btn-sm" id="mAiFill" title="Üstte işaretlediğin kolonların BOŞ hücrelerini, dolu hücrelerdeki kalıbı izleyerek AI taslaklar - hiçbiri onaysız kaydedilmez">🤖 Seçili Kolonların Eksiklerini AI Doldursun</button>
         <button class="btn btn-sm" id="mImport" title="Satır satır 'Aşama adı: içerik' formatında yapıştırılan metni, seçtiğin kolonun hücrelerine dağıtır">📥 Metinden Doldur</button>
         <button class="btn btn-sm" id="mDelMatrix" style="margin-left:auto;">Matrisi Sil</button>
       </div>
+      ${boundChaptersStrip(m)}
       <div style="overflow-x:auto;">
         <table style="border-collapse:collapse;width:max-content;">
           <tr>
@@ -3910,8 +3912,9 @@ async function loadMatrixGrid() {
               <button class="btn-icon-sm m-col-del" data-id="${c.id}" title="Kolonu sil (hücreleriyle)">✕</button>
             </th>`).join('')}
           </tr>
-          ${m.rows.map(r => `<tr>
+          ${m.rows.map((r, ri) => `<tr>
             <th style="${th}${r.kind === 'sub' ? 'font-style:italic;font-weight:400;padding-left:22px;' : ''}">
+              <span style="font-size:10px;color:var(--text-muted);font-weight:700;margin-right:4px;" title="Satır sırası">${ri + 1}</span>
               <span class="m-row-edit" data-id="${r.id}" style="cursor:pointer;" title="Adı, türü ve TALİMAT KASASI'nı düzenle">${r.kind === 'sub' ? '↳ ' : ''}${escapeHtml(r.label)}</span>${(r.instructions || '').trim() ? ` <span style="font-size:10px;color:var(--gold);" title="Bu aşamanın yazım kısıtları kayıtlı - bölümlere otomatik gider">📌</span>` : ''}
               <button class="btn-icon-sm m-row-ins" data-id="${r.id}" title="Bu satırın ALTINA yeni satır ekle">⊕</button>
               <button class="btn-icon-sm m-row-del" data-id="${r.id}" title="Satırı sil (hücreleriyle)">✕</button>
@@ -3958,6 +3961,16 @@ async function loadMatrixGrid() {
       } catch (err) { editor.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; }
     });
     document.getElementById('mBulkAdd').addEventListener('click', () => openBulkAddDialog(m));
+    document.getElementById('mFromChapter').addEventListener('click', () => openRowsFromChapterDialog(m));
+    // Bağlı bölüm rozetleri: tıklayınca o bölüme git
+    document.querySelectorAll('.mx-goto-ch').forEach(b => b.addEventListener('click', async () => {
+      const no = parseInt(b.dataset.num, 10);
+      try {
+        const tumu = await api.get('/chapters/');
+        const hedef = tumu.find(c => c.number === no);
+        if (hedef) { switchView('roman'); setTimeout(() => loadChapterList(hedef.id), 200); }
+      } catch (err) { alert(err.message); }
+    }));
     document.getElementById('mImport').addEventListener('click', () => openMatrixImporter(m));
     document.getElementById('mDelMatrix').addEventListener('click', async () => {
       if (!confirm('Matris ve TÜM hücre planları silinecek (bölümlere dokunulmaz). Emin misin?')) return;
@@ -8590,4 +8603,119 @@ function renderScanIssues(result) {
       <div style="margin-top:6px;font-size:13.5px;">${escapeHtml(issue.description)}</div>
     </div>`).join('');
   return html;
+}
+
+// ---------------------------------------------------------------------------
+// BAĞLI BÖLÜM LİSTESİ: bir matrisin hücreleri farklı bölümlere bağlı olur;
+// hangi bölümlerle çalıştığı ızgaraya bakarak anlaşılmıyordu. Üstte tek
+// şeritte toplanır, tıklayınca o bölüme gidilir.
+// ---------------------------------------------------------------------------
+function boundChaptersStrip(m) {
+  const bagli = new Map();
+  (m.cells || []).forEach(c => {
+    if (c.chapter_number) {
+      if (!bagli.has(c.chapter_number)) bagli.set(c.chapter_number, []);
+      if (c.code) bagli.get(c.chapter_number).push(c.code);
+    }
+  });
+  const bosHucre = (m.cells || []).filter(c => !c.chapter_number && (c.content || '').trim()).length;
+  if (!bagli.size && !bosHucre) return '';
+  const sirali = [...bagli.entries()].sort((a, b) => a[0] - b[0]);
+  return `
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;padding:6px 10px;
+      background:var(--paper-dim);border-radius:6px;font-size:12px;">
+      <b style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">BAĞLI BÖLÜMLER (${sirali.length})</b>
+      ${sirali.map(([no, kodlar]) => `
+        <button class="btn btn-sm mx-goto-ch" data-num="${no}" style="font-size:11px;padding:1px 8px;"
+          title="${kodlar.length} plan hücresi: ${kodlar.join(', ')}">B${no}${kodlar.length > 1 ? ` ·${kodlar.length}` : ''}</button>`).join('')}
+      ${bosHucre ? `<span style="color:var(--danger);font-size:11.5px;" title="Plan yazılmış ama hiçbir bölüme bağlanmamış - bu planlar AI'ya GİTMEZ">⚠ ${bosHucre} hücre bölüme bağlı değil</span>` : ''}
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// BÖLÜMDEN SATIR OLUŞTUR: bir bölümün yapısını satırlara çevirir. İki
+// kaynak: (a) fihristteki ALT GİRDİLERİ (kısımlar), (b) bölümün PLANI
+// (madde madde). Elle 20 satır yazmak yerine var olan yapıyı kullanır.
+// ---------------------------------------------------------------------------
+async function openRowsFromChapterDialog(m) {
+  const editor = document.getElementById('matrixCellEditor');
+  editor.innerHTML = '<div class="empty-state">Fihrist yükleniyor…</div>';
+  editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  try {
+    const tree = await api.get('/matrix/outline-tree');
+    editor.innerHTML = `
+      <div class="panel">
+        <b>⚡ Bölümden satır oluştur</b>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">
+          Bir bölümün yapısı satırlara çevrilir. <b>Alt girdiler</b> = fihristteki kısımlar,
+          <b>plan maddeleri</b> = o bölümün planındaki satırlar. Mevcut satırların sonuna eklenir.
+        </div>
+        <div class="field" style="margin-top:8px;"><label>Bölüm</label>
+          <select id="rfcChapter">
+            ${tree.map(t => `<option value="${t.id}" data-child="${t.child_count}">${'—'.repeat(t.level)} #${t.display} ${escapeHtml(t.title || '(başlıksız)')}${t.child_count ? ` · ${t.child_count} alt girdi` : ''}</option>`).join('')}
+          </select></div>
+        <div class="field"><label>Kaynak</label>
+          <select id="rfcSource">
+            <option value="children">Alt girdiler (fihrist kısımları)</option>
+            <option value="plan">Plan maddeleri</option>
+          </select></div>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="rfcGo">Önizle</button>
+          <button class="btn" id="rfcCancel">Kapat</button>
+        </div>
+        <div id="rfcResult"></div>
+      </div>`;
+    document.getElementById('rfcCancel').addEventListener('click', () => { editor.innerHTML = ''; });
+    document.getElementById('rfcGo').addEventListener('click', async () => {
+      const chapterId = parseInt(document.getElementById('rfcChapter').value, 10);
+      const kaynak = document.getElementById('rfcSource').value;
+      const kutu = document.getElementById('rfcResult');
+      kutu.innerHTML = '<div class="empty-state">Hazırlanıyor…</div>';
+      let etiketler = [];
+      try {
+        if (kaynak === 'children') {
+          const alt = tree.filter(t => t.parent_id === chapterId);
+          if (alt.length) {
+            etiketler = alt.map(t => t.title || `#${t.display}`);
+          } else {
+            // parent_id yoksa numaraya göre türet: seçilenin altındaki bir üst seviye
+            const secilen = tree.find(t => t.id === chapterId);
+            etiketler = tree.filter(t => t.display.startsWith(secilen.display + '-') &&
+              t.display.split('-').length === secilen.display.split('-').length + 1)
+              .map(t => t.title || `#${t.display}`);
+          }
+        } else {
+          const plan = await api.get(`/matrix/plan-for-chapter/${chapterId}`);
+          const liste = Array.isArray(plan) ? plan : (plan ? [plan] : []);
+          etiketler = liste.map(x => (x.content || '').split('\n'))
+            .flat().map(l => l.replace(/^[-*•]\s*/, '').trim()).filter(Boolean);
+        }
+      } catch (err) { kutu.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; return; }
+
+      if (!etiketler.length) {
+        kutu.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted);margin-top:8px;">Bu kaynakta satır bulunamadı - diğer kaynağı dene.</div>';
+        return;
+      }
+      kutu.innerHTML = `
+        <div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:8px;">
+          <div style="font-size:12.5px;"><b>${etiketler.length}</b> satır eklenecek (mevcut ${m.rows.length} satırın sonuna):</div>
+          <div style="max-height:220px;overflow-y:auto;margin-top:6px;">
+            ${etiketler.map((t, i) => `<div style="font-size:12px;padding:2px 0;"><b style="color:var(--text-muted);">${m.rows.length + i + 1}.</b> ${escapeHtml(truncate(t, 80))}</div>`).join('')}
+          </div>
+          <button class="btn btn-sm btn-primary" id="rfcApply" style="margin-top:8px;">Satırları ekle</button>
+        </div>`;
+      document.getElementById('rfcApply').addEventListener('click', async (e) => {
+        const b = e.target; b.disabled = true;
+        for (let i = 0; i < etiketler.length; i++) {
+          b.textContent = `Ekleniyor… ${i + 1}/${etiketler.length}`;
+          try { await api.post(`/matrix/${m.id}/rows`, { label: etiketler[i].slice(0, 120) }); }
+          catch (err) { /* atla */ }
+        }
+        editor.innerHTML = '';
+        await loadMatrixGrid();
+      });
+    });
+  } catch (err) {
+    editor.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+  }
 }

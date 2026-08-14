@@ -931,6 +931,7 @@ class OutlineNode(BaseModel):
     title: str
     kind: str
     child_count: int
+    parent_id: Optional[int] = None   # doğrudan üst girdi (satır türetmede gerekli)
 
 
 class LiteraryScore(BaseModel):

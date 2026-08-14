@@ -110,6 +110,7 @@ def outline_tree(
             id=it["chapter"].id, display=it["display"], level=it["level"],
             title=it["chapter"].title or "", kind=it["chapter"].kind,
             child_count=cocuk_sayisi.get(it["chapter"].id, 0),
+            parent_id=it["parent_id"],
         )
         for it in items
     ]

@@ -552,3 +552,16 @@ def test_plan_for_chapter_returns_list(client, headers):
     client.post("/matrix/quick-plan", json={"chapter_id": ch["id"], "content": "- Güncellendi"}, headers=headers)
     okunan2 = client.get(f"/matrix/plan-for-chapter/{ch['id']}", headers=headers).json()
     assert len(okunan2) == 1 and okunan2[0]["content"] == "- Güncellendi"
+
+
+def test_outline_tree_exposes_parent_id(client, headers):
+    """Satır türetme (bölümden matris) doğrudan alt girdileri bulmak için
+    parent_id'ye ihtiyaç duyar - numara tahminiyle değil, gerçek bağla."""
+    ust = client.post("/chapters/", json={"number": 1, "kind": "part", "title": "BÖLÜM 4"}, headers=headers).json()
+    client.post("/chapters/", json={"number": 2, "kind": "chapter", "title": "Kısım A"}, headers=headers)
+    client.post("/chapters/", json={"number": 3, "kind": "chapter", "title": "Kısım B"}, headers=headers)
+
+    tree = client.get("/matrix/outline-tree", headers=headers).json()
+    altlar = [t for t in tree if t["parent_id"] == ust["id"]]
+    assert [t["title"] for t in altlar] == ["Kısım A", "Kısım B"]
+    assert next(t for t in tree if t["id"] == ust["id"])["parent_id"] is None
