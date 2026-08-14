@@ -1261,3 +1261,27 @@ class ArcReviewResponse(BaseModel):
     volume_note: str = ""
     summary: str = ""
     scenes: List[ArcSceneInfo] = []
+
+
+class VoiceContract(BaseModel):
+    narrator: str = ""
+    focal: str = ""
+    distance: str = ""
+    tense: str = ""
+    note: str = ""
+
+
+class VoiceViolation(BaseModel):
+    paragraph: Optional[int] = None
+    type: str = "mesafe_kaymasi"
+    evidence: str = ""
+    problem: str = ""
+    fix: str = ""
+    certainty: str = "belirsiz"
+
+
+class VoiceScanResponse(BaseModel):
+    """Anlatıcı/odak denetimi: bakış açısı kayması, bilgi aşımı, mesafe
+    kayması, yorum sızması, zaman kayması. Kanıtsız bulgu alınmaz."""
+    contract: VoiceContract = VoiceContract()
+    violations: List[VoiceViolation] = []

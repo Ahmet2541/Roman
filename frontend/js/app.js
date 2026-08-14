@@ -4819,6 +4819,12 @@ async function replaceParagraphText(chapterId, number, text) {
   try {
     const saved = await api.put(`/chapters/${chapterId}/paragraphs/${number}`, { number, text });
     dirtyChapterId = chapterId;
+    // TEK HUNİ: metne yazan her yol buradan geçer. Karşılaştırma temeli
+    // burada güncellenir - eskiden 11 uygulama noktasının yalnızca 4'ünde
+    // güncelleniyordu ve sohbet/mikro düzenleme/elle kayıt sonrası kontrol
+    // BAYAT metinle kıyaslıyordu. Geri alma da otomatik olarak temeli
+    // eski metne çeker (o da bu fonksiyondan geçiyor).
+    setVerifyBaseline(number, text);
     // TAM YENİDEN ÇİZİM YOK: renderReader inceleme panelini de siliyordu -
     // bir paragrafı düzeltince diğer bulgular ekrandan kayboluyordu.
     // Sadece o paragrafın metni ve rozetleri yerinde güncellenir.
@@ -5379,7 +5385,10 @@ async function sendParagraphChat(chapter, number, neighborBlock, originalText) {
     const yorum = (result.reply || '').trim();
     if (yorum) paraChatHistories[number].push({ role: 'assistant', content: yorum, isVersion: false });
     const taslak = (result.draft_result || '').trim();
-    if (taslak) paraChatHistories[number].push({ role: 'assistant', content: taslak, isVersion: true });
+    if (taslak) {
+      paraChatHistories[number].push({ role: 'assistant', content: taslak, isVersion: true });
+      setVerifyBaseline(number, taslak);   // referans ilerler
+    }
     renderParaChatLog(number);
   } catch (err) {
     document.querySelector('.para-chat-pending')?.remove();
@@ -6611,6 +6620,8 @@ function loadParaState(chapterId) {
   Object.keys(paraPurposes).forEach(k => delete paraPurposes[k]);
   Object.keys(paraChatHistories).forEach(k => delete paraChatHistories[k]);
   resolvedParas.clear();
+  // Karşılaştırma temeli de bölüme özeldir - taşınırsa yanlış kıyas olur
+  if (workshopState) workshopState.baseline = {};
   try {
     const raw = localStorage.getItem(`roman_para_state_${chapterId}`);
     if (!raw) return;
@@ -6647,6 +6658,19 @@ function quickFactCheck(oldText, newText) {
   return bulgular;
 }
 
+// Karşılaştırma temeli: sohbette tur tur ilerlerken referans ORİJİNAL
+// kalırsa, 1. turda bilerek çıkardığın şey 4. turda hâlâ "kayıp" diye
+// işaretlenir - sarmalın asıl kaynağı buydu. Temel her onaylanan/üretilen
+// versiyonla İLERLER; kontrol yalnızca SON adımdaki sapmayı ölçer.
+function verifyBaseline(number, fallbackOld) {
+  workshopState.baseline = workshopState.baseline || {};
+  return workshopState.baseline[number] || fallbackOld;
+}
+function setVerifyBaseline(number, metin) {
+  workshopState.baseline = workshopState.baseline || {};
+  if ((metin || '').trim()) workshopState.baseline[number] = metin.trim();
+}
+
 async function verifyBeforeApply(chapterId, number, oldText, newText) {
   const paras = (currentChapter?.paragraphs || []).slice().sort((a, b) => a.number - b.number);
   const idx = paras.findIndex(p => p.number === number);
@@ -6657,7 +6681,7 @@ async function verifyBeforeApply(chapterId, number, oldText, newText) {
     : '';
   try {
     return await api.post('/ai/verify-rewrite', {
-      old_text: oldText, new_text: newText,
+      old_text: verifyBaseline(number, oldText), new_text: newText,
       purpose: effectiveParaPurpose(number).text, neighbors: komsular,
       // Önerinin AMACI: "metin değişti mi" değil "hedef gerçekleşti mi"
       proposal_goal: (workshopState.lastGoal && workshopState.lastGoal[number]) || '',
@@ -6799,6 +6823,17 @@ function openChapterWorkshop(chapter) {
   workshopState.order = [];
   workshopState.idx = 0;
   workshopState.literary = null;
+  // BÖLÜME ÖZEL DURUMLAR SIFIRLANIR: hepsi paragraf NUMARASIYLA
+  // anahtarlanıyor; temizlenmezse A bölümünün P5'ine ait teşhis, temel ve
+  // "görülen seçenekler" B bölümünün P5'ine sızıyordu.
+  workshopState.baseline = {};
+  workshopState.seen = {};
+  workshopState.directives = {};
+  workshopState.lastGoal = {};
+  workshopState.diagnoses = {};
+  workshopState.roleKinds = {};
+  workshopState.motif = null;
+  window.__verifyRounds = {};
   let ov = document.getElementById('workshopOverlay');
   if (!ov) {
     ov = document.createElement('div');
@@ -6979,7 +7014,7 @@ async function renderWorkshopReview() {
   const asama = (n, metin) => {
     ov.querySelector('.workshop-body').innerHTML = `
       <div class="empty-state">
-        <div style="font-size:13px;">${n}/3 · ${metin}</div>
+        <div style="font-size:13px;">${n}/4 · ${metin}</div>
         <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px;">Uzun bölümlerde bir-iki dakika sürebilir.</div>
       </div>`;
   };
@@ -7008,7 +7043,15 @@ async function renderWorkshopReview() {
     workshopState.literary = literary;
     asama(2, 'Okur gözüyle düşürücü noktalar');
     const reader = await api.post(`/ai/reader-test/${ch.id}`, {});
-    asama(3, 'Paragraf işlevleri ve imge haritası');
+    asama(3, 'Anlatıcı ve odak denetimi');
+    // ANLATICI: bakış açısı kayması, bilgi aşımı, mesafe/zaman kayması.
+    // Aynı paragraf anlatıcıya göre tamamen farklı okunur.
+    let voice = { contract: {}, violations: [] };
+    try { voice = await api.post(`/ai/voice-scan/${ch.id}`, {}); }
+    catch (e) { /* başarısız olsa da inceleme sürer */ }
+    workshopState.voice = voice;
+
+    asama(4, 'Paragraf işlevleri ve imge haritası');
     // PARAGRAF İŞLEVLERİ: her paragrafın sahnedeki görevi ("olay mahalli
     // tanıtılıyor", "dijital doğum hazırlığı"). Özet + paragraf birlikte
     // kullanıldığı için isabet yüksek. Elle yazmak zorunda kalmıyorsun;
@@ -7051,6 +7094,18 @@ async function renderWorkshopReview() {
         });
       });
     });
+    // Anlatıcı ihlalleri de paragraf bulgusu olur. "belirsiz" olanlar
+    // bulgu sayılmaz - bilinçli teknik olabilir (çoklu odak bir tercih).
+    (voice.violations || []).filter(v => v.certainty === 'kesin' && v.paragraph).forEach(v => {
+      const vEtiket = {
+        bakis_kaymasi: 'Bakış açısı kayması', bilgi_asimi: 'Anlatıcı bilgi aşımı',
+        mesafe_kaymasi: 'Mesafe kayması', yorum_sizmasi: 'Yorum sızması',
+        zaman_kaymasi: 'Zaman kayması',
+      }[v.type] || v.type;
+      (byPara[v.paragraph] = byPara[v.paragraph] || []).push({
+        kaynak: 'ses', baslik: vEtiket, sorun: v.problem, oneri: v.fix, alinti: v.evidence,
+      });
+    });
     workshopState.findings = byPara;
     workshopState.order = Object.keys(byPara).map(Number).sort((a, b) => a - b);
     workshopState.idx = 0;
@@ -7078,6 +7133,7 @@ async function renderWorkshopParagraph(idx) {
   if (!sira.length) { renderWorkshopReview(); return; }
   workshopState.idx = Math.max(0, Math.min(idx, sira.length - 1));
   const num = sira[workshopState.idx];
+  window.__verifyRounds = {};   // yeni paragraf = yeni tur sayacı
   const para = (ch.paragraphs || []).find(p => p.number === num);
   const kayitlar = workshopState.findings[num] || [];
   const cozuldu = resolvedParas.has(String(num));
@@ -7089,7 +7145,7 @@ async function renderWorkshopParagraph(idx) {
       <span>${cozuldu ? '<span style="color:#3f7a4f;font-weight:600;">✓ düzeltildi</span>' : `${kalan} paragraf kaldı`}</span>
       <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Süpürme modunda bulgusu olmayan paragraflar da geziliyor. İşaretlersen sadece bulgulu paragraflarda durur.">
         <input type="checkbox" id="wsOnlyFlagged" ${workshopState.onlyFlagged ? 'checked' : ''}>
-        sadece bulgulu (${(workshopState.order || []).filter(n => (workshopState.findings[n] || []).length).length})
+        sadece bulgulu (${(workshopState.order || []).filter(n => (workshopState.findings[n] || []).length && !resolvedParas.has(String(n))).length})
       </label>
       <span>${escapeHtml((effectiveParaPurpose(num).source) ? 'işlev: ' + effectiveParaPurpose(num).source : 'işlev tanımsız')}</span>
     </div>
@@ -7165,8 +7221,8 @@ async function renderWorkshopParagraph(idx) {
   // Teşhis gelene kadar HAM bulguları rozet olarak göster; teşhis gelince
   // renderDiagnoses bunları değiştirir (aynı şeyi iki kez yazmamak için).
   renderFindingChips('wsRawChips', kayitlar.map(k => ({
-    icon: k.kaynak === 'editor' ? '📊' : (k.kaynak === 'imge' ? '🎨' : '🎯'),
-    label: k.baslik, renk: k.kaynak === 'editor' ? 'var(--gold)' : (k.kaynak === 'imge' ? '#7a5fb0' : 'var(--danger)'),
+    icon: k.kaynak === 'editor' ? '📊' : (k.kaynak === 'imge' ? '🎨' : (k.kaynak === 'ses' ? '🗣' : '🎯')),
+    label: k.baslik, renk: k.kaynak === 'editor' ? 'var(--gold)' : (k.kaynak === 'imge' ? '#7a5fb0' : (k.kaynak === 'ses' ? '#2f6f8f' : 'var(--danger)')),
     detay: `${k.alinti ? `<div style="font-style:italic;color:var(--text-muted);">"${escapeHtml(k.alinti)}"</div>` : ''}
       <div style="color:var(--text-muted);">${escapeHtml(k.sorun || '')}</div>
       ${k.oneri ? `<div style="margin-top:2px;">→ ${escapeHtml(k.oneri)}</div>` : ''}`,
@@ -7337,7 +7393,7 @@ async function renderWorkshopParagraph(idx) {
 // Sentez yereldir (ek AI isteği yok): DEĞİŞTİR / KORU / KAÇIN başlıkları.
 // ---------------------------------------------------------------------------
 function buildParagraphDirectives(num, kayitlar, paraText) {
-  const etiket = { editor: '[editör]', okur: '[okur]', imge: '[imge]' };
+  const etiket = { editor: '[editör]', okur: '[okur]', imge: '[imge]', ses: '[anlatıcı]' };
   const degistir = (kayitlar || []).map(k =>
     `${etiket[k.kaynak] || '[okur]'} ${k.baslik}: ${k.sorun || ''}${k.oneri ? ' → ' + k.oneri : ''}`);
 
@@ -8186,6 +8242,11 @@ function renderWorkshopReviewSummary(literary, motif, onbellekten, gunFarki) {
       Kapsama: ${literary.total || 0} paragrafın ${literary.scanned || 0}'i tarandı${literary.chunks > 1 ? ` (${literary.chunks} parça)` : ''}.
     </div>
     <div style="font-size:13.5px;margin-top:10px;"><b>${workshopState.order.length}</b> paragrafta bulgu var.</div>
+    ${workshopState.voice?.contract?.narrator ? `
+      <div style="font-size:12px;color:var(--text-muted);margin-top:8px;padding:6px 8px;background:var(--paper-dim);border-radius:6px;">
+        🗣 <b>Anlatıcı:</b> ${escapeHtml(workshopState.voice.contract.narrator)}${workshopState.voice.contract.focal ? ' · odak: ' + escapeHtml(workshopState.voice.contract.focal) : ''}${workshopState.voice.contract.distance ? ' · mesafe: ' + escapeHtml(workshopState.voice.contract.distance) : ''}
+        ${(workshopState.voice.violations || []).filter(v => v.certainty === 'kesin').length ? '<span style="color:var(--danger);"> · ' + (workshopState.voice.violations || []).filter(v => v.certainty === 'kesin').length + ' ihlal</span>' : ''}
+      </div>` : ''}
     ${motif.repeats?.length ? `
       <details style="margin-top:8px;">
         <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);">🎨 İmge haritası (${motif.items?.length || 0} imge tarandı)</summary>
@@ -8447,6 +8508,12 @@ function wireMicroEdit(chapter, num) {
             </div>`).join('')}`;
         kutu.querySelectorAll('.micro-apply').forEach(mb => mb.addEventListener('click', async () => {
           const o = r.options[parseInt(mb.dataset.idx, 10)];
+          // Mikro düzenleme küçük ama kontrolsüz değil: seçilen ifade bir
+          // sayı ya da kanonik isim taşıyorsa sessizce düşebilir.
+          const eskiMetin = metinEl.innerText.trim();
+          const uyarilar = quickFactCheck(eskiMetin, o.preview);
+          if (uyarilar.length && !confirm(
+            `Bu değişiklik veri kaybına yol açıyor:\n\n${uyarilar.join('\n')}\n\nYine de uygulansın mı?`)) return;
           await replaceParagraphText(chapter.id, num, o.preview);
           const para = (chapter.paragraphs || []).find(p => p.number === num);
           if (para) para.text = o.preview;
@@ -8941,7 +9008,10 @@ async function runArcReview(chapterId) {
 function nextFlaggedIndex(mevcut, yon) {
   const sira = workshopState.order || [];
   for (let i = mevcut + yon; i >= 0 && i < sira.length; i += yon) {
-    if ((workshopState.findings[sira[i]] || []).length) return i;
+    const num = sira[i];
+    // Bulgusu olan AMA henüz çözülmemiş paragraflar. Çözülmüşleri de
+    // atlamak gerekiyordu - yoksa düzelttiğin paragrafta tekrar duruyordu.
+    if ((workshopState.findings[num] || []).length && !resolvedParas.has(String(num))) return i;
   }
   return null;
 }
@@ -8953,6 +9023,10 @@ function acceptedChangesFor(number) {
   return gecmis
     .filter(m => m.role === 'user')
     .map(m => (m.content || '').replace(/\s+/g, ' ').trim())
+    // Otomatik çerçeve mesajını DIŞLA: içinde kontrol uyarıları var ve
+    // onları "kabul edilen değişiklik" saymak kontrolü kendi uyarılarıyla
+    // besleyip döngüyü büyütüyordu.
+    .filter(t => !/^P\d+ için seçtiğim versiyon/.test(t) && !/Kontrol şu uyarıları verdi/.test(t))
     .filter(t => t && t.length < 400)
     .slice(-4)
     .join(' | ')

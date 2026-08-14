@@ -603,6 +603,16 @@ def upsert_paragraph(
     if not chapter:
         raise HTTPException(404, "Bölüm bulunamadı")
 
+    # BOŞ METİN KORUMASI: AI boş yanıt döndürdüğünde ya da bir arayüz
+    # hatasında paragrafın içeriği SESSİZCE siliniyordu. Geçmişten geri
+    # alınabiliyor ama kullanıcı fark etmeyebilir - kaynağında engelle.
+    if not (payload.text or "").strip():
+        raise HTTPException(
+            400,
+            "Paragraf metni boş olamaz. Paragrafı kaldırmak için sil düğmesini "
+            "kullan; metin AI'dan boş geldiyse tekrar dene.",
+        )
+
     paragraph = (
         db.query(models.Paragraph)
         .filter(models.Paragraph.chapter_id == chapter_id, models.Paragraph.number == number)

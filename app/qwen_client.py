@@ -593,6 +593,8 @@ def build_context(
     knowledge = build_knowledge_layer(db, universe_id, chapter_number)
     # Turlar arası paralellik: aynı aşamanın diğer turlardaki hâlleri
     parallel = build_parallel_layer(db, novel_id, chapter_number)
+    # Anlatıcı sözleşmesi: kim anlatıyor, hangi mesafeden, neyi bilebilir
+    voice = build_voice_layer(db, universe_id)
     # ÜZERİNDE ÇALIŞILAN BÖLÜMÜN KENDİ ÖZETİ: fihrist katmanı bunu bilerek
     # dışlıyor (yeni bölüm YAZILIRKEN model kendi özetini kopyalamasın diye).
     # Ama var olan bir paragrafı DÜZENLERKEN tam tersi gerekli: ZAMAN,
@@ -633,7 +635,7 @@ def build_context(
     style_warnings = build_style_warning_layer(db, universe_id)
     plan = build_plan_layer(db, novel_id, chapter_number, instruction_text=instruction_text)
     dynamic = build_dynamic_layer(db, universe_id, selected_entities, instruction_text=instruction_text, include_hidden=include_hidden)
-    return "\n\n".join(part for part in [fixed, index, outline, matrix_map, referenced, style, style_warnings, plan, parallel, forward, knowledge, own_summary, chapter_text, dynamic] if part)
+    return "\n\n".join(part for part in [fixed, index, outline, matrix_map, referenced, style, style_warnings, plan, parallel, voice, forward, knowledge, own_summary, chapter_text, dynamic] if part)
 
 
 # ---------------------------------------------------------------------------
@@ -3369,7 +3371,12 @@ verilmişse, o değişiklikleri SORUN OLARAK YAZMA. Yazar bir imgeyi bilerek
 bir DÖNGÜ kurar. Yalnızca kararlaştırılmamış YENİ sorunları bildir.
 
 TEK BİR SORUN İÇİN İKİ KEZ UYARMA: aynı kaybı hem "işlev" hem "anlam" hem
-"süreklilik" başlığı altında tekrar yazma - en uygun tek başlığı seç. Üslup tercihi
+"süreklilik" başlığı altında tekrar yazma - en uygun tek başlığı seç.
+
+ESKİ HÂL = BİR ÖNCEKİ ADIM, ilk taslak değil. Metin tur tur geliştiriliyor
+olabilir; sana verilen "eski hâl" o zincirin son halkasıdır. Daha önceki
+turlarda çıkarılmış şeyleri geri istemek DÖNGÜ kurar - yalnızca BU adımda
+oluşan sapmayı bildir. Üslup tercihi
 farkını sorun olarak yazma. Metin daha iyi olmuşsa "kabul" de.
 
 Yanıtın SADECE şu JSON olsun:
@@ -4308,3 +4315,137 @@ def review_arc(db: Session, novel_id: int, parent_chapter_id: int, max_chars: in
                     "paragraphs": len([p for p in it["chapter"].paragraphs if (p.text or "").strip()])}
                    for it in alt],
     }
+
+
+# ---------------------------------------------------------------------------
+# ANLATICI / ODAK (VOICE) KATMANI. Eksikti ve önemliydi: aynı paragraf,
+# anlatıcının kim olduğuna göre tamamen farklı okunur. "İçeride babasının
+# eski sandalyesi duruyordu" - karakterin zihnindeysek bu HAFIZA, dış
+# anlatıcıysa GÖZLEM, güvenilmez anlatıcıysa ŞÜPHELİ bir bilgidir.
+#
+# İki iş yapar:
+#   (a) build_voice_layer: romanın anlatıcı sözleşmesi context'e girer, yeni
+#       metin bu sözleşmeye uyar.
+#   (b) scan_voice: yazılmış metinde SÖZLEŞME İHLALLERİNİ arar - en sık
+#       hata BAKIŞ AÇISI KAYMASI (aynı sahnede iki karakterin zihnine girme)
+#       ve anlatıcının bilemeyeceği bilgiyi vermesi.
+# ---------------------------------------------------------------------------
+
+VOICE_SCAN_PROMPT = """Sen anlatı tekniği konusunda uzman bir editörsün.
+Sana bir romanın ANLATICI SÖZLEŞMESİ ve bir bölümün paragrafları verilecek.
+Sözleşme ihlallerini bul.
+
+Aradığın ihlaller:
+- bakis_kaymasi: aynı sahnede birden fazla karakterin İÇİNE giriliyor
+  (odak karakteri dışındakinin düşüncesi/duygusu doğrudan veriliyor).
+- bilgi_asimi: anlatıcı, konumu gereği BİLEMEYECEĞİ bir şeyi söylüyor
+  (sınırlı anlatıcı başka odadaki olayı anlatıyor gibi).
+- mesafe_kaymasi: anlatıcının karaktere olan mesafesi aniden değişiyor
+  (uzak/soğuk anlatımdan iç sese ya da tersi, gerekçesiz).
+- yorum_sizmasi: anlatıcı, sözleşmesi gereği yapmaması gereken bir YORUM
+  ya da değer yargısı veriyor.
+- zaman_kaymasi: anlatım zamanı (geçmiş/şimdiki) gerekçesiz değişiyor.
+
+KURALLAR:
+1. KANIT ZORUNLU: her bulgu için paragraf numarası ve metinden en fazla 10
+   kelimelik alıntı. Kanıt gösteremiyorsan o bulguyu YAZMA.
+2. Sözleşme belirtilmemişse metinden ÇIKAR ve varsayımını söyle - ama
+   varsayıma dayanan ihlali "belirsiz" olarak işaretle.
+3. Bilinçli teknik olabilir: çoklu odak ya da ani mesafe değişimi bir
+   üslup tercihi olabilir. Emin değilsen "belirsiz" de.
+4. Uydurma ihlal çıkarma. Metin tutarlıysa boş liste DOĞRU cevaptır.
+
+Yanıtın SADECE şu JSON olsun:
+{"contract": {"narrator": "birinci tekil|üçüncü sınırlı|üçüncü tanrısal|karışık",
+  "focal": "odak karakterin adı ya da yok", "distance": "yakın|orta|uzak",
+  "tense": "geçmiş|şimdiki", "note": "tek cümle"},
+ "violations": [{"paragraph": 12, "type": "bakis_kaymasi", "evidence": "...",
+  "problem": "...", "fix": "...", "certainty": "kesin|belirsiz"}]}"""
+
+
+def build_voice_layer(db: Session, universe_id: int) -> str:
+    """Anlatıcı sözleşmesi context katmanı. Kurallar menüsünde 'anlatıcı'
+    ya da 'bakış açısı' geçen kayıtlardan derlenir - ayrı bir tablo açmak
+    yerine var olan kural altyapısı kullanılır (kullanıcı zaten oraya
+    yazıyor)."""
+    kurallar = db.query(models.Rule).filter(models.Rule.universe_id == universe_id).all()
+    ilgili = []
+    for r in kurallar:
+        metin = f"{r.title or ''} {r.description or ''}"
+        if any(k in _tr_lower(metin) for k in
+               ("anlatıcı", "bakış açısı", "odak", "anlatım zamanı", "birinci tekil", "üçüncü")):
+            satir = (r.title or "").strip()
+            if (r.description or "").strip():
+                satir += f": {r.description.strip()}"
+            if satir:
+                ilgili.append(satir)
+    if not ilgili:
+        return ""
+    return (
+        "=== ANLATICI SÖZLEŞMESİ (bu metin ona UYMALI) ===\n"
+        "Kim anlatıyor, hangi mesafeden, neyi bilebilir - yeni metin bunu\n"
+        "bozmamalı. Odak karakteri dışındakinin zihnine GİRME; anlatıcının\n"
+        "bilemeyeceği bilgiyi verme.\n- " + "\n- ".join(ilgili[:8])
+    )
+
+
+def scan_voice(db: Session, chapter, universe_id: int, max_chars: int = 12000) -> dict:
+    """Bölümde anlatıcı sözleşmesi ihlallerini arar. Uzun bölüm dilimlenir."""
+    paragraphs = [p for p in chapter.paragraphs if (p.text or "").strip()]
+    if not paragraphs:
+        return {"contract": {}, "violations": []}
+
+    sozlesme = build_voice_layer(db, universe_id) or "(Sözleşme tanımlanmamış - metinden çıkar.)"
+    dilimler, mevcut, used = [], [], 0
+    for p in paragraphs:
+        satir = f"[P{p.number}] {p.text.strip()}"
+        if mevcut and used + len(satir) > max_chars:
+            dilimler.append(mevcut); mevcut, used = [], 0
+        mevcut.append(satir); used += len(satir)
+    if mevcut:
+        dilimler.append(mevcut)
+
+    gecerli = {"bakis_kaymasi", "bilgi_asimi", "mesafe_kaymasi", "yorum_sizmasi", "zaman_kaymasi"}
+    numaralar = {p.number for p in paragraphs}
+    client = get_client()
+    contract, violations = {}, []
+    for i, dilim in enumerate(dilimler, start=1):
+        try:
+            r = client.chat.completions.create(
+                model=settings.qwen_model,
+                messages=[
+                    {"role": "system", "content": VOICE_SCAN_PROMPT},
+                    {"role": "user", "content": f"{sozlesme}\n\nBÖLÜM {chapter.number} - PARÇA {i}/{len(dilimler)}:\n"
+                     + "\n".join(dilim)},
+                ],
+            )
+            data = _parse_json_lenient(r.choices[0].message.content) or {}
+        except Exception:
+            logger.exception("Anlatıcı taraması: parça %s başarısız", i)
+            continue
+        if not contract and isinstance(data.get("contract"), dict):
+            c = data["contract"]
+            contract = {
+                "narrator": (c.get("narrator") or "")[:40],
+                "focal": (c.get("focal") or "")[:60],
+                "distance": (c.get("distance") or "")[:20],
+                "tense": (c.get("tense") or "")[:20],
+                "note": (c.get("note") or "")[:200],
+            }
+        for v in (data.get("violations") or []):
+            if not isinstance(v, dict):
+                continue
+            # KANIT ZORUNLU - kanıtsız ihlal alınmaz (halüsinasyon koruması)
+            if not (v.get("evidence") or "").strip():
+                continue
+            num = v.get("paragraph")
+            violations.append({
+                "paragraph": num if num in numaralar else None,
+                "type": v.get("type") if v.get("type") in gecerli else "mesafe_kaymasi",
+                "evidence": (v.get("evidence") or "")[:150],
+                "problem": (v.get("problem") or "")[:300],
+                "fix": (v.get("fix") or "")[:300],
+                "certainty": v.get("certainty") if v.get("certainty") in ("kesin", "belirsiz") else "belirsiz",
+            })
+    violations.sort(key=lambda x: (x["paragraph"] is None, x["paragraph"] or 0))
+    return {"contract": contract, "violations": violations[:15]}

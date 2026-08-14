@@ -944,3 +944,63 @@ def test_verify_respects_accepted_changes(client, headers):
     assert "KARARLAŞTIRILMIŞ DEĞİŞİKLİKLER" in captured["user"]
     assert "gökkuşağını çıkaralım" in captured["user"]
     assert "kayıp/sorun olarak YAZMA" in captured["user"]
+
+
+def test_verify_prompt_treats_old_text_as_previous_step(client, headers):
+    """SARMALIN KÖKÜ: kontrol her turda ORİJİNALLE kıyaslarsa, 1. turda
+    bilerek çıkarılan şey 4. turda hâlâ "kayıp" diye işaretlenir. Referans
+    zincirin SON halkasıdır ve yalnızca bu adımdaki sapma bildirilir."""
+    from app.qwen_client import VERIFY_PROMPT
+    assert "ESKİ HÂL = BİR ÖNCEKİ ADIM" in VERIFY_PROMPT
+    assert "DÖNGÜ kurar" in VERIFY_PROMPT
+    assert "yalnızca BU adımda" in VERIFY_PROMPT
+
+
+def test_voice_scan_finds_pov_violations(client, headers):
+    """ANLATICI/ODAK DENETİMİ: bakış açısı kayması ve bilgi aşımı. Aynı
+    paragraf anlatıcıya göre farklı okunur; bu katman yoktu ve diğer
+    testler bu hataları göremiyordu. KANITSIZ ihlal alınmaz."""
+    from app.qwen_client import build_voice_layer, VOICE_SCAN_PROMPT
+    from sqlalchemy.orm import sessionmaker
+    from app.database import engine
+    from app import models
+
+    client.post("/rules/", json={
+        "title": "Anlatıcı: üçüncü tekil sınırlı",
+        "description": "Odak Vicdan'dır; başka karakterin zihnine girilmez.",
+    }, headers=headers)
+
+    db = sessionmaker(bind=engine)()
+    novel_id = int(headers["X-Novel-Id"])
+    uid = db.query(models.Novel).filter(models.Novel.id == novel_id).first().universe_id
+    katman = build_voice_layer(db, uid)
+    assert "ANLATICI SÖZLEŞMESİ" in katman
+    assert "üçüncü tekil sınırlı" in katman
+
+    ch = _chapter_with_text(client, headers, [
+        "Vicdan salonu taradı.", "Başkan içinden korktuğunu düşündü.",
+    ])
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "contract": {"narrator": "üçüncü sınırlı", "focal": "Vicdan",
+                         "distance": "orta", "tense": "geçmiş", "note": "Sabit odak."},
+            "violations": [
+                {"paragraph": 2, "type": "bakis_kaymasi", "evidence": "içinden korktuğunu düşündü",
+                 "problem": "Başkanın zihnine giriliyor.", "fix": "Dışarıdan göster.", "certainty": "kesin"},
+                {"paragraph": 1, "type": "bilgi_asimi", "evidence": "",
+                 "problem": "Kanıtsız iddia", "certainty": "kesin"},
+                {"paragraph": 2, "type": "uydurma_tur", "evidence": "x", "problem": "y"},
+            ],
+        })
+        r = client.post(f"/ai/voice-scan/{ch['id']}", headers=headers)
+    d = r.json()
+    assert d["contract"]["focal"] == "Vicdan"
+    assert len(d["violations"]) == 2, "kanıtsız ihlal ayıklanmalı"
+    assert d["violations"][0]["type"] == "bakis_kaymasi"
+    assert d["violations"][1]["type"] == "mesafe_kaymasi"     # geçersiz tür güvenli tarafa
+    assert d["violations"][1]["certainty"] == "belirsiz"      # belirtilmemişse belirsiz
+
+    # Kural yoksa katman hiç oluşmaz (boşuna maliyet yok)
+    from app import models as m2
+    bos_uid = 999999
+    assert build_voice_layer(db, bos_uid) == ""
