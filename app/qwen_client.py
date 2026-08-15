@@ -2008,7 +2008,22 @@ def verify_paragraph_rewrite(db: Session, universe_id: int, old_text: str, new_t
     if kayip_sayi:
         hard_issues.append(f"Somut detay düştü - eski metindeki sayılar yeni metinde yok: {', '.join(kayip_sayi)}")
     if kayip_isim:
-        hard_issues.append(f"Özel isim düştü: {', '.join(kayip_isim)}")
+        # ZAMİR İSTİSNASI: bir ismin yerine zamir geçmesi KAYIP değildir -
+        # dilin doğal işleyişidir ("Vicdan bekledi" -> "O bekledi"). Salt
+        # dize varlığına bakmak burada yanlış uyarı üretiyor ve modeli
+        # ismi zorla geri koymaya itiyor (yapay metin).
+        zamirler = ("o ", "onu", "ona", "onun", "kendi", "adam", "kadın", "ihtiyar",
+                    "teknisyen", "yargıç", "başkan", "mühendis")
+        yeni_norm = _tr_lower(new_text)
+        zamir_var = any(z in yeni_norm for z in zamirler)
+        if zamir_var and len(kayip_isim) <= 2:
+            hard_issues.append(
+                f"Özel isim geçmiyor ({', '.join(kayip_isim)}) - yerine zamir/sıfat "
+                f"kullanılmış olabilir. Bağlamdan kim olduğu anlaşılıyorsa SORUN DEĞİL; "
+                f"anlaşılmıyorsa ismi geri koy."
+            )
+        else:
+            hard_issues.append(f"Özel isim düştü: {', '.join(kayip_isim)}")
 
     # 2) Yasak üslup kalıpları (deterministik - eşiği aşan kalıplar)
     rapor = None
@@ -2050,6 +2065,19 @@ def verify_paragraph_rewrite(db: Session, universe_id: int, old_text: str, new_t
     data = _parse_json_lenient(response.choices[0].message.content) or {}
     ai_issues = [str(x)[:300] for x in (data.get("issues") or []) if str(x).strip()]
     verdict = data.get("verdict") if data.get("verdict") in ("kabul", "duzelt", "red") else "kabul"
+    # İŞLEV KORUNUMU: "hata düzeltildi ama metin zayıfladı" durumunu
+    # yakalayan ayrı bir eksen. Sadece kusur aramak yeterli değil - özgün
+    # cümlenin İŞİ de korunmalı. C (kayboldu) tek başına ret sebebidir.
+    fp = data.get("function_preservation")
+    fp = fp if fp in ("A", "B", "C") else "A"
+    fp_note = (data.get("function_note") or "")[:300]
+    if fp == "C":
+        verdict = "red"
+        ai_issues.insert(0, f"İŞLEV KAYBI: özgün cümlenin işlevi yeni metinde yok. {fp_note}")
+    elif fp == "B" and verdict == "kabul":
+        verdict = "duzelt"
+        ai_issues.insert(0, f"İŞLEV DAĞILDI: işlev bu cümlede yok, komşulara yayılmış. {fp_note}")
+
     # Deterministik bulgu varsa karar en az "duzelt" olur - AI kabul dese bile
     if hard_issues and verdict == "kabul":
         verdict = "duzelt"
@@ -2058,6 +2086,8 @@ def verify_paragraph_rewrite(db: Session, universe_id: int, old_text: str, new_t
         "hard_issues": hard_issues,
         "issues": ai_issues,
         "note": (data.get("note") or "")[:300],
+        "function_preservation": fp,
+        "function_note": fp_note,
     }
 
 

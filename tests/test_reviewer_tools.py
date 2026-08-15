@@ -1068,3 +1068,53 @@ def test_review_options_compares_candidates(client, headers):
         r = client.post("/ai/review-options", json={"original": "x", "options": []}, headers=headers)
         mc.assert_not_called()
     assert r.json()["all_insufficient"] is True
+
+
+def test_verify_function_preservation_axis(client, headers):
+    """İŞLEV KORUNUMU ayrı bir eksen: "hata düzeltildi ama metin zayıfladı"
+    durumu. Kusur aramak yetmiyor - özgün cümlenin İŞİ de korunmalı.
+    C (kayboldu) tek başına RET sebebi."""
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "verdict": "kabul", "issues": [], "note": "Hata temizlendi.",
+            "function_preservation": "C",
+            "function_note": "Diskin insani yük taşıdığı sezdirmesi kayboldu.",
+        })
+        r = client.post("/ai/verify-rewrite", json={
+            "old_text": "Yedi yılın ahı diskin içindeydi.",
+            "new_text": "İçinde ne olduğunu bilmiyordum.",
+            "purpose": "Diskin insani bir yük taşıdığını sezdir",
+        }, headers=headers)
+    d = r.json()
+    assert d["verdict"] == "red", "işlev kaybı reddedilmeli"
+    assert d["function_preservation"] == "C"
+    assert "İŞLEV KAYBI" in d["issues"][0]
+
+    # B (dağıldı) kabulü "düzeltilmeli"ye çeker
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "verdict": "kabul", "issues": [], "function_preservation": "B",
+            "function_note": "Komşu cümleye kaymış.",
+        })
+        r = client.post("/ai/verify-rewrite", json={
+            "old_text": "a b c", "new_text": "d e f",
+        }, headers=headers)
+    assert r.json()["verdict"] == "duzelt"
+
+
+def test_verify_pronoun_substitution_is_not_a_loss(client, headers):
+    """YANLIŞ POZİTİF DÜZELTMESİ: bir ismin yerine ZAMİR geçmesi kayıp
+    değildir ("Vicdan bekledi" -> "O bekledi"). Salt dize varlığına bakmak
+    modeli ismi zorla geri koymaya itiyor ve yapay metin üretiyordu."""
+    client.post("/characters/", json={"name": "Vicdan"}, headers=headers)
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen(
+            {"verdict": "kabul", "issues": [], "function_preservation": "A"})
+        r = client.post("/ai/verify-rewrite", json={
+            "old_text": "Vicdan salonu taradı.",
+            "new_text": "O, salonu taradı; kendi sesini duydu.",
+        }, headers=headers)
+    d = r.json()
+    sert = " ".join(d["hard_issues"])
+    assert "SORUN DEĞİL" in sert, "zamir istisnası uygulanmadı"
+    assert "düştü:" not in sert, "kesin kayıp olarak raporlandı"

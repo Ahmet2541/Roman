@@ -273,4 +273,18 @@ test('yazardan alınan bilgi direktiflere girer', () => {
   if (d2.includes('YAZARDAN ALINAN BİLGİ')) throw new Error('boş cevapla bölüm oluştu');
 });
 
+// --- 13. Son çare ayrıştırma: ayraçsız ama boş satırla ayrılmış bloklar ---
+test('ayraçsız üç paragraf yine de ayrışır', () => {
+  const ucBlok = 'Başını salladı. Cebinden mendil çıkardı ve alnını sildi.\n\n'
+    + 'Elleri titredi. Mendili avucunda buruşturdu, sonra cebine soktu.\n\n'
+    + 'Sustu. Mendil elinde kaldı, katlanmamış ve kirli.';
+  if (parseOptionBlocks(ucBlok).length !== 3) throw new Error('ayraçsız bloklar ayrışmadı');
+
+  // TEK paragraf yanlışlıkla bölünmemeli (kısa satırlar, eksik noktalama)
+  const tek = 'Başını salladı. Cebinden bir mendil çıkardı — karısının işlediği — ve sildi.';
+  if (parseOptionBlocks(tek).length !== 1) throw new Error('tek paragraf bölündü');
+  const kisa = 'Başını salladı.\n\nkısa';
+  if (parseOptionBlocks(kisa).length !== 1) throw new Error('kısa parçalar seçenek sayıldı');
+});
+
 Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));

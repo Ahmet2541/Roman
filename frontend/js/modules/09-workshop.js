@@ -689,7 +689,7 @@ async function loadBannedPatterns() {
 }
 
 // Atölyede 3 seçenekli öneri (mobil: tam genişlik kartlar)
-async function workshopFix(chapter, num, issue) {
+async function workshopFix(chapter, num, issue, bicimDenemesi = 0) {
   // SAVUNMA: kapsayıcı yoksa (kullanıcı bu arada başka paragrafa geçtiyse)
   // çökmek yerine sessizce çık. "Cannot set properties of null" hatası
   // buradan geliyordu.
@@ -743,6 +743,11 @@ async function workshopFix(chapter, num, issue) {
     + `UZUNLUK BÜTÇESİ: mevcut paragraf ${(para ? para.text : '').split(/\s+/).filter(Boolean).length} kelime. `
     + 'Yeni hâli bunun %70-140 aralığında kalsın - her turda uzayıp komşu paragrafların '
     + 'ritmini bozmasın.\n'
+    + (bicimDenemesi > 0
+        ? 'ÖNCEKİ DENEMEDE BİÇİMİ BOZDUN - tek blok döndürdün. Bu sefer KESİNLİKLE '
+          + 'üç ayrı blok yaz, her biri "###" ile başlasın. Blokların arasında açıklama, '
+          + 'giriş cümlesi, numaralandırma OLMASIN. Yalnızca üç blok.\n'
+        : '')
     + 'BİÇİM (kesin): her seçeneği şöyle yaz, arada başka hiçbir şey olmasın:\n'
     + '### mikro detay | NEDEN: tek cümlelik gerekçe\n<paragrafın tam yeni hâli>\n'
     + '### ses ve sessizlik | NEDEN: ...\n<paragrafın tam yeni hâli>\n'
@@ -783,7 +788,17 @@ async function workshopFix(chapter, num, issue) {
     // sessizce "SEÇENEK 1/1" görünüyordu ve kullanıcı kaydırma düğmelerinin
     // bozulduğunu sanıyordu.
     const tekSecenek = secenekler.length < 2;
-    if (tekSecenek) reportIssue('bos_yanit', `P${num}: AI ${secenekler.length} seçenek döndürdü (3 istenmişti)`, '');
+    if (tekSecenek) {
+      reportIssue('bos_yanit', `P${num}: AI ${secenekler.length} seçenek döndürdü (3 istenmişti)`, '');
+      // TEK SEFERLİK BİÇİM DENEMESİ: bu bir KALİTE reddi değil, BİÇİM
+      // düzeltmesidir - model üç blok yerine tek blok döndürdü. Sonsuz
+      // döngü riski yok çünkü yalnızca bir kez ve yalnızca ayrıştırma
+      // başarısız olduğunda tekrarlanır.
+      if (bicimDenemesi === 0) {
+        box.innerHTML = '<div class="empty-state">Biçim bozuk geldi - üç seçenek için tekrar isteniyor…</div>';
+        return workshopFix(chapter, num, issue, 1);
+      }
+    }
     // Orijinalle aynı gelen seçenek varsa da uyar (fark vurgusu boş çıkar)
     const ayniOlanlar = secenekler.filter(o =>
       o.text.replace(/\s+/g, ' ').trim() === (eskiMetin || '').replace(/\s+/g, ' ').trim()).length;
@@ -932,7 +947,7 @@ async function workshopFix(chapter, num, issue) {
       const b = e.target; b.disabled = true; b.textContent = 'Yeni seçenekler…';
       const oncekiler = secenekler.map(o => o.approach).filter(Boolean).join(', ');
       await workshopFix(chapter, num, issue
-        + (oncekiler ? ` ÖNCEKİ YAKLAŞIMLARI TEKRARLAMA (${oncekiler}); tamamen farklı üç yol dene.` : ''));
+        + (oncekiler ? ` ÖNCEKİ YAKLAŞIMLARI TEKRARLAMA (${oncekiler}); tamamen farklı üç yol dene.` : ''), 0);
     });
 
     // İFADE BAZLI DEĞİŞTİRME: altın bir öbeğe tıkla -> sadece o ifade için
@@ -1174,7 +1189,18 @@ function parseOptionBlocks(raw) {
   const ISARET = '\u0000';
   const isaretli = metin.split('\n').map(satir =>
     AYRAC.test(satir) ? ISARET + satir.replace(AYRAC, '') : satir).join('\n');
-  const parcalar = isaretli.split(ISARET).filter(x => x && x.trim());
+  let parcalar = isaretli.split(ISARET).filter(x => x && x.trim());
+
+  // SON ÇARE: model hiçbir ayraç kullanmadıysa ama BOŞ SATIRLA ayrılmış
+  // 2-4 tam paragraf döndürdüyse, bunları seçenek say. Ölçüt sıkı tutulur
+  // (her parça en az 40 karakter ve cümle gibi bitiyor) - yoksa tek bir
+  // paragrafın içindeki boş satırlar yanlışlıkla bölünür.
+  if (parcalar.length === 1) {
+    const bloklar = parcalar[0].split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
+    const uygun = bloklar.length >= 2 && bloklar.length <= 4
+      && bloklar.every(b => b.length >= 40 && /[.!?"'…»]\s*$/.test(b));
+    if (uygun) parcalar = bloklar;
+  }
   if (parcalar.length <= 1) {
     // Ayraç yok - tek seçenek olarak ele al (JSON geldiyse temizle)
     const temiz = metin.replace(/^```(?:json)?|```$/gm, '').trim();

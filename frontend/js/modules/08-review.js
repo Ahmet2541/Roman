@@ -406,6 +406,11 @@ function renderVerifyResult(v, onApply, onDiscuss, tur) {
   div.style.cssText = 'margin-top:8px;border:1px solid var(--border);border-left:3px solid ' + renk + ';border-radius:6px;padding:8px;';
   div.innerHTML = `
     <div style="font-size:12.5px;color:${renk};font-weight:600;">${etiket}</div>
+    ${v.function_preservation && v.function_preservation !== 'A' ? `
+      <div style="font-size:11.5px;color:${v.function_preservation === 'C' ? 'var(--danger)' : '#b08d3f'};margin-top:2px;">
+        ${v.function_preservation === 'C' ? '⛔ İŞLEV KAYBI - hata düzeltildi ama metin zayıfladı' : '⚠ İŞLEV DAĞILDI - komşu cümlelere yayılmış'}
+        ${v.function_note ? '<div style="color:var(--text-muted);">' + escapeHtml(v.function_note) + '</div>' : ''}
+      </div>` : ''}
     ${v.note ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${escapeHtml(v.note)}</div>` : ''}
     ${tumBulgular.length ? `<ul style="margin:6px 0 0 16px;padding:0;font-size:12px;">${tumBulgular.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : ''}
     ${(tur || 0) >= 2 ? `<div style="font-size:11.5px;color:#b08d3f;margin-top:6px;padding:6px 8px;background:var(--paper-dim);border-radius:6px;">

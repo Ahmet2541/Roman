@@ -551,8 +551,20 @@ TUTARLILIK: Aynı metin ikinci kez sorulursa AYNI kararı ver. Önceki turda
 sorun görmediğin bir yeri, metin değişmediyse şimdi sorun sayma. Üslup tercihi
 farkını sorun olarak yazma. Metin daha iyi olmuşsa "kabul" de.
 
+İŞLEV KORUNUMU (function_preservation) - AYRI ve ÖNEMLİ bir karar:
+Orijinal cümlenin/paragrafın ÖZEL İŞLEVİ (sadece bilgi vermek değil; sezdirme,
+gerilim kurma, karakter açığa çıkarma gibi) yeni metinde ne oldu?
+  "A" - TAM KORUNDU: aynı işlev yeni metinde de yerine getiriliyor.
+  "B" - DAĞILDI: işlev bu cümlede yok ama komşu cümlelerle birlikte kısmen
+        korunuyor. Yeniden değerlendirilmeli.
+  "C" - KAYBOLDU: yeni metin yalnızca hatayı temizlemiş, özgün işlevi
+        bırakmış. Bu, "hata düzeltildi ama metin zayıfladı" durumudur ve
+        KABUL EDİLEMEZ.
+İşlev tanımlı değilse "A" de - olmayan bir işlevin kaybını iddia etme.
+
 Yanıtın SADECE şu JSON olsun:
-{"verdict": "kabul|duzelt|red", "issues": ["..."], "note": "tek cümle gerekçe"}
+{"verdict": "kabul|duzelt|red", "issues": ["..."], "note": "tek cümle gerekçe",
+ "function_preservation": "A|B|C", "function_note": "tek cümle"}
 Sorun yoksa issues boş liste, verdict "kabul" olsun. Uydurma sorun çıkarma -
 gerçek bir kusur göremiyorsan "kabul" demek DOĞRU cevaptır."""
 

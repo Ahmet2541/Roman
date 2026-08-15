@@ -1012,11 +1012,17 @@ class VerifyRewriteRequest(BaseModel):
 
 class VerifyRewriteResponse(BaseModel):
     """Yazım sonrası kabul kontrolü. hard_issues deterministik (sayı/isim
-    kaybı, yasak kalıp), issues AI değerlendirmesi."""
+    kaybı, yasak kalıp), issues AI değerlendirmesi.
+
+    function_preservation ayrı bir eksendir: "hata düzeltildi ama metin
+    zayıfladı" durumunu yakalar. A tam korundu, B komşulara dağıldı,
+    C kayboldu (tek başına ret sebebi)."""
     verdict: str = "kabul"        # kabul | duzelt | red
     hard_issues: List[str] = []
     issues: List[str] = []
     note: str = ""
+    function_preservation: str = "A"   # A | B | C
+    function_note: str = ""
 
 
 class RetestRequest(BaseModel):
