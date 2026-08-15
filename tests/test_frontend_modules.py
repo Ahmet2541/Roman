@@ -25,8 +25,12 @@ def test_modules_exist_and_are_ordered():
     """Modüller var ve numaralı sırada - yükleme sırası davranışı etkiler."""
     dosyalar = _module_files()
     assert len(dosyalar) >= 8, "modüller bulunamadı"
-    numaralar = [int(f.name.split("-")[0]) for f in dosyalar]
-    assert numaralar == sorted(numaralar) == list(range(1, len(numaralar) + 1))
+    # Ad biçimi: "08-review.js" ya da "08b-checks.js" (aynı numaranın alt
+    # adımı). Sıralama bozulmamalı - yükleme sırası davranışı etkiler.
+    anahtarlar = [f.name.split("-")[0] for f in dosyalar]
+    assert anahtarlar == sorted(anahtarlar), f"sıra bozuk: {anahtarlar}"
+    ana_numaralar = sorted({int(re.match(r"\d+", a).group()) for a in anahtarlar})
+    assert ana_numaralar == list(range(1, len(ana_numaralar) + 1)), f"numara boşluğu: {ana_numaralar}"
 
 
 def test_index_html_loads_every_module_in_order():

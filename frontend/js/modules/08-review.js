@@ -457,14 +457,34 @@ async function renderHealthView(kap) {
         </div>`;
       return;
     }
+    // TÜRE GÖRE GRUPLAMA: hepsi "hata" değil - yavaş istek bir uyarı,
+    // boş yanıt bir kalite sorunu. Karıştırmak önceliği bulanıklaştırıyor.
+    const TUR = {
+      hata:          { ad: '💥 Çökme',        renk: 'var(--danger)', not: 'Arayüz hatası - akış kesildi.' },
+      sunucu_hatasi: { ad: '🔥 Sunucu hatası', renk: 'var(--danger)', not: 'AI ulaşılamadı ya da iç hata (5xx).' },
+      ag_hatasi:     { ad: '📡 Bağlantı',      renk: 'var(--danger)', not: 'Sunucuya hiç ulaşılamadı.' },
+      istek_hatasi:  { ad: '⚠ İstek reddedildi', renk: '#b08d3f',    not: 'Doğrulama/kısıt hatası (4xx).' },
+      yavas_istek:   { ad: '🐢 Yavaş istek',   renk: '#b08d3f',      not: 'Hata değil ama akışı kesiyor.' },
+      bos_yanit:     { ad: '🫥 Boş/eksik yanıt', renk: '#b08d3f',    not: 'AI istenen sayıda seçenek üretmedi.' },
+    };
+    const gruplar = {};
+    hatalar.forEach(h => { (gruplar[h.kind || 'hata'] = gruplar[h.kind || 'hata'] || []).push(h); });
+    const toplamAdet = hatalar.reduce((t, h) => t + (h.count || 1), 0);
     kap.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-        <div style="font-size:13px;"><b>${hatalar.length}</b> farklı hata kaydı</div>
+        <div style="font-size:13px;"><b>${hatalar.length}</b> farklı kayıt · ${toplamAdet} olay</div>
         <button class="btn btn-sm" id="healthClear">Kayıtları temizle</button>
       </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+        ${Object.entries(gruplar).map(([t, liste]) => `
+          <span style="font-size:11.5px;border:1px solid ${(TUR[t] || TUR.hata).renk};color:${(TUR[t] || TUR.hata).renk};
+            border-radius:999px;padding:2px 9px;" title="${(TUR[t] || TUR.hata).not}">
+            ${(TUR[t] || TUR.hata).ad}: ${liste.length}</span>`).join('')}
+      </div>
       ${hatalar.map(h => `
-        <div class="panel" style="margin-top:8px;border-left:3px solid var(--danger);">
-          <div style="font-size:12.5px;font-weight:600;color:var(--danger);">
+        <div class="panel" style="margin-top:8px;border-left:3px solid ${(TUR[h.kind] || TUR.hata).renk};">
+          <div style="font-size:10.5px;color:${(TUR[h.kind] || TUR.hata).renk};letter-spacing:0.3px;">${(TUR[h.kind] || TUR.hata).ad}</div>
+          <div style="font-size:12.5px;font-weight:600;color:${(TUR[h.kind] || TUR.hata).renk};">
             ${escapeHtml(h.message)}${h.count > 1 ? ` <span style="color:var(--text-muted);font-weight:400;">· ${h.count} kez</span>` : ''}
           </div>
           <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">

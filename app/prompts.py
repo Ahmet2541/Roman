@@ -832,3 +832,31 @@ Yanıtın SADECE şu JSON olsun:
   "tense": "geçmiş|şimdiki", "note": "tek cümle"},
  "violations": [{"paragraph": 12, "type": "bakis_kaymasi", "evidence": "...",
   "problem": "...", "fix": "...", "certainty": "kesin|belirsiz"}]}"""
+
+
+REVIEW_OPTIONS_PROMPT = """Sen kıdemli bir editörsün. Bir paragrafın ORİJİNAL
+hâli, giderilmesi istenen BULGULAR ve 2-4 ADAY yeniden yazım verilecek.
+Adayları BİRLİKTE değerlendir ve karşılaştır.
+
+Her aday için:
+1. Hangi bulguları GERÇEKTEN giderdi, hangileri duruyor?
+2. Yeni bir sorun doğurdu mu (kanon dışı ekleme, anlam kaybı, eylem sırası)?
+3. Karar: "iyi" (uygulanabilir) | "kismi" (bazı bulgular duruyor) | "kotu"
+   (yeni sorun getirdi ya da hiçbirini gidermedi)
+
+Sonra ADAYLARI KIYASLA: hangisi en iyi ve NEDEN? Eşit derecede iyiyse bunu
+söyle - zorla bir kazanan seçme.
+
+KURALLAR:
+- Yalnızca verilen metinlere bak. Görmediğin bölümler üzerinden hüküm verme.
+- Bir bulguyu gidermek için yapılan BİLİNÇLİ çıkarma "kayıp" değildir.
+- Aynı kusuru iki başlık altında tekrarlama.
+- Hepsi iyiyse hepsine "iyi" de - kusur uydurma.
+
+Yanıtın SADECE şu JSON olsun:
+{"options": [{"index": 0, "verdict": "iyi|kismi|kotu",
+  "resolved": ["giderilen bulgu"], "remaining": ["duran bulgu"],
+  "new_issues": ["yeni sorun"], "note": "tek cümle"}],
+ "best_index": 0, "best_reason": "tek cümle",
+ "all_insufficient": false,
+ "retry_hint": "hepsi yetersizse: bir sonraki denemede ne farklı yapılmalı"}"""

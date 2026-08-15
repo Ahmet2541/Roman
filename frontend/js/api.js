@@ -24,7 +24,28 @@ async function apiFetch(path, opts = {}) {
     opts.body = JSON.stringify(opts.json);
   }
 
-  const res = await fetch(path, { method: opts.method || 'GET', headers, body: opts.body });
+  // KONTROL AJANI: her isteğin süresi ölçülür ve başarısızlıklar kayda
+  // geçer. Eskiden ajan yalnızca YAKALANMAMIŞ hataları görüyordu; oysa
+  // sorunların çoğu yakalanan hatalar (502 Qwen, 400 doğrulama, ağ kesintisi)
+  // ve bunlar hiçbir yere yazılmıyordu - kullanıcı ekran görüntüsü almak
+  // zorunda kalıyordu.
+  const _baslangic = Date.now();
+  let res;
+  try {
+    res = await fetch(path, { method: opts.method || 'GET', headers, body: opts.body });
+  } catch (agHatasi) {
+    if (typeof reportIssue === 'function') {
+      reportIssue('ag_hatasi', `Sunucuya ulaşılamadı: ${path}`, String(agHatasi && agHatasi.message || agHatasi));
+    }
+    throw new Error('Sunucuya ulaşılamadı. Bağlantını kontrol et; işlem uzun sürüyorsa tekrar dene.');
+  }
+  const _sure = Date.now() - _baslangic;
+  // Yavaş istekler de kaydedilir: hata değil ama akışı kesen bir sorun.
+  // AI uçlarında 45 sn, diğerlerinde 8 sn eşiği.
+  const _esik = path.startsWith('/ai/') ? 45000 : 8000;
+  if (_sure > _esik && typeof reportIssue === 'function') {
+    reportIssue('yavas_istek', `${Math.round(_sure / 1000)} sn sürdü: ${path}`, '');
+  }
 
   if (res.status === 401) {
     clearToken();
@@ -47,6 +68,11 @@ async function apiFetch(path, opts = {}) {
         detail = JSON.stringify(data.detail);
       }
     } catch (e) { /* ignore */ }
+    // Sunucu hatası kayda geçer - hangi uç, hangi kod, ne mesaj
+    if (typeof reportIssue === 'function') {
+      reportIssue(res.status >= 500 ? 'sunucu_hatasi' : 'istek_hatasi',
+                  `${res.status} ${path}: ${detail}`, '');
+    }
     throw new Error(detail);
   }
   if (res.status === 204) return null;

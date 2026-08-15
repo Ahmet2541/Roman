@@ -111,6 +111,7 @@ async function renderWorkshopPrep() {
     </div>
     <div id="wsPrepResult" style="margin-top:10px;"></div>`);
   document.getElementById('workshopClose').addEventListener('click', closeWorkshop);
+  renderKontrolSecici('wsChecksPicker');   // hangi analizler çalışacak
   document.getElementById('wsToReview').addEventListener('click', renderWorkshopReview);
   // TAM TUR: önbelleği yok sayıp analizi TAZELER, süpürme modunu açar ve
   // doğrudan paragraf paragraf düzenlemeye geçer. Tek düğmeyle uçtan uca.
@@ -226,75 +227,47 @@ async function renderWorkshopReview() {
     return;
   }
   workshopState.forceRescan = false;
-  asama(1, 'Editör gözüyle 10 edebî ölçüt');
+
+  // KAYIT TABANLI ÇALIŞTIRMA: her kontrol bağımsız bir birim (bkz.
+  // 08b-checks.js). Yalnızca AÇIK olanlar çalışır; biri hata verirse
+  // diğerleri devam eder ve hangisinin düştüğü raporlanır. Eskiden dört
+  // aşama sabit sırayla ve hep birlikte çalışıyordu.
+  const secili = acikKontroller();
+  const hamSonuclar = {};
+  const dusenler = [];
+  for (let i = 0; i < secili.length; i++) {
+    const k = secili[i];
+    asama(i + 1, k.label.replace(/^\S+\s/, ''), secili.length);
+    try {
+      hamSonuclar[k.id] = await k.run(ch);
+      if (k.onDone) k.onDone(hamSonuclar[k.id]);
+    } catch (err) {
+      dusenler.push(`${k.label}: ${err.message || 'hata'}`);
+    }
+  }
+  workshopState.failedChecks = dusenler;
+
   try {
-    const literary = await api.post(`/ai/literary-review/${ch.id}`, {});
+    // Edebî karne olmadan özet ekranı kurulamaz - zorunlu kontrol
+    const literary = hamSonuclar.literary || { scores: [], fixes: [], average: 0, strongest: '' };
     workshopState.literary = literary;
-    asama(2, 'Okur gözüyle düşürücü noktalar');
-    const reader = await api.post(`/ai/reader-test/${ch.id}`, {});
-    asama(3, 'Anlatıcı ve odak denetimi');
-    // ANLATICI: bakış açısı kayması, bilgi aşımı, mesafe/zaman kayması.
-    // Aynı paragraf anlatıcıya göre tamamen farklı okunur.
-    let voice = { contract: {}, violations: [] };
-    try { voice = await api.post(`/ai/voice-scan/${ch.id}`, {}); }
-    catch (e) { /* başarısız olsa da inceleme sürer */ }
+    const motif = hamSonuclar.motif || { repeats: [], unused_senses: [], summary: '', items: [] };
+    const voice = hamSonuclar.voice || { contract: {}, violations: [] };
+    workshopState.motif = motif;
     workshopState.voice = voice;
 
-    asama(4, 'Paragraf işlevleri ve imge haritası');
-    // PARAGRAF İŞLEVLERİ: her paragrafın sahnedeki görevi ("olay mahalli
-    // tanıtılıyor", "dijital doğum hazırlığı"). Özet + paragraf birlikte
-    // kullanıldığı için isabet yüksek. Elle yazmak zorunda kalmıyorsun;
-    // üzerine yazabilirsin.
-    try {
-      const roller = await api.post(`/ai/paragraph-roles/${ch.id}`, {});
-      (roller.roles || []).forEach(r => {
-        if (!paraPurposes[r.p]) paraPurposes[r.p] = r.role;
-        workshopState.roleKinds = workshopState.roleKinds || {};
-        workshopState.roleKinds[r.p] = r.kind;
-      });
-      saveParaState();
-    } catch (e) { /* işlev çıkarımı başarısız olsa da inceleme sürer */ }
-    let motif = { repeats: [], unused_senses: [], summary: '', items: [] };
-    try { motif = await api.post(`/ai/motif-map/${ch.id}`, {}); }
-    catch (e) { /* imge haritası başarısız olsa da inceleme sürer */ }
-    workshopState.motif = motif;
-
+    // Bulguları topla: her kontrol kendi dönüştürücüsünü kullanır
     const byPara = {};
-    (literary.fixes || []).forEach(f => {
-      if (f.paragraph) (byPara[f.paragraph] = byPara[f.paragraph] || []).push(
-        { kaynak: 'editor', baslik: f.criterion || 'Edebî', sorun: f.problem, oneri: f.fix });
-    });
-    (reader.findings || []).forEach(f => {
-      if (f.paragraph_number) (byPara[f.paragraph_number] = byPara[f.paragraph_number] || []).push(
-        { kaynak: 'okur', baslik: READER_TEST_TYPE_LABELS[f.type] || f.type, sorun: f.reason, oneri: f.suggestion, alinti: f.quote });
-    });
-    // İmge tekrarları da paragraf bulgusu olur: hangi paragrafta tekrar
-    // ettiği belli olduğu için doğrudan oraya bağlanır (leitmotif'ler
-    // bulgu sayılmaz - onlar bilinçli tekrardır).
-    // Sadece KANITLI tekrarlar bulgu olur; "belirsiz" ve "leitmotif" olmaz -
-    // kanıtsız iddiadan öneri üretmek sistemin en tehlikeli davranışı.
-    (motif.repeats || []).filter(x => x.kind === 'tekrar' && (x.confidence ?? 1) >= 0.6).forEach(x => {
-      (x.paragraphs || []).forEach(pn => {
-        (byPara[pn] = byPara[pn] || []).push({
-          kaynak: 'imge',
-          baslik: `İmge tekrarı: ${x.image}`,
-          sorun: `${x.reason || ''} (P${(x.paragraphs || []).join(', P')} aynı imgeyi taşıyor)`,
-          oneri: x.fix || 'Bu paragrafta imgeyi değiştir ya da yeni bir katman ekle.',
+    for (const k of secili) {
+      const ham = hamSonuclar[k.id];
+      if (!ham || !k.toFindings) continue;
+      for (const b of k.toFindings(ham)) {
+        (byPara[b.p] = byPara[b.p] || []).push({
+          kaynak: b.kaynak, baslik: b.baslik, sorun: b.sorun,
+          oneri: b.oneri, alinti: b.alinti,
         });
-      });
-    });
-    // Anlatıcı ihlalleri de paragraf bulgusu olur. "belirsiz" olanlar
-    // bulgu sayılmaz - bilinçli teknik olabilir (çoklu odak bir tercih).
-    (voice.violations || []).filter(v => v.certainty === 'kesin' && v.paragraph).forEach(v => {
-      const vEtiket = {
-        bakis_kaymasi: 'Bakış açısı kayması', bilgi_asimi: 'Anlatıcı bilgi aşımı',
-        mesafe_kaymasi: 'Mesafe kayması', yorum_sizmasi: 'Yorum sızması',
-        zaman_kaymasi: 'Zaman kayması',
-      }[v.type] || v.type;
-      (byPara[v.paragraph] = byPara[v.paragraph] || []).push({
-        kaynak: 'ses', baslik: vEtiket, sorun: v.problem, oneri: v.fix, alinti: v.evidence,
-      });
-    });
+      }
+    }
     workshopState.findings = byPara;
     workshopState.order = Object.keys(byPara).map(Number).sort((a, b) => a - b);
     workshopState.idx = 0;
@@ -719,16 +692,30 @@ async function workshopFix(chapter, num, issue) {
     // parmakla sağa/sola geçilen tek kart daha doğal. Noktalar hangi
     // seçenekte olduğunu gösterir, klavyeyle de gezilebilir.
     if (!secenekler.length) {
+      // SESSİZ KALİTE SORUNU: hata değil ama akışı kesiyor - ajana bildir
+      reportIssue('bos_yanit', `P${num} için AI boş yanıt döndürdü`, (result.generated_text || '').slice(0, 300));
       box.innerHTML = '<div class="error-text" style="font-size:12.5px;">AI boş yanıt döndürdü. Tekrar dene ya da "💬 Konuş" ile yönlendir.</div>';
       return;
     }
     const eskiMetin = para ? para.text : '';
+    // TEK SEÇENEK UYARISI: model üç seçenek üretmediyse bunu SÖYLE. Eskiden
+    // sessizce "SEÇENEK 1/1" görünüyordu ve kullanıcı kaydırma düğmelerinin
+    // bozulduğunu sanıyordu.
+    const tekSecenek = secenekler.length < 2;
+    if (tekSecenek) reportIssue('bos_yanit', `P${num}: AI ${secenekler.length} seçenek döndürdü (3 istenmişti)`, '');
+    // Orijinalle aynı gelen seçenek varsa da uyar (fark vurgusu boş çıkar)
+    const ayniOlanlar = secenekler.filter(o =>
+      o.text.replace(/\s+/g, ' ').trim() === (eskiMetin || '').replace(/\s+/g, ' ').trim()).length;
     // ÜRETİLDİĞİ ANDA DENETİM: her seçenek için ücretsiz/anlık kontrol
     // (sayı-isim kaybı) hemen çalışır ve karta rozet olarak basılır. Böylece
     // "uygula -> kontrol -> geri dön -> yeniden yaz" döngüsüne girmeden
     // hangi seçeneğin temiz olduğunu görüp doğrudan seçersin.
     secenekler.forEach(o => { o.quick = quickFactCheck(eskiMetin, o.text); });
     box.innerHTML = `
+      ${tekSecenek || ayniOlanlar ? `<div style="font-size:11.5px;color:#b08d3f;margin-bottom:6px;padding:5px 8px;background:var(--paper-dim);border-radius:6px;">
+        ${tekSecenek ? '⚠ AI tek seçenek döndürdü (üç istenmişti). ' : ''}${ayniOlanlar ? `⚠ ${ayniOlanlar} seçenek orijinalle AYNI - fark vurgusu boş görünür. ` : ''}
+        <b>🔄 Farklı 3 öneri getir</b> ile tekrar dene ya da <b>💬 Konuş</b> ile yönlendir.
+      </div>` : ''}
       <div class="option-swiper" tabindex="0">
         ${secenekler.map((o, i) => `
           <div class="option-card" data-idx="${i}">
@@ -750,10 +737,60 @@ async function workshopFix(chapter, num, issue) {
         ${secenekler.map((_, i) => `<span class="option-dot${i === 0 ? ' active' : ''}" data-idx="${i}"></span>`).join('')}
         <span style="font-size:11px;color:var(--text-muted);margin-left:6px;">← kaydır →</span>
       </div>
+      <div id="wsOptReview"></div>
       <button class="btn btn-sm" id="wsDeepAll" style="width:100%;margin-top:6px;font-size:11.5px;" title="Üç seçeneği de işlev, süreklilik ve eylem sırası açısından denetler">🔎 Üçünü de derin kontrol et</button>
       <button class="btn btn-sm" id="wsMoreOptions" style="width:100%;margin-top:6px;font-size:11.5px;">🔄 Farklı 3 öneri getir</button>
       <div id="wsPhraseBox"></div>`;
     wireOptionSwiper(box);
+
+    // BİRLİKTE DEĞERLENDİRME (otomatik, TEK istek): adaylar kıyaslanır -
+    // hangisi bulguları gerçekten giderdi, hangisi yeni sorun getirdi.
+    // Her adayı ayrı denetlemekten ucuz ve daha isabetli.
+    if (secenekler.length > 1 && kayitlar.length) {
+      (async () => {
+        const kutu = el('wsOptReview');
+        kutu.innerHTML = '<div style="font-size:11.5px;color:var(--text-muted);margin-top:6px;">Adaylar bulgulara karşı kıyaslanıyor…</div>';
+        try {
+          const rv = await api.post('/ai/review-options', {
+            original: eskiMetin,
+            options: secenekler.map(o => o.text),
+            findings: kayitlar.map(k => `${k.baslik}: ${k.sorun || ''}`),
+            purpose: effectiveParaPurpose(num).text,
+          });
+          const simge = { iyi: '✅', kismi: '🟡', kotu: '❌' };
+          const renk = { iyi: '#3f7a4f', kismi: '#b08d3f', kotu: 'var(--danger)' };
+          // Rozetleri güncelle + en iyiyi işaretle
+          (rv.options || []).forEach(o => {
+            const rozet = box.querySelector(`.opt-badge[data-idx="${o.index}"]`);
+            if (rozet) {
+              rozet.textContent = `${simge[o.verdict]} ${o.verdict}`;
+              rozet.style.color = renk[o.verdict];
+            }
+            const kart = box.querySelector(`.option-card[data-idx="${o.index}"]`);
+            if (kart && o.index === rv.best_index) kart.style.borderColor = '#3f7a4f';
+            const kutucuk = box.querySelector(`.opt-deep[data-idx="${o.index}"]`);
+            if (kutucuk) kutucuk.innerHTML = `
+              <div style="font-size:11px;color:var(--text-muted);margin-top:6px;border-top:1px dashed var(--border);padding-top:4px;">
+                ${o.resolved.length ? `<div style="color:#3f7a4f;">✓ giderdi: ${o.resolved.map(escapeHtml).join('; ')}</div>` : ''}
+                ${o.remaining.length ? `<div style="color:#b08d3f;">◌ duruyor: ${o.remaining.map(escapeHtml).join('; ')}</div>` : ''}
+                ${o.new_issues.length ? `<div style="color:var(--danger);">⚠ yeni: ${o.new_issues.map(escapeHtml).join('; ')}</div>` : ''}
+                ${o.note ? `<div>${escapeHtml(o.note)}</div>` : ''}
+              </div>`;
+          });
+          kutu.innerHTML = rv.all_insufficient
+            ? `<div style="font-size:12px;color:var(--danger);margin-top:6px;padding:6px 8px;border:1px solid var(--danger);border-radius:6px;">
+                 ⚠ <b>Hiçbir aday yeterli değil.</b>${rv.retry_hint ? ' ' + escapeHtml(rv.retry_hint) : ''}
+                 <div style="margin-top:6px;">Kararı sen ver: <b>🔄 Farklı 3 öneri</b> ile yeniden üret,
+                 <b>💬 Konuş</b> ile yönlendir ya da yine de bir adayı uygula.</div>
+               </div>`
+            : `<div style="font-size:12px;color:#3f7a4f;margin-top:6px;">
+                 ✓ Önerilen: <b>SEÇENEK ${(rv.best_index ?? 0) + 1}</b>${rv.best_reason ? ' — ' + escapeHtml(rv.best_reason) : ''}
+               </div>`;
+        } catch (err) {
+          kutu.innerHTML = '';   // değerlendirme başarısızsa sessiz - adaylar zaten görünüyor
+        }
+      })();
+    }
 
     // TOPLU DERİN KONTROL: üçünü birden denetler, sonuçları kartlara yazar.
     // Tek tek uygulayıp geri dönmek yerine hepsini önden görürsün.
@@ -1012,7 +1049,26 @@ function parseOptionBlocks(raw) {
   // "I" ile küçük "ı" case-insensitive EŞLEŞMEZ - model doğal biçimde
   // "###Yaklaşım:" yazınca ayrıştırma tamamen düşüyor ve "3 öneri getir"
   // çalışmıyordu. Artık başlık metni ne olursa olsun bölme çalışır.
-  const parcalar = metin.split(/^\s*#{2,}\s*/m).filter(x => x.trim());
+  // AYRAÇ ESNEKLİĞİ: model her seferinde aynı biçimi kullanmıyor. Sadece
+  // "###" aranınca "SEÇENEK 1:", numaralı liste ya da "---" biçimlerinde
+  // üç seçenek TEK bloğa yapışıyor ve ekranda "1/1" görünüyordu (fark
+  // vurgulaması da anlamsızlaşıyordu). Tanınan biçimler:
+  //   ### başlık        ## başlık
+  //   SEÇENEK 1 / SEÇENEK 1:        1. / 1)          **1)** / **Seçenek 1**
+  //   --- (yatay çizgi)
+  const AYRAC = new RegExp(
+    '^\\s*(?:' +
+      '#{2,}\\s*' +                                   // ### başlık
+      '|-{3,}\\s*$' +                                  // --- ayraç
+      '|\\**\\s*(?:SEÇENEK|SECENEK|Seçenek|Secenek|ALTERNATİF|Alternatif)\\s*\\d+\\s*\\**\\s*:?\\s*' +
+      '|\\**\\s*\\d+\\s*[.)]\\s*\\**\\s*' +          // 1. / 1) / **1)**
+    ')', 'm');
+  // split() yakalama grubu içermemeli ve ilk parça kaybolmamalı:
+  // ayraçları satır başına işaretleyip öyle böleriz.
+  const ISARET = '\u0000';
+  const isaretli = metin.split('\n').map(satir =>
+    AYRAC.test(satir) ? ISARET + satir.replace(AYRAC, '') : satir).join('\n');
+  const parcalar = isaretli.split(ISARET).filter(x => x && x.trim());
   if (parcalar.length <= 1) {
     // Ayraç yok - tek seçenek olarak ele al (JSON geldiyse temizle)
     const temiz = metin.replace(/^```(?:json)?|```$/gm, '').trim();
@@ -1025,9 +1081,19 @@ function parseOptionBlocks(raw) {
   }
   return parcalar.map(p => {
     const satirlar = p.split('\n');
+    // Ayraç satırında metin de varsa ("1. Metin A." ya da "--- " sonrası),
+    // ilk satır BAŞLIK değil METİNDİR - başlığı boş bırakıp metni koru.
+    const ilk = satirlar[0].trim();
+    const baslikGibi = ilk.length <= 60 && !/[.!?]\s*$/.test(ilk);
+    if (!baslikGibi) {
+      return { text: p.trim(), approach: '', reason: '' };
+    }
     // Başlık satırı: "YAKLAŞIM: mikro detay | NEDEN: gerekçe" ya da sadece
     // "mikro detay". Başındaki etiket kelimesi (yaklaşım/approach) atılır.
-    let bas = satirlar[0].trim().replace(/^(yakla[şs][iı]m|approach)\s*:?\s*/i, '');
+    let bas = satirlar[0].trim()
+      .replace(/\*+/g, '')                                   // **kalın** işaretleri
+      .replace(/^(yakla[şs][iı]m|approach)\s*:?\s*/i, '')
+      .trim();
     const m = bas.match(/^(.*?)\s*\|\s*(?:NEDEN|WHY)\s*:?\s*(.*)$/i);
     const approach = (m ? m[1] : bas).trim().slice(0, 40);
     const reason = (m ? m[2] : '').trim().slice(0, 160);

@@ -1285,3 +1285,29 @@ class VoiceScanResponse(BaseModel):
     kayması, yorum sızması, zaman kayması. Kanıtsız bulgu alınmaz."""
     contract: VoiceContract = VoiceContract()
     violations: List[VoiceViolation] = []
+
+
+class ReviewOptionsRequest(BaseModel):
+    original: str
+    options: List[str] = []
+    findings: List[str] = []
+    purpose: str = ""
+
+
+class OptionVerdict(BaseModel):
+    index: int
+    verdict: str = "kismi"        # iyi | kismi | kotu
+    resolved: List[str] = []
+    remaining: List[str] = []
+    new_issues: List[str] = []
+    note: str = ""
+
+
+class ReviewOptionsResponse(BaseModel):
+    """Adayları BİRLİKTE değerlendirme: hangisi bulguları en iyi giderdi.
+    Otomatik yeniden üretim yok - karar kullanıcının."""
+    options: List[OptionVerdict] = []
+    best_index: Optional[int] = None
+    best_reason: str = ""
+    all_insufficient: bool = False
+    retry_hint: str = ""

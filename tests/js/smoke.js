@@ -66,6 +66,28 @@ test('parseOptionBlocks üç biçimi de ayrıştırır', () => {
   if (parseOptionBlocks('').length !== 0) throw new Error('boş girdi boş dönmeli');
 });
 
+// --- 3b. Ayraç esnekliği: model her seferinde aynı biçimi kullanmıyor ---
+test('parseOptionBlocks tüm ayraç biçimlerini tanır', () => {
+  const bicimler = {
+    'diyez': '### a | NEDEN: x\nMetin A.\n### b\nMetin B.\n### c\nMetin C.',
+    'SEÇENEK n': 'SEÇENEK 1: a\nMetin A.\n\nSEÇENEK 2: b\nMetin B.\n\nSEÇENEK 3: c\nMetin C.',
+    'numaralı': '1. Metin A cümlesi.\n\n2. Metin B cümlesi.\n\n3. Metin C cümlesi.',
+    'yatay çizgi': 'Metin A.\n\n---\n\nMetin B.\n\n---\n\nMetin C.',
+  };
+  for (const [ad, v] of Object.entries(bicimler)) {
+    const r = parseOptionBlocks(v);
+    if (r.length !== 3) throw new Error(`${ad}: beklenen 3, gelen ${r.length}`);
+    if (!r[0].text.includes('Metin A')) throw new Error(`${ad}: ilk parça kayboldu`);
+    if (!r[2].text.includes('Metin C')) throw new Error(`${ad}: son parça kayboldu`);
+  }
+  // Kalın işaretleri başlıktan temizlenmeli
+  const k = parseOptionBlocks('**1) Mikro detay**\nMetin A.\n\n**2) Ses**\nMetin B.');
+  if (k.length !== 2) throw new Error('kalın başlık: ' + k.length);
+  if (k[0].approach.includes('*')) throw new Error('kalın işareti temizlenmedi: ' + k[0].approach);
+  // Ayraçsız düz metin TEK seçenek olarak korunur (kaybolmaz)
+  if (parseOptionBlocks('Düz bir paragraf.').length !== 1) throw new Error('düz metin kayboldu');
+});
+
 // --- 4. Deterministik kontrol: cümle başı kelimeler isim SAYILMAZ ---
 test('quickFactCheck cümle başı kelimeyi isim saymaz', () => {
   global.window.__canonNames = ['Vicdan'];
@@ -96,4 +118,49 @@ test('highlightDiff değişen öbeği işaretler', () => {
 // Başlangıç hataları yalnızca BİLGİ - gerçek tarayıcıda DOM var olduğu
 // için bunların çoğu orada oluşmaz. Modül YÜKLEME hataları ise gerçek.
 sonuc.baslangic_uyarilari = baslangicHatalari.slice(0, 5);
+// --- 7. Kontrol kayıt defteri: her kontrol bağımsız açılıp kapanabilir ---
+test('kontroller bağımsız açılıp kapanır', () => {
+  const KONTROLLER = global.KONTROLLER || global.window.KONTROLLER;
+  const { kontrolAcikMi, kontrolAyarla, acikKontroller } = global.window;
+  if (!Array.isArray(KONTROLLER) || KONTROLLER.length < 4) throw new Error('kayıt defteri eksik');
+  for (const k of KONTROLLER) {
+    for (const alan of ['id', 'label', 'hint', 'cost', 'run']) {
+      if (!k[alan]) throw new Error(`${k.id || '?'}: ${alan} eksik`);
+    }
+    if (typeof k.run !== 'function') throw new Error(`${k.id}: run fonksiyon değil`);
+  }
+  // Zorunlu kontrol kapatılamaz
+  const zorunlu = KONTROLLER.find(k => k.zorunlu);
+  if (zorunlu) {
+    kontrolAyarla(zorunlu.id, false);
+    if (!kontrolAcikMi(zorunlu.id)) throw new Error('zorunlu kontrol kapatılabildi');
+  }
+  // İsteğe bağlı kontrol kapanır ve açık listeden düşer
+  const istege = KONTROLLER.find(k => !k.zorunlu);
+  kontrolAyarla(istege.id, false);
+  if (kontrolAcikMi(istege.id)) throw new Error('kapatılan kontrol hâlâ açık');
+  if (acikKontroller().some(k => k.id === istege.id)) throw new Error('kapalı kontrol listede');
+  kontrolAyarla(istege.id, true);
+  if (!kontrolAcikMi(istege.id)) throw new Error('tekrar açılamadı');
+});
+
+// --- 8. Bulgu dönüştürücüler: kanıtsız/belirsiz bulgu ÜRETMEZ ---
+test('toFindings kanıtsız bulguyu elemeli', () => {
+  const KONTROLLER = global.KONTROLLER || global.window.KONTROLLER;
+  const ses = KONTROLLER.find(k => k.id === 'voice');
+  const b = ses.toFindings({ violations: [
+    { paragraph: 2, type: 'bakis_kaymasi', certainty: 'kesin', problem: 'x' },
+    { paragraph: 3, type: 'bakis_kaymasi', certainty: 'belirsiz', problem: 'y' },
+  ]});
+  if (b.length !== 1) throw new Error('belirsiz ihlal bulgu sayıldı: ' + b.length);
+
+  const imge = KONTROLLER.find(k => k.id === 'motif');
+  const m = imge.toFindings({ repeats: [
+    { image: 'a', kind: 'tekrar', confidence: 0.9, paragraphs: [1, 5] },
+    { image: 'b', kind: 'tekrar', confidence: 0.3, paragraphs: [7] },   // düşük güven
+    { image: 'c', kind: 'leitmotif', confidence: 1, paragraphs: [9] },  // bilinçli
+  ]});
+  if (m.length !== 2) throw new Error('güven/leitmotif filtresi çalışmadı: ' + m.length);
+});
+
 console.log(JSON.stringify(sonuc, null, 1));

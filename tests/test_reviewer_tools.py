@@ -1021,3 +1021,50 @@ def test_verify_rejects_identical_text(client, headers):
     assert d["verdict"] == "duzelt"
     assert "DEĞİŞMEMİŞ" in d["hard_issues"][0]
     assert "yeniden üretmeyi" in d["note"]
+
+
+def test_review_options_compares_candidates(client, headers):
+    """ADAYLARI BİRLİKTE DEĞERLENDİRME: üç seçenek tek istekte kıyaslanır -
+    hangisi bulguları giderdi, hangisi yeni sorun getirdi, hangisi en iyi.
+    OTOMATİK yeniden üretim YOK: kontrol fazla katı davranabiliyor ve
+    otomatik ret, kullanıcıyı sistemin katılığına hapseden döngü kurar."""
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "options": [
+                {"index": 0, "verdict": "iyi", "resolved": ["Klişe"], "remaining": [], "note": "Temiz."},
+                {"index": 1, "verdict": "kismi", "resolved": [], "remaining": ["Alt metin"], "note": "Yarım."},
+                {"index": 2, "verdict": "kotu", "new_issues": ["Kanon dışı geçmiş"], "note": "Uydurma."},
+                {"index": 9, "verdict": "iyi"},          # geçersiz indeks - yok sayılmalı
+            ],
+            "best_index": 0, "best_reason": "Bulguyu gideren tek aday.",
+            "all_insufficient": False,
+        })
+        r = client.post("/ai/review-options", json={
+            "original": "Sıradan bir mahalle.",
+            "options": ["Toz asılı kaldı.", "Mahalle sessizdi.", "Babası onu dövmüştü."],
+            "findings": ["Klişe: yargı sıfatları", "Alt metin: her şey söyleniyor"],
+        }, headers=headers)
+    d = r.json()
+    assert len(d["options"]) == 3, "geçersiz indeks ayıklanmalı"
+    assert d["options"][0]["verdict"] == "iyi" and d["options"][2]["verdict"] == "kotu"
+    assert d["best_index"] == 0
+    assert d["all_insufficient"] is False
+
+    # HEPSİ kötüyse bu AÇIKÇA bildirilir (ama otomatik yeniden üretim olmaz)
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "options": [{"index": i, "verdict": "kotu"} for i in range(2)],
+            "retry_hint": "Mikro detaya yaslan, yargı sıfatı kullanma.",
+        })
+        r = client.post("/ai/review-options", json={
+            "original": "x", "options": ["a", "b"], "findings": ["Klişe"],
+        }, headers=headers)
+    d = r.json()
+    assert d["all_insufficient"] is True
+    assert "Mikro detaya" in d["retry_hint"]
+
+    # Aday yoksa Qwen'e hiç gidilmez
+    with patch("app.qwen_client.get_client") as mc:
+        r = client.post("/ai/review-options", json={"original": "x", "options": []}, headers=headers)
+        mc.assert_not_called()
+    assert r.json()["all_insufficient"] is True

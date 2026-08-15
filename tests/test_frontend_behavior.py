@@ -107,3 +107,29 @@ def test_client_error_agent_records_and_deduplicates(client, headers):
 
     client.delete("/diagnostics/client-errors", headers=headers)
     assert client.get("/diagnostics/client-errors", headers=headers).json() == []
+
+
+def test_agent_records_non_crash_issues_by_kind(client, headers):
+    """AJAN YALNIZCA ÇÖKMELERİ DEĞİL, akışı bozan HER ŞEYİ izler: sunucu
+    hatası, ağ kesintisi, yavaş istek, AI'nın boş/eksik yanıtı. Bunlar
+    eskiden hiçbir yere yazılmıyordu - kullanıcı ekran görüntüsü almak
+    zorunda kalıyordu."""
+    turler = ["sunucu_hatasi", "ag_hatasi", "yavas_istek", "bos_yanit", "istek_hatasi"]
+    for t in turler:
+        r = client.post("/diagnostics/client-error", json={
+            "message": f"{t} örneği", "kind": t, "view": "denetim",
+        }, headers=headers)
+        assert r.status_code == 204
+
+    kayitlar = client.get("/diagnostics/client-errors", headers=headers).json()
+    assert {k["kind"] for k in kayitlar} == set(turler)
+
+    # Geçersiz tür güvenli tarafa çekilir
+    client.post("/diagnostics/client-error", json={
+        "message": "uydurma tür", "kind": "saçma_tür",
+    }, headers=headers)
+    uydurma = next(k for k in client.get("/diagnostics/client-errors", headers=headers).json()
+                   if k["message"] == "uydurma tür")
+    assert uydurma["kind"] == "hata"
+
+    client.delete("/diagnostics/client-errors", headers=headers)

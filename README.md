@@ -306,6 +306,33 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   düzeltilmişse `✓5`). Puan bulgu sayısı ve ağırlığından türetilir;
   "tercih" sınıfı teşhisler puanı düşürmez. Hepsi inceleme önbelleğinden
   okunur - ek AI isteği yok, sayfa açılışında anında görünür.
+- **🩺 Kontrol Ajanı (Sistem Sağlığı)**: arayüzde bir şey ters gittiğinde
+  sistem KENDİ bildirir - kullanıcının ekran görüntüsü alması gerekmez.
+  İzlenen türler: 💥 çökme (yakalanmamış JS hatası), 🔥 sunucu hatası
+  (5xx - AI ulaşılamadı), 📡 bağlantı kesintisi, ⚠ istek reddedildi (4xx),
+  🐢 yavaş istek (AI uçlarında 45 sn, diğerlerinde 8 sn üstü - hata değil
+  ama akışı keser), 🫥 boş/eksik yanıt (AI istenen sayıda seçenek üretmedi).
+  Her kayıtta hangi EKRAN ve hangi EYLEM olduğu durur; tekrarlar tek
+  kayıtta birleşir ("3 kez"). Denetim > Sistem Sağlığı'nda türe göre
+  gruplanmış görünür. Metin içeriği gönderilmez.
+- **⚖ Adaylar BİRLİKTE değerlendirilir**: üç seçenek üretildiği an tek
+  istekte kıyaslanır - hangisi bulguları gerçekten giderdi, hangisi yeni
+  sorun getirdi, hangisi en iyi. Her kartta rozet (✅ iyi / 🟡 kısmi /
+  ❌ kötü) ve döküm (✓ giderdi / ◌ duruyor / ⚠ yeni sorun); en iyi seçeneğin
+  çerçevesi yeşile döner. Her adayı ayrı denetlemekten UCUZ ve daha
+  isabetli - model ancak birlikte gördüğünde kıyaslayabilir.
+  **Otomatik yeniden üretim YOK** (bilinçli): kontrol sık sık fazla katı
+  davranıyor; otomatik ret, kullanıcıyı sistemin katılığına hapseden bir
+  döngü kurar. Hepsi yetersizse sistem bunu açıkça söyler ve ne yapılması
+  gerektiğini önerir - kararı yazar verir.
+- **⚙ Kontroller tek tek açılıp kapanabilir**: analiz aşamaları (edebî
+  ölçütler, okur gözü, anlatıcı/odak, paragraf işlevleri, imge haritası)
+  bağımsız birimlerdir. Hazırlık ekranındaki "⚙ Çalışacak kontroller"den
+  seçilir; kapalı olan HİÇ çalışmaz, bulgusu da olmaz. Her birinin maliyet
+  göstergesi var (ucuz/orta/pahalı). Diyalogsuz bir bölümde anlatıcı
+  denetimini kapatmak gibi. Bir kontrol hata verirse diğerleri devam eder
+  ve özet ekranında "şu kontroller çalışamadı" uyarısı çıkar - sessizce
+  eksik analiz olmaz.
 - **🔍 Bölüm İncelemesi (birleşik denetim)**: iki aşama tek akışta.
   (1) EDİTÖR gözü - 10 edebî ölçüt karnesi, (2) OKUR gözü - düşürücü
   noktalar. Sonra bulgular PARAGRAF PARAGRAF birleştirilir: bir paragraf
@@ -455,11 +482,20 @@ app/
     relationships.py  - Karakter ilişki haritası
     progressions.py   - Gelişim çizelgesi (varlıkların bölüm bazlı kronolojik notları)
     chapters.py       - Bölüm/Paragraf CRUD + arama + içe aktarma
-    ai.py             - /ai/assist, /ai/chat (kapsam + geçmiş budama),
+    ai.py             - 24 AI ucu. Başlıcaları:
+                        /ai/assist, /ai/chat (kapsam + geçmiş budama),
                         /ai/context-preview (boyut dökümüyle),
                         /ai/approve-suggestions, /ai/approve-entity-update,
                         /ai/full-scan, /ai/reader-test/{id} (Okur Testi),
-                        /ai/paragraph-entities (K/M/N balonları)
+                        /ai/paragraph-entities (K/M/N balonları),
+                        /ai/literary-review, /ai/voice-scan (anlatıcı),
+                        /ai/motif-map, /ai/paragraph-roles (işlevler),
+                        /ai/fuse-diagnoses (teşhis füzyonu),
+                        /ai/review-options (adayları BİRLİKTE değerlendirme),
+                        /ai/verify-rewrite, /ai/retest-paragraph,
+                        /ai/tradeoff (kazanç-kayıp), /ai/necessity (silme testi),
+                        /ai/structure-scan, /ai/arc-review (tur değerlendirmesi),
+                        /ai/knowledge-scan, /ai/micro-edit, /ai/plan-from-text
     universes.py      - Evren (seri) yönetimi - kitaplar arası paylaşılan dünya
     entity_history.py - Varlık değişiklik geçmişi + anlık görüntüden geri yükleme
     factions.py       - Gruplar & Kurumlar: üyelik + rol yönetimi
@@ -485,6 +521,11 @@ frontend/
     05-scans.js       - tutarlılık ve üslup taramaları
     06-matrix.js      - Plan Matrisi: ızgara, hücreler, fihrist eşleştirme
     07-tools.js       - gruplar, sesli okuma, isim vurgulama, zaman çizelgesi
+    07b-checks.js     - KONTROL KAYIT DEFTERİ: her analiz bağımsız bir birim
+                        (id, etiket, maliyet, çalıştırıcı, bulgu dönüştürücü).
+                        Tek tek açılıp kapanabilir; kapalı olan hiç çalışmaz.
+                        Biri hata verirse diğerleri devam eder ve hangisinin
+                        düştüğü raporlanır
     08-review.js      - Denetim menüsü, bölüm incelemesi, teşhis füzyonu
     09-workshop.js    - Bölüm Atölyesi: hazırlık, derin analiz, paragraf düzenleme
     10-knowledge.js   - Bilgi/İfşa Haritası, tur değerlendirmesi, yapısal akış
@@ -600,8 +641,15 @@ Kurallar:
 
 ## Testler
 
-**185 test** (20 dosya) - AI çağrıları `unittest.mock` ile sahte Qwen
+**187 test** (20 dosya) - AI çağrıları `unittest.mock` ile sahte Qwen
 yanıtlarıyla çalışır, gerçek bir `DASHSCOPE_API_KEY` gerekmez.
+
+Frontend tarafında iki katman test var: **modül bütünlüğü** (her modül tek
+başına geçerli mi, index.html hepsini doğru sırada yüklüyor mu, yinelenen
+tanım var mı) ve **davranış** (modüller Node'da minimal bir DOM taklidiyle
+yüklenip kritik fonksiyonlar çalıştırılır - tanımsız değişken, olmayan
+elemana yazma, ayrıştırma hataları yakalanır). Ayrıca arayüzün çağırdığı
+her AI ucunun backend'de var olduğu doğrulanır.
 
 Kapsam: evren/kitap paylaşımı, migration'lar, sections merge ve seçici
 gönderim, alias tespiti (Türkçe İ/ı dahil), mekan hiyerarşisi, kural
@@ -651,17 +699,20 @@ progression'da yanlış chapter_number) otomatik yakalar.
 
 **Teknik borç:**
 
-- `qwen_client.py` çok büyüdü (4.400+ satır) - bölünmesi gerekiyor.
-  (`app.js` bölündü: `frontend/js/modules/`.)
+- `qwen_client.py` 4.474 → 2.679 satıra indi (yönergeler `prompts.py`'ye,
+  bağlam katmanları `ai_context.py`'ye taşındı). Kalan kısım AI çağıran
+  analiz/üretim fonksiyonları; bunları ayırmak testlerin sahte Qwen
+  bağlantısını (`patch("app.qwen_client.get_client")`) kırar, o yüzden
+  bilinçli olarak ertelendi.
 - Frontend davranış testi VAR ama dar kapsamlı: modüller Node'da minimal
   bir DOM taklidiyle yüklenip kritik fonksiyonlar çalıştırılıyor
   (tanımsız değişken, olmayan elemana yazma, ayrıştırma hataları
   yakalanıyor). Tam kullanıcı akışları (tıkla → istek → ekran güncellensin)
   hâlâ test edilmiyor.
-- **🩺 Hata ajanı**: tarayıcıda oluşan hatalar otomatik olarak sunucuya
-  bildirilir ve Denetim > Sistem Sağlığı'nda görünür - kullanıcının ekran
-  görüntüsü alması gerekmez. Metin içeriği gönderilmez, yalnızca hata
-  mesajı + bağlam.
+- Tam kullanıcı akışı testi yok (tıkla → istek → ekran güncellensin).
+  Mevcut davranış testleri fonksiyon seviyesinde çalışıyor.
+- Maliyet ölçümü yok: bir paragrafı elden geçirmenin kaç AI çağrısına mal
+  olduğu bilinmiyor (bilinçli olarak ertelendi - hata yakalamıyor).
 - CORS deploy'da `*` bırakılmamalı; rate limiter bellek-içi (tek worker
   varsayar); `logs/app.log` rotasyonsuz; `datetime.utcnow()` uyarıları.
 - Railway'de SQLite kalıcı DEĞİLDİR - PostgreSQL'e geçilmeli (bkz. DEPLOY.md).

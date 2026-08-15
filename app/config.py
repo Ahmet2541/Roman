@@ -8,6 +8,12 @@ class Settings(BaseSettings):
     dashscope_api_key: str = ""
     dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     qwen_model: str = "qwen-plus"
+    # AI isteklerinde ZAMAN AŞIMI ve YENİDEN DENEME. Eskiden ikisi de yoktu:
+    # ağ tıkandığında istek sonsuza kadar bekliyor, tarayıcı "Failed to
+    # fetch" veriyor ve kullanıcı neyin olduğunu anlamıyordu. Uzun bölüm
+    # analizleri için cömert bir sınır (180 sn) seçildi.
+    qwen_timeout_seconds: float = 180.0
+    qwen_max_retries: int = 2
 
     db_encryption_key: str = ""
 

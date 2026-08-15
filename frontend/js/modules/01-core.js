@@ -135,11 +135,32 @@ function stripMarkdownArtifacts(str) {
 let __lastAction = '';
 function noteAction(ad) { __lastAction = String(ad || '').slice(0, 120); }
 
+// KAYIT TÜRLERİ: sadece çökme değil, akışı bozan her şey.
+//   hata          - yakalanmamış JS hatası (çökme)
+//   sunucu_hatasi - 5xx (Qwen ulaşılamadı, iç hata)
+//   istek_hatasi  - 4xx (doğrulama, bulunamadı, kısıt)
+//   ag_hatasi     - sunucuya hiç ulaşılamadı
+//   yavas_istek   - eşiği aşan süre (hata değil ama akışı keser)
+//   bos_yanit     - AI boş/tek/aynı yanıt döndürdü (sessiz kalite sorunu)
+async function reportIssue(tur, mesaj, detay) {
+  try {
+    await api.post('/diagnostics/client-error', {
+      message: String(mesaj || '').slice(0, 500),
+      stack: String(detay || '').slice(0, 2000),
+      kind: tur || 'hata',
+      view: (typeof currentView !== 'undefined' ? currentView : '') || '',
+      action: __lastAction,
+      url: (window.location && window.location.hash) || '',
+    });
+  } catch (e) { /* bildirim başarısızsa sessiz kal - hata döngüsü kurma */ }
+}
+
 async function reportClientError(message, stack) {
   try {
     await api.post('/diagnostics/client-error', {
       message: String(message || '').slice(0, 500),
       stack: String(stack || '').slice(0, 2000),
+      kind: 'hata',
       view: (typeof currentView !== 'undefined' ? currentView : '') || '',
       action: __lastAction,
       url: (window.location && window.location.hash) || '',
