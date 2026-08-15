@@ -100,12 +100,26 @@ async function renderWorkshopPrep() {
       if (!c) return '';
       const gun = Math.floor((Date.now() - c.at) / 86400000);
       const bulgu = Object.keys(c.findings || {}).length;
+      const cozulen = (() => {
+        try {
+          const st = JSON.parse(localStorage.getItem(`roman_para_state_${ch.id}`) || '{}');
+          return (st.resolved || []).length;
+        } catch (e) { return 0; }
+      })();
       return `<div style="font-size:12px;color:var(--text-muted);background:var(--paper-dim);padding:6px 8px;border-radius:6px;margin-top:10px;">
-        📦 Kayıtlı inceleme var (${gun > 0 ? gun + ' gün önce' : 'bugün'}) · ${bulgu} paragrafta bulgu ·
-        edebî ortalama ${c.literary?.average ?? '?'}/5 — analiz baştan çalışmayacak.</div>`;
+        📦 <b>Kayıtlı inceleme:</b> ${gun > 0 ? gun + ' gün önce' : 'bugün'} · ${bulgu} paragrafta bulgu ·
+        ${cozulen} düzeltildi · edebî ortalama ${c.literary?.average ?? '?'}/5
+        <div style="margin-top:2px;">Metni düzenlediysen bulgular eskimiş olabilir - o zaman
+        <b>🔄 Yeniden incele</b> daha doğru sonuç verir.</div></div>`;
     })()}
     <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
-      <button class="btn btn-primary" id="wsFullPass" style="flex:1;min-width:190px;" title="${loadReviewCache(ch.id) ? 'Kayıtlı inceleme kullanılır - analiz baştan çalışmaz' : 'Analiz çalıştırılır, sonra paragraf paragraf düzenleme'}">${loadReviewCache(ch.id) ? '▶ Düzenlemeye devam et' : '🔬 Bölümü değerlendir ve düzenle'}</button>
+      ${loadReviewCache(ch.id) ? `
+        <button class="btn btn-primary" id="wsFullPass" style="flex:1;min-width:190px;"
+          title="Kayıtlı inceleme kullanılır - analiz baştan çalışmaz (hızlı)">▶ Kayıtlı incelemeyle devam</button>
+        <button class="btn" id="wsRescanPass" style="flex:1;min-width:170px;"
+          title="Tüm kontroller BAŞTAN çalışır - metin değiştiyse doğru sonuç için gerekli">🔄 Yeniden incele</button>`
+      : `<button class="btn btn-primary" id="wsFullPass" style="flex:1;min-width:190px;"
+          title="Analiz çalıştırılır, sonra paragraf paragraf düzenleme">🔬 Bölümü değerlendir ve düzenle</button>`}
       <button class="btn" id="wsLengthPass" style="flex:1;min-width:170px;">📏 Paragraf uzunluk kontrolü</button>
       <button class="btn" id="wsToReview" style="flex:1;min-width:140px;">Sadece incele →</button>
     </div>
@@ -131,6 +145,14 @@ async function renderWorkshopPrep() {
       const sel = document.getElementById('lcChapter');
       if (sel) { sel.value = String(id); document.getElementById('lcScan')?.click(); }
     }, 500);
+  });
+  // YENİDEN İNCELE: önbelleği yok sayıp tüm kontrolleri baştan çalıştırır.
+  // Metni düzenledikten sonra kayıtlı bulgular ESKİMİŞ olur - o zaman bu
+  // gerekir. Seçimi kullanıcı yapar; sistem sessizce karar vermez.
+  el('wsRescanPass').addEventListener('click', () => {
+    workshopState.forceRescan = true;
+    workshopState.autoSweep = true;
+    renderWorkshopReview();
   });
   el('wsFullPass').addEventListener('click', () => {
     // ÖNBELLEĞİ KULLAN: kayıtlı inceleme varsa analizi TEKRAR ÇALIŞTIRMA -
@@ -227,6 +249,10 @@ async function renderWorkshopReview() {
     workshopState.findings = onbellek.findings;
     workshopState.order = onbellek.order || [];
     workshopState.roleKinds = onbellek.roleKinds || {};
+    workshopState.ranChecks = onbellek.ranChecks || [];
+    workshopState.failedChecks = onbellek.failedChecks || [];
+    workshopState.voice = onbellek.voice || { contract: {}, violations: [] };
+    workshopState.motif = onbellek.motif || { repeats: [] };
     renderWorkshopReviewSummary(onbellek.literary, onbellek.motif || {}, true, gun);
     return;
   }
@@ -287,6 +313,12 @@ async function renderWorkshopReview() {
     saveReviewCache(ch.id, {
       at: Date.now(), literary, findings: byPara, motif,
       order: workshopState.order, roleKinds: workshopState.roleKinds || {},
+      // Hangi kontroller çalıştı: kayıtlı incelemede "çalışmadı" uyarısı
+      // yanlış çıkmasın. Bunlar saklanmayınca kapsama özeti "0/5 temiz,
+      // 5 çalışmadı" diyordu - oysa hepsi çalışmıştı.
+      ranChecks: workshopState.ranChecks || [],
+      failedChecks: workshopState.failedChecks || [],
+      voice: workshopState.voice || null,
     });
 
     renderWorkshopReviewSummary(literary, motif, false, 0);

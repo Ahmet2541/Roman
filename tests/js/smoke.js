@@ -229,4 +229,29 @@ test('paragraf kontrol özeti çalışmayanı temiz saymaz', () => {
   if (d2.find(x => x.k.id === 'literary').durum !== 'temiz') throw new Error('temiz sayılmadı');
 });
 
+// --- 11. Önbellek kapsama bilgisini SAKLAMALI ---
+// Hata: kayıtlı inceleme yüklenince "0/5 kontrol temiz · 5 çalışmadı"
+// yazıyordu - oysa hepsi çalışmıştı. Önbellek ranChecks'i saklamıyordu.
+test('önbellek hangi kontrollerin çalıştığını saklar', () => {
+  const ws = global.window.workshopState;
+  saveReviewCache(42, {
+    at: Date.now(), literary: { average: 4, scores: [], fixes: [] },
+    findings: { 3: [{ kaynak: 'okur', baslik: 'Tempo' }] },
+    order: [3], ranChecks: ['literary', 'reader', 'voice', 'motif', 'roles'],
+    failedChecks: [], roleKinds: {},
+  });
+  const c = loadReviewCache(42);
+  if (!c || !Array.isArray(c.ranChecks)) throw new Error('ranChecks saklanmadı');
+  if (c.ranChecks.length !== 5) throw new Error('kapsama bilgisi eksik: ' + c.ranChecks.length);
+
+  // Geri yüklendiğinde kontroller "çalışmadı" görünmemeli
+  ws.findings = c.findings;
+  ws.ranChecks = c.ranChecks;
+  ws.failedChecks = c.failedChecks;
+  const d = paragrafKontrolDurumu(3);
+  const calismayan = d.filter(x => x.durum === 'yok');
+  if (calismayan.length) throw new Error('çalışmış kontroller "çalışmadı" göründü: ' +
+    calismayan.map(x => x.k.id).join(', '));
+});
+
 Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));
