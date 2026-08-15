@@ -55,7 +55,7 @@ async function renderEntityView(type) {
     <div class="entity-list" id="entityList"><div class="empty-state">Yükleniyor…</div></div>
     <div id="formContainer"></div>`;
 
-  document.getElementById('addBtn').addEventListener('click', () => showEntityForm(type, null));
+  el('addBtn').addEventListener('click', () => showEntityForm(type, null));
 
   try {
     const items = await api.get(cfg.endpoint);
@@ -151,7 +151,7 @@ async function renderPlacesView() {
     <div class="entity-list" id="placeTree"><div class="empty-state">Yükleniyor…</div></div>
     <div id="formContainer"></div>`;
 
-  document.getElementById('addBtn').addEventListener('click', () => showEntityForm('place', null));
+  el('addBtn').addEventListener('click', () => showEntityForm('place', null));
 
   try {
     const places = await api.get('/places/');
@@ -346,7 +346,7 @@ async function loadProgressionPanel(entityType, entityId) {
         } catch (err) { alert(err.message); }
       });
     });
-    document.getElementById('addProgressionBtn').addEventListener('click', async () => {
+    el('addProgressionBtn').addEventListener('click', async () => {
       const chapterNumber = prompt('Hangi bölümden itibaren geçerli? Bir SAYI gir (ör. 3), boş da bırakabilirsin:');
       if (chapterNumber === null) return;
       if (chapterNumber.trim() && Number.isNaN(parseInt(chapterNumber.trim(), 10))) {
@@ -492,10 +492,10 @@ async function showEntityForm(type, item) {
       <div id="formError" class="error-text"></div>
     </div>`;
 
-  document.getElementById('cancelBtn').addEventListener('click', () => { container.innerHTML = ''; });
+  el('cancelBtn').addEventListener('click', () => { container.innerHTML = ''; });
   if (supportsRules) {
     loadEntityRules(type, item.id);
-    document.getElementById('entityRuleAddBtn').addEventListener('click', async () => {
+    el('entityRuleAddBtn').addEventListener('click', async () => {
       const title = el('entityRuleTitle').value.trim();
       if (!title) return;
       try {
@@ -514,7 +514,7 @@ async function showEntityForm(type, item) {
       toggleSectionsBtn.innerHTML = toggleSectionsBtn.innerHTML.replace(isHidden ? '▸' : '▾', isHidden ? '▾' : '▸');
     });
   }
-  document.getElementById('saveBtn').addEventListener('click', async () => {
+  el('saveBtn').addEventListener('click', async () => {
     const titleField = cfg.isRule ? 'title' : 'name';
     const payload = {};
     payload[titleField] = el('f_title').value.trim();

@@ -29,7 +29,7 @@ async function renderRomanView() {
     </div>
     <div id="createItemModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(10,12,20,0.45);z-index:50;align-items:center;justify-content:center;"></div>`;
 
-  document.getElementById('newChapterBtn').addEventListener('click', (e) => {
+  el('newChapterBtn').addEventListener('click', (e) => {
     e.stopPropagation();
     const menu = document.getElementById('newChapterMenu');
     menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
@@ -501,8 +501,8 @@ function openChapterEditPrompt(id) {
     </div>`;
   overlay.style.display = 'flex';
   const close = () => { overlay.style.display = 'none'; overlay.innerHTML = ''; };
-  document.getElementById('editChapterCancel').addEventListener('click', close);
-  document.getElementById('editChapterSave').addEventListener('click', async () => {
+  el('editChapterCancel').addEventListener('click', close);
+  el('editChapterSave').addEventListener('click', async () => {
     const title = el('editChapterTitle').value.trim();
     const kind = el('editChapterKind').value;
     if (!title && kind !== 'chapter') {
@@ -554,11 +554,11 @@ function openBulkScanForPart(partId) {
       <div id="bulkScanResult" style="margin-top:10px;"></div>
     </div>`;
 
-  document.getElementById('closeBulkScanBtn').addEventListener('click', () => {
+  el('closeBulkScanBtn').addEventListener('click', () => {
     panel.style.display = 'none';
     panel.innerHTML = '';
   });
-  document.getElementById('runBulkScanBtn').addEventListener('click', async (e) => {
+  el('runBulkScanBtn').addEventListener('click', async (e) => {
     const chosenIds = Array.from(panel.querySelectorAll('.bulk-scan-chapter-check:checked')).map(cb => parseInt(cb.value, 10));
     if (!chosenIds.length) { alert('En az bir bölüm seçmelisin.'); return; }
     e.target.disabled = true;
@@ -749,10 +749,10 @@ function openCreateItemModal(kind) {
     </div>`;
   overlay.style.display = 'flex';
 
-  document.getElementById('createItemCancelBtn').addEventListener('click', () => { overlay.style.display = 'none'; });
+  el('createItemCancelBtn').addEventListener('click', () => { overlay.style.display = 'none'; });
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; }, { once: true });
 
-  document.getElementById('createItemConfirmBtn').addEventListener('click', async (e) => {
+  el('createItemConfirmBtn').addEventListener('click', async (e) => {
     const rawTitle = el('createItemTitle').value;
     if (kind !== 'chapter' && !rawTitle.trim()) {
       el('createItemError').textContent = `${kindLabel} için bir metin gerekli.`;
@@ -969,7 +969,7 @@ function renderReader(chapter) {
       </div>
     </div>`;
 
-  document.getElementById('aiSplitBtn').addEventListener('click', async () => {
+  el('aiSplitBtn').addEventListener('click', async () => {
     const textarea = document.getElementById('pasteBigTextArea');
     const text = textarea.value.trim();
     if (!text) return;
@@ -992,7 +992,7 @@ function renderReader(chapter) {
     }
   });
 
-  document.getElementById('scanProgressionsBtn').addEventListener('click', () => runSuggestProgressions(chapter));
+  el('scanProgressionsBtn').addEventListener('click', () => runSuggestProgressions(chapter));
 
   const pending = pendingAiSuggestions[chapter.id];
   if (pending) {
@@ -1003,7 +1003,7 @@ function renderReader(chapter) {
         <strong style="font-size:12.5px;">🔔 Bu bölümü ayrıldığında AI arka planda taradı: ${total} öneri bulundu.</strong>
         <button class="btn btn-sm" id="showPendingAiBtn" style="margin-left:8px;">Göster</button>
       </div>`;
-    document.getElementById('showPendingAiBtn').addEventListener('click', () => {
+    el('showPendingAiBtn').addEventListener('click', () => {
       banner.innerHTML = '';
       if (pending.entities.length) {
         const entPanel = document.createElement('div');
@@ -1054,7 +1054,7 @@ function renderReader(chapter) {
       el('kindWarningBanner').style.display = 'none';
     });
   }
-  document.getElementById('editTitleBtn').addEventListener('click', async () => {
+  el('editTitleBtn').addEventListener('click', async () => {
     const newTitle = prompt('Yeni bölüm başlığı:', chapter.title || '');
     if (newTitle === null) return;
     try {
@@ -1066,7 +1066,7 @@ function renderReader(chapter) {
     } catch (err) { alert(err.message); }
   });
 
-  document.getElementById('editSummaryBtn').addEventListener('click', async () => {
+  el('editSummaryBtn').addEventListener('click', async () => {
     const newSummary = prompt('Bölüm özeti (fihriste ve AI bağlamına bu şekilde girer):', chapter.summary || '');
     if (newSummary === null) return;
     try {
@@ -1082,29 +1082,29 @@ function renderReader(chapter) {
   // Araçlar paneli aç/kapa - tercih hatırlanır
   const toolsPanel = document.getElementById('chapterToolsPanel');
   if (localStorage.getItem('roman_tools_open') === '1') toolsPanel.style.display = 'block';
-  document.getElementById('toolsToggle').addEventListener('click', (e) => {
+  el('toolsToggle').addEventListener('click', (e) => {
     const acik = toolsPanel.style.display !== 'none';
     toolsPanel.style.display = acik ? 'none' : 'block';
     e.target.textContent = acik ? '⋯ Araçlar' : '⋯ Araçları gizle';
     localStorage.setItem('roman_tools_open', acik ? '0' : '1');
   });
   if (toolsPanel.style.display === 'block') el('toolsToggle').textContent = '⋯ Araçları gizle';
-  document.getElementById('highlightNamesBtn').addEventListener('click', () => toggleNameHighlight(chapter));
+  el('highlightNamesBtn').addEventListener('click', () => toggleNameHighlight(chapter));
   readerPane.querySelectorAll('.mention-goto').forEach(el => el.addEventListener('click', () => {
     openEntityFromMention(el.dataset.type, parseInt(el.dataset.id, 10));
   }));
-  document.getElementById('ttsPlayBtn').addEventListener('click', () => openTtsRangePicker(chapter));
+  el('ttsPlayBtn').addEventListener('click', () => openTtsRangePicker(chapter));
 
-  document.getElementById('workshopBtn').addEventListener('click', () => openChapterWorkshop(chapter));
-  document.getElementById('chapterReviewBtn').addEventListener('click', () => runChapterReview(chapter));
-  document.getElementById('timelineTopBtn').addEventListener('click', () => {
+  el('workshopBtn').addEventListener('click', () => openChapterWorkshop(chapter));
+  el('chapterReviewBtn').addEventListener('click', () => runChapterReview(chapter));
+  el('timelineTopBtn').addEventListener('click', () => {
     if (!(currentChapter?.summary || chapter.summary || '').trim()) {
       alert('Önce özet oluştur - zaman bilgisi özetin ZAMAN satırından okunuyor.');
       return;
     }
     runSuggestEvents(chapter, 'readerTestResult');
   });
-  document.getElementById('finishChapterBtn').addEventListener('click', () => finishChapter(chapter));
+  el('finishChapterBtn').addEventListener('click', () => finishChapter(chapter));
   // Özette tarih var mı? Zaman çizelgesi bölüm metnindeki tarih/saatten
   // besleniyor; özet tarihsizse çizelge boş kalır ve kronoloji kopar.
   // Özet varsayılan KAPALI: yapılandırılmış özet (ZAMAN/OLAY/MEKAN/ATMOSFER/
@@ -1119,10 +1119,10 @@ function renderReader(chapter) {
     if (onizleme) onizleme.style.display = acik ? '' : 'none';
   });
   renderSummaryDateWarning(chapter);
-  document.getElementById('timelineFromSummaryBtn').addEventListener('click', () => {
+  el('timelineFromSummaryBtn').addEventListener('click', () => {
     runSuggestEvents(chapter, 'summaryEventScanResult');
   });
-  document.getElementById('genSummaryBtn').addEventListener('click', async () => {
+  el('genSummaryBtn').addEventListener('click', async () => {
     const btn = document.getElementById('genSummaryBtn');
     const summaryText = document.getElementById('chapterSummaryText');
     btn.disabled = true;
@@ -1259,7 +1259,7 @@ function renderReader(chapter) {
       } catch (err) { alert(err.message); }
     });
   });
-  document.getElementById('addParaBtn').addEventListener('click', () => {
+  el('addParaBtn').addEventListener('click', () => {
     const nextNumber = chapter.paragraphs.length ? Math.max(...chapter.paragraphs.map(p => p.number)) + 1 : 1;
     addEmptyParagraphBlock(nextNumber);
   });

@@ -129,7 +129,8 @@ const _NULL_EL = new Proxy({}, {
 });
 function el(id) { return document.getElementById(id) || _NULL_EL; }
 
-const paraPurposes = {};
+// var: `const` bazı çalıştırma ortamlarında script'ler arası paylaşılmıyor
+var paraPurposes = {};
 
 // PARAGRAF UZUNLUK SINIRI: bu eşiği aşan paragraf kaydedilmeden önce
 // bölünmesi istenir. Sert engel DEĞİL (yazının kaybolması en kötüsüdür)
@@ -431,7 +432,7 @@ function renderVerifyResult(v, onApply, onDiscuss, tur) {
 //   ADIM 3 PARAGRAF PARAGRAF: tek ekranda tek paragraf - metni, bulguları,
 //     3 seçenek, sohbet, kaydet ve ilerle. Çözülenler işaretlenir.
 // ---------------------------------------------------------------------------
-const workshopState = {
+var workshopState = {
   chapter: null, findings: {}, order: [], idx: 0, literary: null,
   // Süpürme modunda bulgusu olmayan paragrafları atla (tercih hatırlanır)
   onlyFlagged: (() => { try { return localStorage.getItem('roman_ws_only_flagged') === '1'; } catch (e) { return false; } })(),
@@ -500,4 +501,12 @@ async function renderHealthView(kap) {
   } catch (err) {
     kap.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   }
+}
+
+
+// Global erişim (tarayıcı + test ortamı)
+if (typeof window !== 'undefined') {
+  window.workshopState = workshopState;
+  window.paraPurposes = paraPurposes;
+  window.resolvedParas = typeof resolvedParas !== 'undefined' ? resolvedParas : new Set();
 }

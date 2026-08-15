@@ -19,11 +19,26 @@ class FakeEl {
   addEventListener(ev, fn) { (this.listeners[ev] = this.listeners[ev] || []).push(fn); }
   removeEventListener() {}
   click() { (this.listeners.click || []).forEach(f => f({ target: this, stopPropagation() {}, preventDefault() {} })); }
-  querySelector(sel) { return document.querySelector(sel, this); }
+  querySelector(sel) {
+    // Sınıf seçicisi: yazılan HTML'de o sınıf geçiyorsa kalıcı bir sahte
+    // eleman döndür (uygulama .workshop-body gibi kapsayıcıları böyle buluyor)
+    if (typeof sel === 'string' && sel.startsWith('.') && this._html.includes(sel.slice(1))) {
+      this._alt = this._alt || {};
+      if (!this._alt[sel]) this._alt[sel] = new FakeEl('', 'div');
+      return this._alt[sel];
+    }
+    return document.querySelector(sel, this);
+  }
   querySelectorAll(sel) { return document.querySelectorAll(sel, this); }
   insertAdjacentHTML(pos, html) { this._html += html; document._index(this); }
   insertAdjacentElement(pos, el) { this.children.push(el); return el; }
-  appendChild(el) { this.children.push(el); return el; }
+  appendChild(el) {
+    this.children.push(el);
+    // Oluşturulup gövdeye eklenen elemanlar getElementById ile bulunabilmeli
+    // (uygulama kaplama/overlay'leri böyle kuruyor)
+    if (el && el.id) document._els.set(el.id, el);
+    return el;
+  }
   remove() {}
   scrollIntoView() {}
   focus() {}

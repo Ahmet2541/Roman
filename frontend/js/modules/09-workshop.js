@@ -60,7 +60,7 @@ async function renderWorkshopPrep() {
   const ov = document.getElementById('workshopOverlay');
   const ch = workshopState.chapter;
   ov.innerHTML = workshopShell('Hazırlık', 1, '<div class="empty-state">Kontrol ediliyor…</div>');
-  document.getElementById('workshopClose').addEventListener('click', closeWorkshop);
+  el('workshopClose').addEventListener('click', closeWorkshop);
 
   const ozetVar = !!(ch.summary || '').trim();
   let planVar = false, olayVar = false;
@@ -110,15 +110,19 @@ async function renderWorkshopPrep() {
       <button class="btn" id="wsToReview" style="flex:1;min-width:140px;">Sadece incele →</button>
     </div>
     <div id="wsPrepResult" style="margin-top:10px;"></div>`);
-  document.getElementById('workshopClose').addEventListener('click', closeWorkshop);
-  renderKontrolSecici('wsChecksPicker');   // hangi analizler çalışacak
-  document.getElementById('wsToReview').addEventListener('click', renderWorkshopReview);
+  // DİNLEYİCİ BAĞLAMA SIRASI KRİTİK: burada bir satır patlarsa SONRAKİ
+  // düğmeler hiç bağlanmaz ve "düğme çalışmıyor" diye görünür. Bu sohbette
+  // tam olarak bu yaşandı - önce güvenli erişim (el), sonra her bağlama
+  // kendi başına.
+  el('workshopClose').addEventListener('click', closeWorkshop);
+  try { renderKontrolSecici('wsChecksPicker'); } catch (e) { /* seçici olmasa da akış sürer */ }
+  el('wsToReview').addEventListener('click', renderWorkshopReview);
   // TAM TUR: önbelleği yok sayıp analizi TAZELER, süpürme modunu açar ve
   // doğrudan paragraf paragraf düzenlemeye geçer. Tek düğmeyle uçtan uca.
   // UZUNLUK KONTROLÜ: tamamen mekanik iş - edebî değerlendirmeyle
   // karışmasın diye ayrı düğme. Atölyeyi kapatıp Denetim > Uzunluk
   // sekmesine geçer ve bu bölümü seçili getirir.
-  document.getElementById('wsLengthPass').addEventListener('click', () => {
+  el('wsLengthPass').addEventListener('click', () => {
     const id = ch.id;
     closeWorkshop();
     currentDenetimTab = 'length';
@@ -128,7 +132,7 @@ async function renderWorkshopPrep() {
       if (sel) { sel.value = String(id); document.getElementById('lcScan')?.click(); }
     }, 500);
   });
-  document.getElementById('wsFullPass').addEventListener('click', () => {
+  el('wsFullPass').addEventListener('click', () => {
     // ÖNBELLEĞİ KULLAN: kayıtlı inceleme varsa analizi TEKRAR ÇALIŞTIRMA -
     // doğrudan paragraf düzenlemeye geç. Eskiden forceRescan=true idi ve
     // her tıklamada dakikalar süren analiz baştan başlıyordu. Tazelemek
@@ -177,8 +181,8 @@ async function renderWorkshopPrep() {
             <button class="btn btn-sm" id="wsPlanCancel">Vazgeç</button>
           </div>
         </div>`;
-      document.getElementById('wsPlanCancel').addEventListener('click', () => { kutu.innerHTML = ''; });
-      document.getElementById('wsPlanSave').addEventListener('click', async () => {
+      el('wsPlanCancel').addEventListener('click', () => { kutu.innerHTML = ''; });
+      el('wsPlanSave').addEventListener('click', async () => {
         try {
           const kayitBtn = document.getElementById('wsPlanSave');
           kayitBtn.disabled = true; kayitBtn.textContent = 'Kaydediliyor…';
@@ -209,7 +213,7 @@ async function renderWorkshopReview() {
       </div>`;
   };
   ov.innerHTML = workshopShell('Derin Analiz', 2, '');
-  document.getElementById('workshopClose').addEventListener('click', closeWorkshop);
+  el('workshopClose').addEventListener('click', closeWorkshop);
 
   // Önbellek: daha önce incelenmişse sonuçları geri yükle, yeniden analiz
   // için kullanıcıya sor. Uzun bölümlerde analiz dakikalar sürüyor.
@@ -283,7 +287,7 @@ async function renderWorkshopReview() {
   } catch (err) {
     ov.querySelector('.workshop-body').innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>
       <button class="btn" id="wsRetry" style="margin-top:10px;">Tekrar dene</button>`;
-    document.getElementById('wsRetry').addEventListener('click', renderWorkshopReview);
+    el('wsRetry').addEventListener('click', renderWorkshopReview);
   }
 }
 
@@ -353,9 +357,9 @@ async function renderWorkshopParagraph(idx) {
       <button class="btn btn-primary" id="wsNext" style="flex:1;">${workshopState.idx === sira.length - 1 ? 'Bitir ✓' : 'Sonraki →'}</button>
     </div>`);
 
-  document.getElementById('workshopClose').addEventListener('click', closeWorkshop);
+  el('workshopClose').addEventListener('click', closeWorkshop);
   wireMicroEdit(ch, num);   // metinde ifade seçince mikro düzenleme çubuğu
-  document.getElementById('wsPurpose').addEventListener('input', (e) => {
+  el('wsPurpose').addEventListener('input', (e) => {
     paraPurposes[num] = e.target.value; saveParaState();
   });
   // TEŞHİS FÜZYONU: ham bulguları tek teşhiste birleştirip sınıflandırır.
@@ -405,7 +409,7 @@ async function renderWorkshopParagraph(idx) {
         ⚠ Bu paragraf ${kelimeSayisi} kelime - okuma temposunu düşürebilir.
         <button class="btn btn-sm" id="wsSplitPara" style="font-size:11px;margin-top:4px;">✂ Bölmeyi öner</button>
       </div>`;
-    document.getElementById('wsSplitPara').addEventListener('click', async (e2) => {
+    el('wsSplitPara').addEventListener('click', async (e2) => {
       const b2 = e2.target; b2.disabled = true; b2.textContent = 'Bölünüyor…';
       try {
         const r = await api.post(`/chapters/${ch.id}/split-preview`, { text: para.text });
@@ -424,8 +428,8 @@ async function renderWorkshopParagraph(idx) {
               <button class="btn btn-sm" id="wsSplitCancel">Vazgeç</button>
             </div>
           </div>`;
-        document.getElementById('wsSplitCancel').addEventListener('click', () => { kutu.innerHTML = ''; });
-        document.getElementById('wsSplitApply').addEventListener('click', async () => {
+        el('wsSplitCancel').addEventListener('click', () => { kutu.innerHTML = ''; });
+        el('wsSplitApply').addEventListener('click', async () => {
           try {
             await applyParagraphSplit(ch, num, parcalar);
             kutu.innerHTML = '<div style="font-size:12px;color:#3f7a4f;">✓ Bölündü.</div>';
@@ -440,20 +444,20 @@ async function renderWorkshopParagraph(idx) {
 
   // KONTROLLER PANELİ: ekran kalabalıklaşmıştı - ana akış (öneri/konuş)
   // üstte, denetim araçları bu düğmenin arkasında.
-  document.getElementById('wsChecksToggle').addEventListener('click', (e) => {
+  el('wsChecksToggle').addEventListener('click', (e) => {
     const panel = document.getElementById('wsChecksPanel');
     const acik = panel.style.display !== 'none';
     panel.style.display = acik ? 'none' : 'block';
     e.target.textContent = acik ? '🔬 Paragraf kontrolleri' : '🔬 Kontrolleri gizle';
   });
-  document.getElementById('wsShowDirectives2').addEventListener('click', () => {
+  el('wsShowDirectives2').addEventListener('click', () => {
     const kutu = document.getElementById('wsNecessityBox');
     if (kutu.dataset.mode === 'dir') { kutu.innerHTML = ''; kutu.dataset.mode = ''; return; }
     kutu.dataset.mode = 'dir';
     const d = buildParagraphDirectives(num, kayitlar, para ? para.text : '');
     kutu.innerHTML = `<pre style="white-space:pre-wrap;font-size:11px;background:var(--paper-dim);padding:8px;border-radius:6px;margin:6px 0;">${escapeHtml(d)}</pre>`;
   });
-  document.getElementById('wsNecessity').addEventListener('click', async (e) => {
+  el('wsNecessity').addEventListener('click', async (e) => {
     const b = e.target, kutu = document.getElementById('wsNecessityBox');
     b.disabled = true; b.textContent = 'Ölçülüyor…';
     try {
@@ -484,7 +488,7 @@ async function renderWorkshopParagraph(idx) {
   // SADECE BULGULU: süpürme modunda 109 paragrafın hepsi geziliyor; çoğunda
   // yapacak bir şey yok. Bu kutu işaretliyse gezinme bulgusu olmayan
   // paragrafları ATLAR - ama liste değişmez, istediğinde geri açarsın.
-  document.getElementById('wsOnlyFlagged').addEventListener('change', (e) => {
+  el('wsOnlyFlagged').addEventListener('change', (e) => {
     workshopState.onlyFlagged = e.target.checked;
     try { localStorage.setItem('roman_ws_only_flagged', e.target.checked ? '1' : '0'); } catch (er) { /* yoksay */ }
     if (e.target.checked && !(workshopState.findings[num] || []).length) {
@@ -493,16 +497,16 @@ async function renderWorkshopParagraph(idx) {
       renderWorkshopParagraph(hedef);
     }
   });
-  document.getElementById('wsPrev').addEventListener('click', () => {
+  el('wsPrev').addEventListener('click', () => {
     const h = workshopState.onlyFlagged ? nextFlaggedIndex(workshopState.idx, -1) : workshopState.idx - 1;
     if (h !== null && h >= 0) renderWorkshopParagraph(h);
   });
-  document.getElementById('wsSkip').addEventListener('click', () => {
+  el('wsSkip').addEventListener('click', () => {
     const h = workshopState.onlyFlagged ? nextFlaggedIndex(workshopState.idx, 1) : workshopState.idx + 1;
     if (h === null) { renderWorkshopDone(); return; }
     renderWorkshopParagraph(h);
   });
-  document.getElementById('wsNext').addEventListener('click', () => {
+  el('wsNext').addEventListener('click', () => {
     const h = workshopState.onlyFlagged ? nextFlaggedIndex(workshopState.idx, 1) : workshopState.idx + 1;
     if (h === null || h >= sira.length) { renderWorkshopDone(); return; }
     renderWorkshopParagraph(h);
@@ -510,7 +514,7 @@ async function renderWorkshopParagraph(idx) {
 
   // Elle kaydet: atölyede metni doğrudan düzenleyip kaydedebilmek şart -
   // bazen AI'ya hiç gerek olmuyor, tek kelime değişecek.
-  document.getElementById('wsSaveManual').addEventListener('click', async () => {
+  el('wsSaveManual').addEventListener('click', async () => {
     const yeni = el('wsParaText').innerText.trim();
     if (!yeni) return;
     const durum = document.getElementById('wsSaveState');
@@ -524,12 +528,12 @@ async function renderWorkshopParagraph(idx) {
     durum.textContent = '✓ kaydedildi';
   });
 
-  document.getElementById('wsFix').addEventListener('click', async (e) => {
+  el('wsFix').addEventListener('click', async (e) => {
     const b = e.target; b.disabled = true; b.textContent = 'Öneriler yazılıyor…';
     await workshopFix(ch, num, issue || 'Bu paragrafı güçlendir.');
     b.disabled = false; b.textContent = '✨ 3 öneri getir';
   });
-  document.getElementById('wsChat').addEventListener('click', () => {
+  el('wsChat').addEventListener('click', () => {
     const box = document.getElementById('wsWork');
     if (box.dataset.mode === 'chat') { box.innerHTML = ''; box.dataset.mode = ''; return; }
     box.dataset.mode = 'chat';
@@ -541,8 +545,8 @@ async function renderWorkshopParagraph(idx) {
       </div>
       <button class="btn btn-sm" id="wsChatWrite" style="margin-top:6px;width:100%;font-size:11.5px;">✍️ Konuştuklarımıza göre yaz</button>`;
     renderParaChatLog(num);
-    document.getElementById('wsChatSend').addEventListener('click', () => sendParagraphChat(ch, num, '', para ? para.text : ''));
-    document.getElementById('wsChatWrite').addEventListener('click', () => writeParagraphVersion(ch, num, '', para ? para.text : ''));
+    el('wsChatSend').addEventListener('click', () => sendParagraphChat(ch, num, '', para ? para.text : ''));
+    el('wsChatWrite').addEventListener('click', () => writeParagraphVersion(ch, num, '', para ? para.text : ''));
   });
 }
 
@@ -794,7 +798,7 @@ async function workshopFix(chapter, num, issue) {
 
     // TOPLU DERİN KONTROL: üçünü birden denetler, sonuçları kartlara yazar.
     // Tek tek uygulayıp geri dönmek yerine hepsini önden görürsün.
-    document.getElementById('wsDeepAll').addEventListener('click', async (e) => {
+    el('wsDeepAll').addEventListener('click', async (e) => {
       const b = e.target; b.disabled = true; b.textContent = 'Üçü denetleniyor…';
       const sonuclar = await Promise.all(secenekler.map(o =>
         verifyBeforeApply(chapter.id, num, eskiMetin, o.text)));
@@ -822,7 +826,7 @@ async function workshopFix(chapter, num, issue) {
     });
 
     // FARKLI 3 ÖNERİ: önceki yaklaşımları dışlayarak yeniden üret
-    document.getElementById('wsMoreOptions').addEventListener('click', async (e) => {
+    el('wsMoreOptions').addEventListener('click', async (e) => {
       const b = e.target; b.disabled = true; b.textContent = 'Yeni seçenekler…';
       const oncekiler = secenekler.map(o => o.approach).filter(Boolean).join(', ');
       await workshopFix(chapter, num, issue
@@ -851,9 +855,9 @@ async function workshopFix(chapter, num, issue) {
             <button class="btn btn-sm" id="wsRefine" style="font-size:11.5px;">✨ Bunu da geliştir</button>
             <button class="btn btn-sm btn-primary" id="wsGoNext" style="font-size:11.5px;">Sonraki paragraf →</button>
           </div>`;
-        document.getElementById('wsRefine').addEventListener('click', () =>
+        el('wsRefine').addEventListener('click', () =>
           workshopFix(chapter, num, 'Metni bir tur daha güçlendir; aynı yaklaşımları tekrarlama.'));
-        document.getElementById('wsGoNext').addEventListener('click', () => {
+        el('wsGoNext').addEventListener('click', () => {
           const sira = workshopState.order;
           if (workshopState.idx === sira.length - 1) renderWorkshopDone();
           else renderWorkshopParagraph(workshopState.idx + 1);
@@ -878,7 +882,7 @@ async function workshopFix(chapter, num, issue) {
             </div>`;
           // GERİ ALMA: uyguladıktan sonra pişman olunca atölyeden çıkmak
           // gerekmesin - eski metin elimizde, tek tıkla geri yazılır.
-          document.getElementById('wsUndo').addEventListener('click', async () => {
+          el('wsUndo').addEventListener('click', async () => {
             await replaceParagraphText(chapter.id, num, eski);
             if (para) para.text = eski;
             const paraEl3 = document.getElementById('wsParaText');
@@ -890,9 +894,9 @@ async function workshopFix(chapter, num, issue) {
           // "detay düştü mü" bakıyordu; bu "klişe kalktı mı" bakıyor.
           runParagraphRetest(num, eski, secilen, kayitlar);
           // Kaydettikten sonra da yol açık: metin üzerinde tekrar çalışılabilir
-          document.getElementById('wsRefine').addEventListener('click', () =>
+          el('wsRefine').addEventListener('click', () =>
             workshopFix(chapter, num, 'Metni bir tur daha güçlendir; aynı yaklaşımları tekrarlama.'));
-          document.getElementById('wsGoNext').addEventListener('click', () => {
+          el('wsGoNext').addEventListener('click', () => {
             const sira = workshopState.order;
             if (workshopState.idx === sira.length - 1) renderWorkshopDone();
             else renderWorkshopParagraph(workshopState.idx + 1);
@@ -923,9 +927,9 @@ function renderWorkshopDone() {
       <button class="btn" id="wsAgain" style="flex:1;">Yeniden incele</button>
       <button class="btn btn-primary" id="wsFinish" style="flex:1;">Bitir</button>
     </div>`);
-  document.getElementById('workshopClose').addEventListener('click', closeWorkshop);
-  document.getElementById('wsAgain').addEventListener('click', renderWorkshopReview);
-  document.getElementById('wsFinish').addEventListener('click', closeWorkshop);
+  el('workshopClose').addEventListener('click', closeWorkshop);
+  el('wsAgain').addEventListener('click', renderWorkshopReview);
+  el('wsFinish').addEventListener('click', closeWorkshop);
 }
 
 // ---------------------------------------------------------------------------
@@ -1185,7 +1189,7 @@ async function openPhraseAlternatives(chapter, num, spanEl, secenekler) {
           <button class="btn btn-sm phrase-pick" data-alt="${escapeHtml(a)}" style="display:block;width:100%;text-align:left;margin-top:6px;font-size:12.5px;">${escapeHtml(a)}</button>`).join('')}
         <button class="btn btn-sm" id="phraseClose" style="margin-top:8px;font-size:11.5px;">Kapat</button>
       </div>`;
-    document.getElementById('phraseClose').addEventListener('click', () => { box.innerHTML = ''; });
+    el('phraseClose').addEventListener('click', () => { box.innerHTML = ''; });
     box.querySelectorAll('.phrase-pick').forEach(b => b.addEventListener('click', () => {
       // Seçilen alternatifi kartın metnine YERİNDE işle
       const yeni = tamMetin.replace(ifade, b.dataset.alt);
@@ -1279,11 +1283,11 @@ function openWorkshopVerifyChat(chapter, num, eskiMetin, secilenMetin, uyarilar,
   input.value = acilis;
   sendParagraphChat(chapter, num, '', para ? para.text : eskiMetin);
 
-  document.getElementById('wsVcSend').addEventListener('click', () =>
+  el('wsVcSend').addEventListener('click', () =>
     sendParagraphChat(chapter, num, '', para ? para.text : eskiMetin));
-  document.getElementById('wsVcWrite').addEventListener('click', () =>
+  el('wsVcWrite').addEventListener('click', () =>
     writeParagraphVersion(chapter, num, '', para ? para.text : eskiMetin));
-  document.getElementById('wsVcKeep').addEventListener('click', async () => {
+  el('wsVcKeep').addEventListener('click', async () => {
     await replaceParagraphText(chapter.id, num, secilenMetin);
     resolvedParas.add(String(num)); saveParaState();
     if (para) para.text = secilenMetin;

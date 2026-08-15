@@ -24,7 +24,7 @@ async function renderFactionView() {
     </div>
     <div id="formContainer"></div>
     <div id="factionList"></div>`;
-  document.getElementById('newFactionBtn').addEventListener('click', () => showEntityForm('faction', null));
+  el('newFactionBtn').addEventListener('click', () => showEntityForm('faction', null));
   await loadFactionList();
 }
 

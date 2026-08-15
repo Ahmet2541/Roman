@@ -31,7 +31,7 @@ async function loadMatrixList() {
       loadMatrixList();
       loadMatrixGrid();
     }));
-    document.getElementById('newMatrixBtn').addEventListener('click', openNewMatrixDialog);
+    el('newMatrixBtn').addEventListener('click', openNewMatrixDialog);
     if (currentMatrixId && list.some(m => m.id === currentMatrixId)) await loadMatrixGrid();
     else if (list.length === 1) { currentMatrixId = list[0].id; await loadMatrixList(); }
     else if (!list.length) el('matrixGridArea').innerHTML = `<div class="empty-state">Henüz matris yok - "+ Yeni Matris" ile başla, sonra kolon ve satırları ekle.</div>`;
@@ -113,13 +113,13 @@ async function loadMatrixGrid() {
         </table>
       </div>`;
 
-    document.getElementById('mAddCol').addEventListener('click', () => addMatrixColumn(m, null));
+    el('mAddCol').addEventListener('click', () => addMatrixColumn(m, null));
     area.querySelectorAll('.m-col-ins').forEach(btn => btn.addEventListener('click', (e) => {
       e.stopPropagation();
       addMatrixColumn(m, parseInt(btn.dataset.id, 10));
     }));
-    document.getElementById('mAddRow').addEventListener('click', () => addMatrixRow(m, null));
-    document.getElementById('mGenChapters').addEventListener('click', async () => {
+    el('mAddRow').addEventListener('click', () => addMatrixRow(m, null));
+    el('mGenChapters').addEventListener('click', async () => {
       if (!confirm(`${m.columns.length} Kısım + ${m.columns.length * m.rows.length} Bölüm fihristin SONUNA eklenecek ve hücreler bağlanacak. Devam?`)) return;
       try {
         const r = await api.post(`/matrix/${m.id}/generate-chapters`, {});
@@ -127,7 +127,7 @@ async function loadMatrixGrid() {
         await loadMatrixGrid();
       } catch (err) { alert(err.message); }
     });
-    document.getElementById('mAiFill').addEventListener('click', async () => {
+    el('mAiFill').addEventListener('click', async () => {
       const selected = Array.from(area.querySelectorAll('.m-col-check:checked')).map(cb => parseInt(cb.dataset.id, 10));
       if (!selected.length) { alert('Önce kolon başlıklarındaki kutulardan en az bir tur seç.'); return; }
       if (!confirm(`${selected.length} kolonun boş hücreleri için AI taslak üretecek (kolon başına 1 AI isteği). Hiçbiri onaysız kaydedilmez. Devam?`)) return;
@@ -138,8 +138,8 @@ async function loadMatrixGrid() {
         renderAiFillReview(m, result);
       } catch (err) { editor.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; }
     });
-    document.getElementById('mBulkAdd').addEventListener('click', () => openBulkAddDialog(m));
-    document.getElementById('mFromChapter').addEventListener('click', () => openRowsFromChapterDialog(m));
+    el('mBulkAdd').addEventListener('click', () => openBulkAddDialog(m));
+    el('mFromChapter').addEventListener('click', () => openRowsFromChapterDialog(m));
     document.querySelectorAll('.m-row-collapse').forEach(b => b.addEventListener('click', (e) => {
       e.stopPropagation();
       const id = String(b.dataset.id);
@@ -147,7 +147,7 @@ async function loadMatrixGrid() {
       saveCollapsedMatrixRows();
       loadMatrixGrid();
     }));
-    document.getElementById('mCollapseAll').addEventListener('click', () => {
+    el('mCollapseAll').addEventListener('click', () => {
       const bolumSatirlari = m.rows.filter(r => (m.cells || []).some(c => c.row_id === r.id && c.chapter_id));
       const hepsiKapali = bolumSatirlari.every(r => collapsedMatrixRows.has(String(r.id)));
       bolumSatirlari.forEach(r => {
@@ -166,8 +166,8 @@ async function loadMatrixGrid() {
         if (hedef) { switchView('roman'); setTimeout(() => loadChapterList(hedef.id), 200); }
       } catch (err) { alert(err.message); }
     }));
-    document.getElementById('mImport').addEventListener('click', () => openMatrixImporter(m));
-    document.getElementById('mDelMatrix').addEventListener('click', async () => {
+    el('mImport').addEventListener('click', () => openMatrixImporter(m));
+    el('mDelMatrix').addEventListener('click', async () => {
       if (!confirm('Matris ve TÜM hücre planları silinecek (bölümlere dokunulmaz). Emin misin?')) return;
       try { await api.del(`/matrix/${m.id}`); currentMatrixId = null; await loadMatrixList(); el('matrixGridArea').innerHTML = ''; }
       catch (err) { alert(err.message); }
@@ -272,8 +272,8 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     </div>`;
   editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-  document.getElementById('mCellCancel').addEventListener('click', () => { editor.innerHTML = ''; });
-  document.getElementById('mCellSave').addEventListener('click', async () => {
+  el('mCellCancel').addEventListener('click', () => { editor.innerHTML = ''; });
+  el('mCellSave').addEventListener('click', async () => {
     const chapterVal = el('mCellChapter').value;
     try {
       await api.put(`/matrix/${m.id}/cells`, {
@@ -341,7 +341,7 @@ function renderAiFillReview(m, result) {
   editor.querySelectorAll('.ai-fill-skip').forEach(btn => btn.addEventListener('click', () => {
     editor.querySelector(`[data-idx="${btn.dataset.idx}"]`)?.remove();
   }));
-  document.getElementById('aiFillSaveAll').addEventListener('click', async () => {
+  el('aiFillSaveAll').addEventListener('click', async () => {
     try {
       const remaining = Array.from(editor.querySelectorAll('#aiFillItems [data-idx]')).map(el => parseInt(el.dataset.idx, 10));
       for (const idx of remaining) await saveOne(idx);
@@ -349,7 +349,7 @@ function renderAiFillReview(m, result) {
       await loadMatrixGrid();
     } catch (err) { el('aiFillError').textContent = err.message; }
   });
-  document.getElementById('aiFillClose').addEventListener('click', () => { editor.innerHTML = ''; });
+  el('aiFillClose').addEventListener('click', () => { editor.innerHTML = ''; });
 }
 
 // ---------------------------------------------------------------------------
@@ -390,8 +390,8 @@ async function runPlanDraft(chapter) {
           <button class="btn btn-sm" id="planDraftDiscardBtn">Vazgeç</button>
         </div>
       </div>`;
-    document.getElementById('planDraftDiscardBtn').addEventListener('click', () => { box.innerHTML = ''; });
-    document.getElementById('planDraftAcceptBtn').addEventListener('click', async () => {
+    el('planDraftDiscardBtn').addEventListener('click', () => { box.innerHTML = ''; });
+    el('planDraftAcceptBtn').addEventListener('click', async () => {
       const btn = document.getElementById('planDraftAcceptBtn');
       btn.disabled = true; btn.textContent = 'Ekleniyor…';
       try {
@@ -461,8 +461,8 @@ function openQuickPlanEditor(chapter, currentText) {
       <div id="quickPlanError" class="error-text"></div>
     </div>`;
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  document.getElementById('quickPlanCancel').addEventListener('click', () => { box.innerHTML = ''; });
-  document.getElementById('quickPlanSave').addEventListener('click', async () => {
+  el('quickPlanCancel').addEventListener('click', () => { box.innerHTML = ''; });
+  el('quickPlanSave').addEventListener('click', async () => {
     const content = el('quickPlanText').value.trim();
     if (!content) {
       el('quickPlanError').textContent =
@@ -614,7 +614,7 @@ async function openMatrixColumnEditor(m, colId) {
       <div id="mColError" class="error-text"></div>
     </div>`;
   editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  document.getElementById('mColCancel').addEventListener('click', () => { editor.innerHTML = ''; });
+  el('mColCancel').addEventListener('click', () => { editor.innerHTML = ''; });
 
   // Fihrist ağacını yükle: alt girdisi olan girdiler öne çıkarılır
   (async () => {
@@ -629,7 +629,7 @@ async function openMatrixColumnEditor(m, colId) {
     } catch (err) { sel.innerHTML = `<option value="">Yüklenemedi: ${escapeHtml(err.message)}</option>`; }
   })();
 
-  document.getElementById('mColBind').addEventListener('click', async () => {
+  el('mColBind').addEventListener('click', async () => {
     const parentId = el('mColParent').value;
     const box = document.getElementById('mColBindResult');
     if (!parentId) { box.innerHTML = '<div class="error-text">Önce bir üst girdi seç.</div>'; return; }
@@ -647,7 +647,7 @@ async function openMatrixColumnEditor(m, colId) {
       await loadMatrixGrid();
     } catch (err) { box.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; }
   });
-  document.getElementById('mColSave').addEventListener('click', async () => {
+  el('mColSave').addEventListener('click', async () => {
     const label = el('mColLabel').value.trim();
     if (!label) { el('mColError').textContent = 'Ad boş olamaz.'; return; }
     const charVal = el('mColChar').value;
@@ -687,9 +687,9 @@ async function openMatrixImporter(m) {
       <div id="mImpResult"></div>
     </div>`;
   editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  document.getElementById('mImpCancel').addEventListener('click', () => { editor.innerHTML = ''; });
+  el('mImpCancel').addEventListener('click', () => { editor.innerHTML = ''; });
 
-  document.getElementById('mImpPreview').addEventListener('click', async () => {
+  el('mImpPreview').addEventListener('click', async () => {
     const colId = parseInt(el('mImpCol').value, 10);
     const lines = el('mImpText').value.split('\n').map(l => l.trim()).filter(Boolean);
     const matches = [], unmatched = [];
@@ -719,7 +719,7 @@ async function openMatrixImporter(m) {
         ${unmatched.length ? `<div style="font-size:12px;color:var(--danger);margin-top:6px;">Eşleşmeyen ${unmatched.length} satır atlanacak.</div>` : ''}
         <button class="btn btn-primary btn-sm" id="mImpApply" style="margin-top:8px;">${matches.length} Hücreyi Yaz</button>
       </div>`;
-    document.getElementById('mImpApply').addEventListener('click', async () => {
+    el('mImpApply').addEventListener('click', async () => {
       const overwrites = matches.filter(x => filled.has(colId + ':' + x.row.id));
       if (overwrites.length && !confirm(`${overwrites.length} dolu hücrenin üzerine yazılacak. Devam?`)) return;
       try {
@@ -1096,8 +1096,8 @@ async function openMatrixRowEditor(m, rowId) {
       <div id="mRowError" class="error-text"></div>
     </div>`;
   editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  document.getElementById('mRowCancel').addEventListener('click', () => { editor.innerHTML = ''; });
-  document.getElementById('mRowSave').addEventListener('click', async () => {
+  el('mRowCancel').addEventListener('click', () => { editor.innerHTML = ''; });
+  el('mRowSave').addEventListener('click', async () => {
     const label = el('mRowLabel').value.trim();
     if (!label) { el('mRowError').textContent = 'Ad boş olamaz.'; return; }
     try {
@@ -1708,26 +1708,26 @@ function openTtsRangePicker(chapter) {
     </div>`;
   overlay.style.display = 'flex';
   const kapat = () => { overlay.style.display = 'none'; overlay.innerHTML = ''; };
-  document.getElementById('ttsCancel').addEventListener('click', kapat);
-  document.getElementById('ttsPresetAll').addEventListener('click', () => {
+  el('ttsCancel').addEventListener('click', kapat);
+  el('ttsPresetAll').addEventListener('click', () => {
     el('ttsFrom').value = ilk; el('ttsTo').value = son;
   });
-  document.getElementById('ttsPresetFirst').addEventListener('click', () => {
+  el('ttsPresetFirst').addEventListener('click', () => {
     el('ttsFrom').value = ilk;
     el('ttsTo').value = paras[Math.min(9, paras.length - 1)].number;
   });
-  document.getElementById('ttsPresetLast').addEventListener('click', () => {
+  el('ttsPresetLast').addEventListener('click', () => {
     el('ttsFrom').value = paras[Math.max(0, paras.length - 10)].number;
     el('ttsTo').value = son;
   });
-  document.getElementById('ttsPresetFlagged').addEventListener('click', () => {
+  el('ttsPresetFlagged').addEventListener('click', () => {
     const c = loadReviewCache(chapter.id);
     const numaralar = Object.keys(c?.findings || {}).map(Number).sort((a, b) => a - b);
     if (!numaralar.length) { alert('Bu bölümde işaretli bulgu yok - önce incele.'); return; }
     kapat();
     startChapterTts(chapter, 0, numaralar);
   });
-  document.getElementById('ttsStart').addEventListener('click', () => {
+  el('ttsStart').addEventListener('click', () => {
     const bas = parseInt(el('ttsFrom').value, 10) || ilk;
     const bit = parseInt(el('ttsTo').value, 10) || son;
     const secili = paras.filter(p => p.number >= Math.min(bas, bit) && p.number <= Math.max(bas, bit))
@@ -1864,8 +1864,8 @@ function openNewMatrixDialog() {
     </div>`;
   overlay.style.display = 'flex';
   const close = () => { overlay.style.display = 'none'; overlay.innerHTML = ''; };
-  document.getElementById('nmCancel').addEventListener('click', close);
-  document.getElementById('nmCreate').addEventListener('click', async () => {
+  el('nmCancel').addEventListener('click', close);
+  el('nmCreate').addEventListener('click', async () => {
     const name = el('nmName').value.trim();
     if (!name) { el('nmError').textContent = 'Matris adı gerekli.'; return; }
     const nCols = Math.max(0, Math.min(50, parseInt(el('nmCols').value, 10) || 0));
@@ -1910,8 +1910,8 @@ function openBulkAddDialog(m) {
       <div id="baError" class="error-text"></div>
     </div>`;
   editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  document.getElementById('baCancel').addEventListener('click', () => { editor.innerHTML = ''; });
-  document.getElementById('baApply').addEventListener('click', async () => {
+  el('baCancel').addEventListener('click', () => { editor.innerHTML = ''; });
+  el('baApply').addEventListener('click', async () => {
     const nCols = Math.max(0, Math.min(50, parseInt(el('baCols').value, 10) || 0));
     const nRows = Math.max(0, Math.min(50, parseInt(el('baRows').value, 10) || 0));
     if (!nCols && !nRows) { el('baError').textContent = 'En az bir sayı gir.'; return; }

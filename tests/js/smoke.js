@@ -29,9 +29,18 @@ for (const f of fs.readdirSync(MODULES).sort()) {
   }
 }
 
+const bekleyenler = [];
 function test(ad, fn) {
-  try { fn(); sonuc.testler.push({ ad, ok: true }); }
-  catch (e) { sonuc.testler.push({ ad, ok: false, hata: `${e.name}: ${e.message}` }); }
+  try {
+    const r = fn();
+    if (r && typeof r.then === 'function') {
+      bekleyenler.push(r.then(
+        () => sonuc.testler.push({ ad, ok: true }),
+        (e) => sonuc.testler.push({ ad, ok: false, hata: `${e.name}: ${e.message}` })));
+    } else {
+      sonuc.testler.push({ ad, ok: true });
+    }
+  } catch (e) { sonuc.testler.push({ ad, ok: false, hata: `${e.name}: ${e.message}` }); }
 }
 
 // --- 1. Kritik fonksiyonlar tanımlı mı ---
@@ -163,4 +172,39 @@ test('toFindings kanıtsız bulguyu elemeli', () => {
   if (m.length !== 2) throw new Error('güven/leitmotif filtresi çalışmadı: ' + m.length);
 });
 
-console.log(JSON.stringify(sonuc, null, 1));
+// --- 9. TAM AKIŞ: "Düzenlemeye devam et" uçtan uca çalışır ---
+// Bu sohbette yaşanan hata: hazırlık ekranındaki bir dinleyici bağlama
+// satırı patlayınca SONRAKİ düğmeler hiç bağlanmıyor ve "düğme çalışmıyor"
+// olarak görünüyordu. Bu test o zinciri baştan sona yürütür.
+test('kayıtlı incelemeyle düzenlemeye devam akışı', async () => {
+  const bolum = {
+    id: 7, number: 2, title: 'Test', summary: 'ZAMAN: 2030.',
+    paragraphs: [1, 2, 3].map(n => ({ number: n, text: `Paragraf ${n} metni.`, mentions: [] })),
+  };
+  localStorage.setItem('roman_review_7', JSON.stringify({
+    at: Date.now(),
+    literary: { average: 4.3, scores: [{ key: 'ritim', label: 'Ritim', score: 4, reason: 'x' }],
+                fixes: [{ criterion: 'Ritim', paragraph: 2, problem: 'p', fix: 'f' }],
+                total: 3, scanned: 3, chunks: 1, strongest: 'iyi' },
+    findings: { 2: [{ kaynak: 'editor', baslik: 'Ritim', sorun: 'p', oneri: 'f' }] },
+    motif: { repeats: [] }, order: [2], roleKinds: {},
+  }));
+  global.__apiResponse = () => [];
+
+  openChapterWorkshop(bolum);
+  await new Promise(r => setTimeout(r, 60));
+
+  const fullPass = document.getElementById('wsFullPass');
+  if (!fullPass) throw new Error('hazırlık ekranı kurulmadı');
+  if (!(fullPass.listeners.click || []).length) throw new Error('"Düzenlemeye devam et" dinleyicisi BAĞLANMADI');
+
+  fullPass.click();
+  await new Promise(r => setTimeout(r, 700));
+
+  const toParas = document.getElementById('wsToParas');
+  if (!toParas) throw new Error('inceleme özeti kurulmadı');
+  if (!(toParas.listeners.click || []).length) throw new Error('"Paragraflara geç" dinleyicisi BAĞLANMADI');
+  if (!document.getElementById('wsParaText')) throw new Error('paragraf ekranına geçilmedi');
+});
+
+Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));

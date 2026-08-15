@@ -22,7 +22,7 @@ function renderFullScanView(container) {
       📦 Kayıtlı tarama (${scanAgeLabel(oncekiTutarlilik)}) - yeniden çalıştırmak için düğmeye bas.</div>`
       + renderScanIssues(oncekiTutarlilik.veri);
   }
-  document.getElementById('startScanBtn').addEventListener('click', async () => {
+  el('startScanBtn').addEventListener('click', async () => {
     const resultEl = document.getElementById('scanResult');
     resultEl.innerHTML = `<div class="empty-state">Qwen tüm romanı okuyor, bu biraz sürebilir…</div>`;
     try {
@@ -84,7 +84,7 @@ async function renderSearchResults(q) {
     });
   }
 
-  document.getElementById('typeFilter').addEventListener('change', draw);
+  el('typeFilter').addEventListener('change', draw);
   draw();
 }
 
@@ -196,7 +196,7 @@ function selectNovelAndStart(novelId) {
 function showNovelSelectScreen() {
   el('novelSelectOverlay').style.display = 'flex';
   loadAndRenderNovelList();
-  document.getElementById('createNovelBtn').addEventListener('click', async () => {
+  el('createNovelBtn').addEventListener('click', async () => {
     const input = document.getElementById('newNovelName');
     const name = input.value.trim();
     if (!name) return;
@@ -250,7 +250,7 @@ async function initApp() {
     el('novelSelectOverlay').style.display = 'flex';
   };
   bar.addEventListener('click', openSwitcher);
-  document.getElementById('switchNovelBtn').addEventListener('click', openSwitcher);
+  el('switchNovelBtn').addEventListener('click', openSwitcher);
 
   document.querySelectorAll('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -264,11 +264,11 @@ async function initApp() {
   document.getElementById('sidebarOverlay')?.addEventListener('click', () => {
     document.body.classList.remove('sidebar-open');
   });
-  document.getElementById('logoutBtn').addEventListener('click', () => {
+  el('logoutBtn').addEventListener('click', () => {
     clearToken();
     window.location.href = '/app/login.html';
   });
-  document.getElementById('globalSearch').addEventListener('keydown', (e) => {
+  el('globalSearch').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && e.target.value.trim()) {
       const query = e.target.value.trim();
       const pMatch = query.match(/^[Pp](\d+)$/);
@@ -340,7 +340,7 @@ function renderStyleScanView(container) {
       <div id="sp_error" class="error-text"></div>
     </div>`;
 
-  document.getElementById('styleScanBtn').addEventListener('click', async () => {
+  el('styleScanBtn').addEventListener('click', async () => {
     const el = document.getElementById('styleReport');
     el.innerHTML = `<div class="empty-state">Tüm seri taranıyor…</div>`;
     try {
@@ -350,7 +350,7 @@ function renderStyleScanView(container) {
     }
   });
 
-  document.getElementById('suggestPatternsBtn').addEventListener('click', async () => {
+  el('suggestPatternsBtn').addEventListener('click', async () => {
     const box = document.getElementById('patternCandidates');
     box.innerHTML = '<div class="empty-state">Roman taranıyor, tekrar eden yapılar aranıyor…</div>';
     try {
@@ -388,7 +388,7 @@ function renderStyleScanView(container) {
     }
   });
 
-  document.getElementById('sp_addBtn').addEventListener('click', async () => {
+  el('sp_addBtn').addEventListener('click', async () => {
     const errEl = document.getElementById('sp_error');
     errEl.textContent = '';
     try {

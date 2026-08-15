@@ -25,8 +25,8 @@ async function renderKnowledgeView() {
     <div id="knowledgeScanBox"></div>
     <div id="factForm"></div>
     <div id="factList"><div class="empty-state">Yükleniyor…</div></div>`;
-  document.getElementById('addFactBtn').addEventListener('click', () => showFactForm(null));
-  document.getElementById('scanKnowledgeBtn').addEventListener('click', runKnowledgeScan);
+  el('addFactBtn').addEventListener('click', () => showFactForm(null));
+  el('scanKnowledgeBtn').addEventListener('click', runKnowledgeScan);
   await loadFactList();
 }
 
@@ -100,8 +100,8 @@ async function showFactForm(fact) {
       </div>
       <div id="fk_err" class="error-text"></div>
     </div>`;
-  document.getElementById('fk_cancel').addEventListener('click', () => { kap.innerHTML = ''; });
-  document.getElementById('fk_save').addEventListener('click', async () => {
+  el('fk_cancel').addEventListener('click', () => { kap.innerHTML = ''; });
+  el('fk_save').addEventListener('click', async () => {
     const bilgi = el('fk_info').value.trim();
     if (!bilgi) { el('fk_err').textContent = 'Bilgi metni gerekli.'; return; }
     const veri = {
@@ -128,7 +128,13 @@ async function showFactForm(fact) {
 // ---------------------------------------------------------------------------
 function renderWorkshopReviewSummary(literary, motif, onbellekten, gunFarki) {
   const renk = (p) => p <= 2 ? 'var(--danger)' : (p === 3 ? '#b08d3f' : '#3f7a4f');
-  document.getElementById('workshopOverlay').querySelector('.workshop-body').innerHTML = `
+  // GÜVENLİ GÖVDE ERİŞİMİ: bu zincir kopunca fonksiyonun GERİ KALANI hiç
+  // çalışmıyor - düğme dinleyicileri bağlanmıyor ve "düğme çalışmıyor"
+  // olarak görünüyordu. Kaplama ya da gövde yoksa sessizce çık.
+  const _ov = document.getElementById('workshopOverlay');
+  const _govde = _ov && _ov.querySelector ? _ov.querySelector('.workshop-body') : null;
+  if (!_govde) return;
+  _govde.innerHTML = `
     <div style="text-align:center;padding:10px 0;">
       <div style="font-size:30px;font-weight:700;color:${renk(Math.round(literary.average))}">${literary.average}<span style="font-size:16px;color:var(--text-muted);">/5</span></div>
       <div style="font-size:12px;color:var(--text-muted);">edebî ortalama</div>
@@ -185,8 +191,8 @@ function renderWorkshopReviewSummary(literary, motif, onbellekten, gunFarki) {
       <button class="btn" id="wsBackPrep" style="flex:1;">← Hazırlık</button>
       <button class="btn btn-primary" id="wsToParas" style="flex:2;">Paragraflara geç →</button>
     </div>`;
-  document.getElementById('wsBackPrep').addEventListener('click', renderWorkshopPrep);
-  document.getElementById('wsToParas').addEventListener('click', () => {
+  el('wsBackPrep').addEventListener('click', renderWorkshopPrep);
+  el('wsToParas').addEventListener('click', () => {
     if (el('wsSweep').checked) {
       // Tüm paragraflar sırayla; bulgusu olanlar zaten işaretli görünür
       workshopState.order = (workshopState.chapter.paragraphs || [])
@@ -207,13 +213,13 @@ function renderWorkshopReviewSummary(literary, motif, onbellekten, gunFarki) {
 
   // Önbellekten geldiyse tazeleme seçeneği sun
   if (onbellekten) {
-    const govdeEl = document.getElementById('workshopOverlay').querySelector('.workshop-body');
+    const govdeEl = _govde;
     govdeEl.insertAdjacentHTML('afterbegin', `
       <div style="font-size:11.5px;color:var(--text-muted);background:var(--paper-dim);padding:6px 8px;border-radius:6px;margin-bottom:8px;">
         📦 Kayıtlı inceleme gösteriliyor${gunFarki > 0 ? ` (${gunFarki} gün önce)` : ' (bugün)'} - analiz yeniden çalıştırılmadı.
         <button class="btn btn-sm" id="wsRescan" style="font-size:11px;margin-left:6px;">🔄 Yeniden incele</button>
       </div>`);
-    document.getElementById('wsRescan').addEventListener('click', () => {
+    el('wsRescan').addEventListener('click', () => {
       workshopState.forceRescan = true;
       renderWorkshopReview();
     });
@@ -379,7 +385,7 @@ function wireMicroEdit(chapter, num) {
       <input type="text" id="wsMicroReq" placeholder="ne olsun? (boş: güçlendir)" style="flex:1;min-width:140px;font-size:11.5px;">
       <button class="btn btn-sm btn-primary" id="wsMicroGo" style="font-size:11.5px;">✂ Sadece bunu değiştir</button>`;
     metinEl.insertAdjacentElement('afterend', bar);
-    document.getElementById('wsMicroGo').addEventListener('click', async (e) => {
+    el('wsMicroGo').addEventListener('click', async (e) => {
       const b = e.target; b.disabled = true; b.textContent = 'Alternatifler…';
       kutu.dataset.mode = 'micro';
       kutu.innerHTML = '<div class="empty-state">Sadece seçili parça için alternatifler…</div>';
@@ -472,7 +478,7 @@ async function renderLengthCheckView(el) {
         <button class="btn btn-primary" id="lcScan">Uzun paragrafları bul</button>
       </div>
       <div id="lcResult"></div>`;
-    document.getElementById('lcScan').addEventListener('click', () => runLengthScan());
+    el('lcScan').addEventListener('click', () => runLengthScan());
   } catch (err) {
     el.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   }
@@ -516,7 +522,7 @@ async function runLengthScan() {
     // TOPLU BÖLME: her paragrafın önerisi tek tek alınır, hepsi ÖNCE
     // gösterilir, onaydan sonra SONDAN BAŞA uygulanır (numara çakışması
     // olmasın) ve numaralar otomatik yeniden sıralanır.
-    document.getElementById('lcSplitAll').addEventListener('click', async (e) => {
+    el('lcSplitAll').addEventListener('click', async (e) => {
       const b = e.target, box = document.getElementById('lcAllBox');
       b.disabled = true;
       const plan = [];
@@ -552,8 +558,8 @@ async function runLengthScan() {
           </div>
           <div id="lcAllProgress" style="font-size:12px;color:var(--text-muted);"></div>
         </div>`;
-      document.getElementById('lcAllCancel').addEventListener('click', () => { box.innerHTML = ''; });
-      document.getElementById('lcAllApply').addEventListener('click', async (e2) => {
+      el('lcAllCancel').addEventListener('click', () => { box.innerHTML = ''; });
+      el('lcAllApply').addEventListener('click', async (e2) => {
         const ab = e2.target, ilerleme = document.getElementById('lcAllProgress');
         ab.disabled = true;
         // SONDAN BAŞA: önce büyük numaralar bölünür, böylece daha küçük
@@ -575,7 +581,7 @@ async function runLengthScan() {
           <b style="color:#3f7a4f;">✓ ${sirali.length} paragraf bölündü</b>
           <div style="font-size:12px;color:var(--text-muted);">Numaralar yeniden sıralandı. Toplam ${guncelBolum.paragraphs.length} paragraf.</div>
           <button class="btn btn-sm" id="lcRescan" style="margin-top:8px;">Yeniden tara</button></div>`;
-        document.getElementById('lcRescan').addEventListener('click', () => runLengthScan());
+        el('lcRescan').addEventListener('click', () => runLengthScan());
       });
     });
 
@@ -765,8 +771,8 @@ async function openRowsFromChapterDialog(m) {
         </div>
         <div id="rfcResult"></div>
       </div>`;
-    document.getElementById('rfcCancel').addEventListener('click', () => { editor.innerHTML = ''; });
-    document.getElementById('rfcGo').addEventListener('click', async () => {
+    el('rfcCancel').addEventListener('click', () => { editor.innerHTML = ''; });
+    el('rfcGo').addEventListener('click', async () => {
       const chapterId = parseInt(el('rfcChapter').value, 10);
       const kaynak = el('rfcSource').value;
       const kutu = document.getElementById('rfcResult');
@@ -804,7 +810,7 @@ async function openRowsFromChapterDialog(m) {
           </div>
           <button class="btn btn-sm btn-primary" id="rfcApply" style="margin-top:8px;">Satırları ekle</button>
         </div>`;
-      document.getElementById('rfcApply').addEventListener('click', async (e) => {
+      el('rfcApply').addEventListener('click', async (e) => {
         const b = e.target; b.disabled = true;
         for (let i = 0; i < etiketler.length; i++) {
           b.textContent = `Ekleniyor… ${i + 1}/${etiketler.length}`;
@@ -889,7 +895,7 @@ async function runArcReview(chapterId) {
 
         ${r.closing ? `<div style="margin-top:12px;font-size:12.5px;"><b>Kapanış:</b> <span style="color:var(--text-muted);">${escapeHtml(r.closing)}</span></div>` : ''}
       </div>`;
-    document.getElementById('arcClose').addEventListener('click', () => {
+    el('arcClose').addEventListener('click', () => {
       overlay.style.display = 'none'; overlay.innerHTML = '';
     });
   } catch (err) {

@@ -192,7 +192,7 @@ async function renderAiPanel(chapter) {
       cb.addEventListener('change', () => { renderSelectedEntityChips(); updateTypeCounts(); updateContextToolsSummary(); }));
     updateTypeCounts();
 
-    document.getElementById('entityPickerSearch').addEventListener('input', (e) => {
+    el('entityPickerSearch').addEventListener('input', (e) => {
       const q = e.target.value.trim().toLowerCase();
       panel.querySelectorAll('.entity-picker-label').forEach(label => {
         label.style.display = !q || label.dataset.name.includes(q) ? '' : 'none';
@@ -222,11 +222,11 @@ async function renderAiPanel(chapter) {
     });
 
     // Bağlam araçları: kapalı başlar, tek tıkla açılır (progressive disclosure)
-    document.getElementById('toggleContextTools').addEventListener('click', () => {
+    el('toggleContextTools').addEventListener('click', () => {
       const box = document.getElementById('contextToolsBox');
       box.style.display = box.style.display === 'none' ? '' : 'none';
     });
-    document.getElementById('textScopeSelect').addEventListener('change', updateContextToolsSummary);
+    el('textScopeSelect').addEventListener('change', updateContextToolsSummary);
 
     panel.querySelectorAll('.ai-mode-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -237,7 +237,7 @@ async function renderAiPanel(chapter) {
       });
     });
 
-    document.getElementById('aiChatSendBtn').addEventListener('click', () => sendChatMessage(chapter));
+    el('aiChatSendBtn').addEventListener('click', () => sendChatMessage(chapter));
     // @isim yazımı: hem sohbet hem talimat kutusunda çalışır
     ['aiChatInput', 'aiInstruction'].forEach(id => {
       const el = document.getElementById(id);
@@ -261,26 +261,26 @@ async function renderAiPanel(chapter) {
         }, 150);
       });
     });
-    document.getElementById('aiChatInput').addEventListener('keydown', (e) => {
+    el('aiChatInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(chapter); }
     });
-    document.getElementById('clearChatBtn').addEventListener('click', () => {
+    el('clearChatBtn').addEventListener('click', () => {
       aiChatMessages = [];
       aiRoomHistories[currentAiRoom] = [];   // sadece AKTİF odayı temizle
       renderChatMessages();
     });
-    document.getElementById('aiAssistBtn').addEventListener('click', () => runAiAssist(chapter));
-    document.getElementById('previewContextBtn').addEventListener('click', () => runContextPreview(chapter));
+    el('aiAssistBtn').addEventListener('click', () => runAiAssist(chapter));
+    el('previewContextBtn').addEventListener('click', () => runContextPreview(chapter));
 
-    document.getElementById('resultInsertBtn').addEventListener('click', () => {
+    el('resultInsertBtn').addEventListener('click', () => {
       insertChatReplyAsParagraph(el('aiResultText').textContent);
     });
-    document.getElementById('resultCopyBtn').addEventListener('click', async () => {
+    el('resultCopyBtn').addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(el('aiResultText').textContent);
       } catch (e) { /* pano izni yoksa sessizce geç - kritik değil */ }
     });
-    document.getElementById('resultClearBtn').addEventListener('click', () => clearResult());
+    el('resultClearBtn').addEventListener('click', () => clearResult());
   } catch (err) {
     panel.innerHTML = `<h3>AI Yazım Desteği</h3><div class="error-text">${escapeHtml(err.message)}</div>`;
   }
@@ -644,7 +644,7 @@ function renderImportView() {
 
   // Yedeği indir: api.js JSON parse ettiği için burada doğrudan fetch -
   // yanıt blob olarak alınıp tarayıcıya indirtilir.
-  document.getElementById('restoreBackupBtn').addEventListener('click', async () => {
+  el('restoreBackupBtn').addEventListener('click', async () => {
     const fileInput = document.getElementById('restoreFile');
     const mode = el('restoreMode').value;
     const state = document.getElementById('restoreState');
@@ -671,7 +671,7 @@ function renderImportView() {
     } finally { btn.disabled = false; }
   });
 
-  document.getElementById('exportBackupBtn').addEventListener('click', async () => {
+  el('exportBackupBtn').addEventListener('click', async () => {
     const btn = document.getElementById('exportBackupBtn');
     const state = document.getElementById('exportBackupState');
     btn.disabled = true; state.textContent = 'Hazırlanıyor…';
@@ -699,7 +699,7 @@ function renderImportView() {
     } finally { btn.disabled = false; }
   });
 
-  document.getElementById('importBtn').addEventListener('click', async () => {
+  el('importBtn').addEventListener('click', async () => {
     const fileInput = document.getElementById('importFile');
     if (!fileInput.files.length) { alert('Bir dosya seç.'); return; }
     const aiSplit = el('aiSplitImportCheck').checked;
@@ -735,7 +735,7 @@ function renderImportView() {
     }
   });
 
-  document.getElementById('reindexBtn').addEventListener('click', async () => {
+  el('reindexBtn').addEventListener('click', async () => {
     const resultEl = document.getElementById('reindexResult');
     resultEl.innerHTML = '<div class="empty-state">Taranıyor…</div>';
     try {
@@ -932,9 +932,9 @@ async function renderEventsView() {
     <div class="entity-list" id="eventList"><div class="empty-state">Yükleniyor…</div></div>
     <div id="eventFormContainer"></div>`;
 
-  document.getElementById('addEventBtn').addEventListener('click', () => showEventForm(null));
-  document.getElementById('checkConflictsBtn').addEventListener('click', checkEventConflicts);
-  document.getElementById('scanAllEventsBtn').addEventListener('click', runBulkEventScan);
+  el('addEventBtn').addEventListener('click', () => showEventForm(null));
+  el('checkConflictsBtn').addEventListener('click', checkEventConflicts);
+  el('scanAllEventsBtn').addEventListener('click', runBulkEventScan);
   ['eventSortSelect', 'eventDateFilter', 'eventMissingOnly'].forEach(id =>
     document.getElementById(id).addEventListener('input', loadEventList));
   await loadEventList();
@@ -1054,8 +1054,8 @@ async function showEventForm(event) {
         <div id="eventFormError" class="error-text"></div>
       </div>`;
 
-    document.getElementById('cancelEventBtn').addEventListener('click', () => { container.innerHTML = ''; });
-    document.getElementById('saveEventBtn').addEventListener('click', async () => {
+    el('cancelEventBtn').addEventListener('click', () => { container.innerHTML = ''; });
+    el('saveEventBtn').addEventListener('click', async () => {
       const name = el('ev_name').value.trim();
       if (!name) { el('eventFormError').textContent = 'Olay adı boş olamaz.'; return; }
       const placeVal = el('ev_place').value;
@@ -1114,7 +1114,7 @@ async function renderRelationshipsView() {
     <div class="entity-list" id="relList"><div class="empty-state">Yükleniyor…</div></div>
     <div id="relFormContainer"></div>`;
 
-  document.getElementById('addRelBtn').addEventListener('click', showRelationshipForm);
+  el('addRelBtn').addEventListener('click', showRelationshipForm);
   await loadRelationships();
 }
 
@@ -1204,8 +1204,8 @@ async function showRelationshipForm() {
         <div id="relFormError" class="error-text"></div>
       </div>`;
 
-    document.getElementById('cancelRelBtn').addEventListener('click', () => { container.innerHTML = ''; });
-    document.getElementById('saveRelBtn').addEventListener('click', async () => {
+    el('cancelRelBtn').addEventListener('click', () => { container.innerHTML = ''; });
+    el('saveRelBtn').addEventListener('click', async () => {
       const label = el('rel_label').value.trim();
       if (!label) { el('relFormError').textContent = 'İlişki tanımı boş olamaz.'; return; }
       const payload = {
