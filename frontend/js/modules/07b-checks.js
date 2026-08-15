@@ -26,6 +26,7 @@
 var KONTROLLER = [
   {
     id: 'literary',
+    kaynak: 'editor',
     label: '📊 Edebî ölçütler',
     hint: '10 ölçütlü editör karnesi: betimleme, atmosfer, alt metin, ritim, karakterizasyon…',
     cost: 'pahalı',
@@ -39,6 +40,7 @@ var KONTROLLER = [
   },
   {
     id: 'reader',
+    kaynak: 'okur',
     label: '🎯 Okur gözü',
     hint: 'Okuru düşüren noktalar: tempo, bilgi bocası, klişe, anlaşılırlık, diyalog sorunları.',
     cost: 'pahalı',
@@ -52,6 +54,7 @@ var KONTROLLER = [
   },
   {
     id: 'voice',
+    kaynak: 'ses',
     label: '🗣 Anlatıcı ve odak',
     hint: 'Bakış açısı kayması, anlatıcının bilemeyeceği bilgi, mesafe/zaman kayması. Diyalogsuz bölümlerde kapatılabilir.',
     cost: 'orta',
@@ -69,6 +72,7 @@ var KONTROLLER = [
   },
   {
     id: 'roles',
+    kaynak: null,   // bulgu üretmez, işlev doldurur
     label: '🎯 Paragraf işlevleri',
     hint: 'Her paragrafın sahnedeki görevini çıkarır ("olay mahalli tanıtılıyor"). Yeniden yazımın ölçüsü olur.',
     cost: 'orta',
@@ -86,6 +90,7 @@ var KONTROLLER = [
   },
   {
     id: 'motif',
+    kaynak: 'imge',
     label: '🎨 İmge/motif haritası',
     hint: 'Tüm paragrafların imgelerini çıkarıp tekrarları bulur; leitmotif ile tekrarı ayırır.',
     cost: 'pahalı',

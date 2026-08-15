@@ -306,6 +306,13 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   düzeltilmişse `✓5`). Puan bulgu sayısı ve ağırlığından türetilir;
   "tercih" sınıfı teşhisler puanı düşürmez. Hepsi inceleme önbelleğinden
   okunur - ek AI isteği yok, sayfa açılışında anında görünür.
+- **🧪 Paragraf kontrol özeti**: her paragrafın üstünde "3/4 kontrol temiz"
+  rozeti; dokununca hangi kontrolden geçtiği listelenir. Üç durum ayrılır:
+  **✓ temiz** (çalıştı, bulgu yok), **⚠ bulgu var**, **○ çalışmadı**
+  (kapalıydı ya da hata verdi). Bu ayrım kritik: bulgu çıkmaması
+  "sorunsuz" demek DEĞİL - kontrol hiç çalışmamış olabilir. Liste bunu
+  açıkça yazar: "○ işaretli kontroller çalışmadı, bu paragraf o açıdan
+  denetlenmedi."
 - **🩺 Kontrol Ajanı (Sistem Sağlığı)**: arayüzde bir şey ters gittiğinde
   sistem KENDİ bildirir - kullanıcının ekran görüntüsü alması gerekmez.
   İzlenen türler: 💥 çökme (yakalanmamış JS hatası), 🔥 sunucu hatası

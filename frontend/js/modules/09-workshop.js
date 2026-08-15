@@ -250,6 +250,12 @@ async function renderWorkshopReview() {
     }
   }
   workshopState.failedChecks = dusenler;
+  // Hangi kontroller GERÇEKTEN çalıştı: paragraf ekranında "hangi testten
+  // geçti" göstergesi buna dayanır. Kapalı ya da düşen kontrol "geçti"
+  // sayılmamalı - yanlış güven verir.
+  workshopState.ranChecks = secili
+    .filter(k => hamSonuclar[k.id] !== undefined)
+    .map(k => k.id);
 
   try {
     // Edebî karne olmadan özet ekranı kurulamaz - zorunlu kontrol
@@ -315,6 +321,7 @@ async function renderWorkshopParagraph(idx) {
       </label>
       <span>${escapeHtml((effectiveParaPurpose(num).source) ? 'işlev: ' + effectiveParaPurpose(num).source : 'işlev tanımsız')}</span>
     </div>
+    ${paragrafKontrolOzeti(num)}
 
     <div class="field" style="margin:8px 0;">
       <label style="font-size:10.5px;">🎯 BU PARAGRAFIN İŞİ</label>
@@ -358,6 +365,12 @@ async function renderWorkshopParagraph(idx) {
     </div>`);
 
   el('workshopClose').addEventListener('click', closeWorkshop);
+  // Kontrol özeti aç/kapa
+  el('paraChecksToggle').addEventListener('click', () => {
+    const liste = el('paraChecksList');
+    const acik = liste.style.display !== 'none';
+    liste.style.display = acik ? 'none' : 'block';
+  });
   wireMicroEdit(ch, num);   // metinde ifade seçince mikro düzenleme çubuğu
   el('wsPurpose').addEventListener('input', (e) => {
     paraPurposes[num] = e.target.value; saveParaState();
@@ -1368,4 +1381,58 @@ function renderFindingChips(kapsayiciId, ogeler) {
     goster(acikMi ? null : i);   // ikinci dokunuş kapatır
   }));
   goster(0);   // ilki açık başlasın
+}
+
+// ---------------------------------------------------------------------------
+// PARAGRAF KONTROL ÖZETİ: bu paragrafın HANGİ testlerden geçtiğini gösterir.
+// Neden gerekli: bulgu çıkmaması "sorunsuz" anlamına gelmiyordu - kontrol
+// hiç çalışmamış da olabilir (kapalıydı ya da hata verdi). Kapsama
+// görünmeyince yanlış güven oluşuyordu.
+//
+// Üç durum: ✓ temiz (çalıştı, bulgu yok) · ⚠ bulgu var · ○ çalışmadı.
+// ---------------------------------------------------------------------------
+function paragrafKontrolDurumu(num) {
+  const kayitlar = (workshopState.findings || {})[num] || [];
+  const calisanlar = workshopState.ranChecks || [];
+  const dusenMetni = (workshopState.failedChecks || []).join(' ');
+  return (typeof KONTROLLER !== 'undefined' ? KONTROLLER : []).map(k => {
+    if (!calisanlar.includes(k.id)) {
+      const dustu = dusenMetni.includes(k.label);
+      return { k, durum: 'yok', not: dustu ? 'hata verdi' : (kontrolAcikMi(k.id) ? 'çalışmadı' : 'kapalı') };
+    }
+    if (!k.kaynak) return { k, durum: 'bilgi', not: 'işlev dolduruldu' };
+    const bulgu = kayitlar.filter(x => x.kaynak === k.kaynak);
+    return bulgu.length
+      ? { k, durum: 'bulgu', not: `${bulgu.length} bulgu`, bulgular: bulgu }
+      : { k, durum: 'temiz', not: 'temiz' };
+  });
+}
+
+function paragrafKontrolOzeti(num) {
+  const durumlar = paragrafKontrolDurumu(num);
+  if (!durumlar.length) return '';
+  const temiz = durumlar.filter(d => d.durum === 'temiz').length;
+  const bulgulu = durumlar.filter(d => d.durum === 'bulgu').length;
+  const yok = durumlar.filter(d => d.durum === 'yok').length;
+  const simge = { temiz: '✓', bulgu: '⚠', yok: '○', bilgi: 'ℹ' };
+  const renk = { temiz: '#3f7a4f', bulgu: '#b08d3f', yok: 'var(--text-muted)', bilgi: 'var(--text-muted)' };
+  const ozetRenk = bulgulu ? '#b08d3f' : (yok ? 'var(--text-muted)' : '#3f7a4f');
+  return `
+    <div style="margin-top:6px;">
+      <button class="btn btn-sm" id="paraChecksToggle" style="font-size:11px;padding:2px 8px;color:${ozetRenk};"
+        title="Bu paragrafın hangi kontrollerden geçtiği - dokun, listeyi aç">
+        🧪 ${temiz}/${durumlar.filter(d => d.durum !== 'bilgi').length} kontrol temiz${bulgulu ? ` · ${bulgulu} bulgu` : ''}${yok ? ` · ${yok} çalışmadı` : ''}
+      </button>
+      <div id="paraChecksList" style="display:none;margin-top:4px;font-size:11.5px;">
+        ${durumlar.map(d => `
+          <div style="display:flex;gap:6px;padding:2px 0;color:${renk[d.durum]};">
+            <span>${simge[d.durum]}</span>
+            <span style="flex:1;min-width:0;">${escapeHtml(d.k.label)}
+              <span style="color:var(--text-muted);">· ${escapeHtml(d.not)}</span></span>
+          </div>`).join('')}
+        ${yok ? `<div style="color:var(--text-muted);margin-top:4px;">
+          ○ işaretli kontroller çalışmadı - bu paragraf o açıdan <b>denetlenmedi</b>,
+          "sorunsuz" olduğu anlamına gelmez.</div>` : ''}
+      </div>
+    </div>`;
 }

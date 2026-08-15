@@ -207,4 +207,26 @@ test('kayıtlı incelemeyle düzenlemeye devam akışı', async () => {
   if (!document.getElementById('wsParaText')) throw new Error('paragraf ekranına geçilmedi');
 });
 
+// --- 10. Kontrol özeti: "çalışmadı" ile "temiz" AYRIMI ---
+// Bulgu çıkmaması "sorunsuz" demek değil - kontrol hiç çalışmamış da
+// olabilir. Bu ayrım kaybolursa yanlış güven oluşur.
+test('paragraf kontrol özeti çalışmayanı temiz saymaz', () => {
+  const ws = global.window.workshopState;
+  ws.findings = { 5: [{ kaynak: 'okur', baslik: 'Tempo', sorun: 'x' }] };
+  ws.ranChecks = ['literary', 'reader'];      // voice/motif ÇALIŞMADI
+  ws.failedChecks = [];
+
+  const d = paragrafKontrolDurumu(5);
+  const bul = (id) => d.find(x => x.k.id === id);
+  if (bul('reader').durum !== 'bulgu') throw new Error('bulgu görülmedi');
+  if (bul('literary').durum !== 'temiz') throw new Error('temiz görülmedi');
+  if (bul('voice').durum !== 'yok') throw new Error('çalışmayan kontrol TEMİZ sayıldı');
+  if (bul('motif').durum !== 'yok') throw new Error('çalışmayan kontrol TEMİZ sayıldı');
+
+  // Hiç bulgu olmayan paragrafta da çalışmayanlar "yok" kalır
+  const d2 = paragrafKontrolDurumu(99);
+  if (d2.find(x => x.k.id === 'voice').durum !== 'yok') throw new Error('kapsama yanılsaması');
+  if (d2.find(x => x.k.id === 'literary').durum !== 'temiz') throw new Error('temiz sayılmadı');
+});
+
 Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));
