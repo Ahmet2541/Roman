@@ -306,6 +306,19 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   düzeltilmişse `✓5`). Puan bulgu sayısı ve ağırlığından türetilir;
   "tercih" sınıfı teşhisler puanı düşürmez. Hepsi inceleme önbelleğinden
   okunur - ek AI isteği yok, sayfa açılışında anında görünür.
+- **🎯 Başarı ölçütü (üretimin hedefi)**: teşhis "neyin yanlış olduğunu"
+  söylüyordu ama "neyin doğru sayılacağını" söylemiyordu - model hedefi
+  bilmediği için aynı eksende EŞANLAMLILAR üretiyordu ("sürekli aynı
+  cevabı veriyor"). Artık her teşhis ÖLÇÜLEBİLİR bir koşul üretir:
+  "mendil için en fazla BİR duygusal tanımlayıcı kalırsa", "yargı sıfatı
+  sayısı SIFIR olursa". Ölçülemez ifadeler ("daha edebi olsun") yasak.
+  Aynı ölçüt üç yere birden gider: üretime hedef, aday değerlendirmesine
+  kıyas ölçüsü, kullanıcıya 🎯 rozeti olarak.
+- **🔗 Bağlı detay zinciri**: bir olguyu değiştirmek tek kelimelik iş
+  değildir. Malzeme/mekân/zaman/nesne değişirse ona bağlı duyusal ve
+  fiziksel detaylar da değişmeli - tahta gıcırdar, çelik çınlar; ıslak
+  kayar, kuru tutar. Hem üretim direktiflerinde hem doğrulamada kontrol
+  edilir: "çelik merdiven" yapılıp "gıcırdadı" bırakılırsa HATA sayılır.
 - **❓ AI soru sorabilir (yazardan bilgi alma)**: bir paragrafın kurgusal
   gerekçesi METİNDE YOKSA ve cevabı yeniden yazımı değiştirecekse, model
   tahmin etmek yerine SORAR. Örnek: "Dikkat et, karışmasın birbirine"
@@ -657,7 +670,7 @@ Kurallar:
 
 ## Testler
 
-**187 test** (20 dosya) - AI çağrıları `unittest.mock` ile sahte Qwen
+**191 test** (21 dosya) - AI çağrıları `unittest.mock` ile sahte Qwen
 yanıtlarıyla çalışır, gerçek bir `DASHSCOPE_API_KEY` gerekmez.
 
 Frontend tarafında iki katman test var: **modül bütünlüğü** (her modül tek

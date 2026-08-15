@@ -1100,6 +1100,10 @@ class FusionRequest(BaseModel):
 class Diagnosis(BaseModel):
     title: str = ""
     cls: str = "belirsiz"     # hata | zayif | tercih | belirsiz
+    # BAŞARI ÖLÇÜTÜ: "bu düzeltme başarılı sayılır EĞER ..." - ölçülebilir
+    # koşul. Bu olmadan üretici model neyi hedefleyeceğini bilemiyor ve
+    # aynı fikrin eşanlamlılarını üretip duruyordu.
+    success_criterion: str = ""
     evidence: str = ""
     sources: List[str] = []
     confidence: float = 0.5

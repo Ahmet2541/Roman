@@ -639,11 +639,30 @@ function buildParagraphDirectives(num, kayitlar, paraText) {
       + cevaplar.map(c => `${c.soru} → ${c.cevap}`).join('\n- '));
   }
   if (degistir.length) satirlar.push('DEĞİŞTİR (testlerden çıkan bulgular):\n- ' + degistir.join('\n- '));
+  // BAŞARI ÖLÇÜTÜ: "neyin yanlış olduğu" yetmiyor - "neyin doğru sayılacağı"
+  // da söylenmezse model aynı eksende eşanlamlılar üretiyor. Ölçütler
+  // teşhis aşamasında üretilir ve hem ÜRETİME hem DOĞRULAMAYA aynı hedefi
+  // verir.
+  const olcutler = ((workshopState.diagnoses || {})[num] || [])
+    .filter(d => (d.success_criterion || '').trim())
+    .map(d => d.success_criterion.trim());
+  if (olcutler.length) {
+    satirlar.push('BAŞARI ÖLÇÜTÜ (yeni metin BUNLARI sağlamalı - sağlamayan seçenek üretme):\n- '
+      + olcutler.join('\n- '));
+  }
   if (koru.length) satirlar.push(
     'KORU - bu veriler yeni metinde AYNEN geçmeli (kontrol bunları arar): ' + koru.join(', '));
   if (kacin.length) satirlar.push('KAÇIN (aşırı kullanılmış kalıplar): ' + kacin.join(', '));
   satirlar.push('DAİMA: eylem sırasını bozma, olay akışını ve zamanı koru, '
     + '"sanki/gibi/adeta" ile açıklama yapma, yargı sıfatı kullanma.');
+  // BAĞLI DETAY ZİNCİRİ: bir olguyu değiştirmek tek kelimelik iş değildir.
+  // Malzeme, mekân, zaman ya da nesne değişirse ona BAĞLI duyusal ve
+  // fiziksel detaylar da değişmeli - yoksa metin kendi içinde çelişir
+  // (tahta gıcırdar, çelik çınlar; gece gölge yapmaz, gündüz yapar).
+  satirlar.push('BAĞLI DETAY ZİNCİRİ: bir olguyu (malzeme, mekân, zaman, nesne, hava, '
+    + 'mesafe) değiştirirsen ona BAĞLI tüm duyusal/fiziksel detayları da tutarlı hale getir. '
+    + 'Tahta gıcırdar, çelik çınlar; ıslak kayar, kuru tutar; gece gölge düşürmez. '
+    + 'Değişiklikle çelişen ESKİ detay bırakma - metin kendi içinde çelişir.');
   // ÜRETİM, DENETİMİ ÖNCEDEN BİLSİN: aynı ölçütlerle üretilmeyen metin
   // kontrolde takılıyor ve döngü kuruluyordu. Kontrol listesi burada.
   // EN KÜÇÜK ETKİLİ MÜDAHALE: model "paragrafı baştan yazalım, yeni sembol
@@ -728,6 +747,11 @@ async function workshopFix(chapter, num, issue, bicimDenemesi = 0) {
     + 'açıklama yok, yargı sıfatı yok.\n'
     + 'ÜÇ FARKLI YAKLAŞIM üret (aynı fikrin varyasyonu DEĞİL): biri mikro detaya, '
     + 'biri sese/sessizliğe, biri harekete yaslansın.\n'
+    + 'SİLME SINIRI (kesin): bulgunun İŞARET ETMEDİĞİ cümleleri silme. Özellikle '
+    + 'paragrafın KAPANIŞ VURUŞUNU (son cümle ya da son iki cümle) koru - orası çoğu '
+    + 'zaman paragrafın işlevini taşır. Bir bulgu "fazla sıfat" diyorsa çözüm sıfatı '
+    + 'atmaktır, cümleyi atmak değil. Yaklaşımlar BİRBİRİNDEN farklı olsun ama üçü de '
+    + 'paragrafın İŞLEVİNİ korusun; işlevi kaybeden bir seçenek üretme.\n'
     + 'SORU SORMA HAKKIN VAR: paragrafın kurgusal gerekçesi metinde YOKSA ve cevabı '
     + 'yeniden yazımı DEĞİŞTİRECEKSE, tahmin etme - SOR. Örnek: bir uyarının ("dikkat et, '
     + 'karışmasın") sebebi metinde açıklanmamışsa, o sebebi bilmeden doğru vurguyu kuramazsın. '
@@ -806,7 +830,14 @@ async function workshopFix(chapter, num, issue, bicimDenemesi = 0) {
     // (sayı-isim kaybı) hemen çalışır ve karta rozet olarak basılır. Böylece
     // "uygula -> kontrol -> geri dön -> yeniden yaz" döngüsüne girmeden
     // hangi seçeneğin temiz olduğunu görüp doğrudan seçersin.
-    secenekler.forEach(o => { o.quick = quickFactCheck(eskiMetin, o.text); });
+    secenekler.forEach(o => {
+      o.quick = quickFactCheck(eskiMetin, o.text);
+      // AŞIRI SİLME KONTROLÜ (deterministik, ücretsiz): üreteç bulgunun
+      // işaret etmediği cümleleri de siliyor - özellikle KAPANIŞ vuruşunu.
+      // Testte üç seçeneğin üçü de paragrafın son cümlesini attı, oysa
+      // denetçi aynı silmeyi "işlev kaybı" diye reddediyordu.
+      o.quick = o.quick.concat(overDeletionWarnings(eskiMetin, o.text));
+    });
     box.innerHTML = `
       ${sorular.length ? `
         <div style="border:1px solid var(--gold);border-radius:8px;padding:8px;margin-bottom:8px;background:#fffdf6;">
@@ -875,7 +906,14 @@ async function workshopFix(chapter, num, issue, bicimDenemesi = 0) {
           const rv = await api.post('/ai/review-options', {
             original: eskiMetin,
             options: secenekler.map(o => o.text),
-            findings: kayitlar.map(k => `${k.baslik}: ${k.sorun || ''}`),
+            findings: [
+              ...kayitlar.map(k => `${k.baslik}: ${k.sorun || ''}`),
+              // Ölçütler bulgularla birlikte gider: adaylar aynı hedefe
+              // karşı değerlendirilsin
+              ...((workshopState.diagnoses || {})[num] || [])
+                .filter(d => (d.success_criterion || '').trim())
+                .map(d => `BAŞARI ÖLÇÜTÜ: ${d.success_criterion.trim()}`),
+            ],
             purpose: effectiveParaPurpose(num).text,
           });
           const simge = { iyi: '✅', kismi: '🟡', kotu: '❌' };
@@ -1456,6 +1494,7 @@ function renderDiagnoses(num, teshisler) {
           ${d.confidence ? `<span style="color:var(--text-muted);font-weight:400;">· güven %${Math.round(d.confidence * 100)}</span>` : ''}</div>
         ${d.evidence ? `<div style="font-style:italic;color:var(--text-muted);margin-top:2px;">"${escapeHtml(d.evidence)}"</div>` : ''}
         ${d.why ? `<div style="color:var(--text-muted);margin-top:2px;">${escapeHtml(d.why)}</div>` : ''}
+        ${d.success_criterion ? `<div style="margin-top:3px;color:#3f7a4f;">🎯 <b>Başarı ölçütü:</b> ${escapeHtml(d.success_criterion)}</div>` : ''}
         ${d.cls === 'tercih' && d.intent_note ? `<div style="color:#3f7a4f;margin-top:2px;">💡 ${escapeHtml(d.intent_note)}</div>` : ''}
         <div style="font-size:10.5px;color:var(--text-muted);margin-top:3px;">${st.not}</div>`,
     };
@@ -1550,4 +1589,54 @@ function paragrafKontrolOzeti(num) {
           "sorunsuz" olduğu anlamına gelmez.</div>` : ''}
       </div>
     </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// AŞIRI SİLME UYARISI (deterministik, AI'sız). Üreteç, bulgunun işaret
+// etmediği cümleleri de silebiliyor - en sık kurban paragrafın KAPANIŞ
+// vuruşu oluyor, ki işlevi çoğu zaman orası taşır. Denetçi bunu sonradan
+// "işlev kaybı" diye reddediyor; bu kontrol aynı sorunu ÜCRETSİZ ve ANINDA
+// yakalar, kullanıcı seçeneğe bakarken görür.
+// ---------------------------------------------------------------------------
+function cumlelereAyir(metin) {
+  return (metin || '')
+    .split(/(?<=[.!?…])\s+/)
+    .map(c => c.trim())
+    .filter(Boolean);
+}
+
+function overDeletionWarnings(eski, yeni) {
+  const uyarilar = [];
+  const e = cumlelereAyir(eski);
+  const y = cumlelereAyir(yeni);
+  if (!e.length) return uyarilar;
+
+  // 1) KAPANIŞ VURUŞU korunmuş mu? Tek kelimenin hayatta kalması yetmez -
+  //    "Mendil kalmıştı. Sadece mendil." kapanışında yalnızca "mendil"
+  //    geçiyor diye korunmuş sayılırsa kontrol işe yaramaz. Kapanışın
+  //    ayırt edici kelimelerinin ÇOĞU korunmalı. Son cümle çok kısaysa
+  //    (vuruş etkisi için) bir önceki cümleyle birlikte değerlendirilir.
+  let kapanis = e[e.length - 1];
+  if (e.length >= 2 && kapanis.split(/\s+/).length < 5) {
+    kapanis = e[e.length - 2] + ' ' + kapanis;
+  }
+  const anahtarlar = [...new Set(
+    kapanis.toLowerCase()
+      .replace(/[.,!?;:—–-]/g, ' ')
+      .split(/\s+/)
+      .filter(k => k.length > 3)
+  )];
+  if (anahtarlar.length >= 2) {
+    const yeniNorm = (yeni || '').toLowerCase();
+    const kalan = anahtarlar.filter(k => yeniNorm.includes(k));
+    if (kalan.length / anahtarlar.length < 0.6) {
+      uyarilar.push(`Kapanış vuruşu düşmüş: "${truncate(kapanis, 50)}" - paragrafın işlevi çoğu zaman orada durur.`);
+    }
+  }
+
+  // 2) Cümle sayısında sert düşüş (bulgu "fazla sıfat" ise cümle atılmamalı)
+  if (e.length >= 4 && y.length <= Math.ceil(e.length * 0.6)) {
+    uyarilar.push(`${e.length} cümle → ${y.length} cümle: bulgunun işaret etmediği cümleler silinmiş olabilir.`);
+  }
+  return uyarilar;
 }

@@ -1118,3 +1118,60 @@ def test_verify_pronoun_substitution_is_not_a_loss(client, headers):
     sert = " ".join(d["hard_issues"])
     assert "SORUN DEĞİL" in sert, "zamir istisnası uygulanmadı"
     assert "düştü:" not in sert, "kesin kayıp olarak raporlandı"
+
+
+def test_fusion_requires_measurable_success_criterion(client, headers):
+    """BAŞARI ÖLÇÜTÜ: teşhis "neyin yanlış" olduğunu söylüyordu ama "neyin
+    doğru sayılacağını" söylemiyordu - üretici model aynı eksende
+    eşanlamlılar üretip duruyordu ("sürekli aynı cevabı veriyor").
+    Ölçüt hem ÜRETİME hem DOĞRULAMAYA aynı hedefi verir."""
+    from app.qwen_client import FUSION_PROMPT
+    assert "BAŞARI ÖLÇÜTÜ" in FUSION_PROMPT
+    assert "ölçülemez" in FUSION_PROMPT.lower() or "ÖLÇÜLEBİLİR" in FUSION_PROMPT
+
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({"diagnoses": [
+            {"title": "Duygusal ipucu tekrarı", "class": "zayif", "evidence": "kenarları sararmış",
+             "success_criterion": "mendil için en fazla BİR duygusal tanımlayıcı kalırsa",
+             "sources": ["editor"], "confidence": 0.8},
+            {"title": "Kısa cümleler", "class": "tercih", "evidence": "Depremde değil.",
+             "success_criterion": "bu ölçüt YAZILMAMALI", "intent_note": "bilinçli ritim"},
+        ]})
+        r = client.post("/ai/fuse-diagnoses", json={
+            "paragraph_text": "Mendil kalmıştı. Sadece mendil.",
+            "findings": [{"source": "editor", "title": "Tekrar", "detail": "x"}],
+        }, headers=headers)
+    d = r.json()["diagnoses"]
+    assert "en fazla BİR" in d[0]["success_criterion"]
+    # "tercih" sınıfına ölçüt yazılmaz - o zaten düzeltilmeyecek
+    assert d[1]["success_criterion"] == "", "tercih sınıfına ölçüt sızdı"
+
+
+def test_verify_checks_dependent_detail_chain(client, headers):
+    """BAĞLI DETAY ZİNCİRİ: bir olguyu değiştirmek tek kelimelik iş değil.
+    "tahta merdiven" -> "çelik merdiven" yapılıp "gıcırdadı" bırakılırsa
+    metin kendi içinde çelişir - çelik gıcırdamaz. Hem üretim hem
+    doğrulama bunu bilmeli."""
+    from app.qwen_client import VERIFY_PROMPT
+    assert "BAĞLI DETAY TUTARLILIĞI" in VERIFY_PROMPT
+    assert "gıcırdamaz" in VERIFY_PROMPT
+
+    captured = {}
+    def fake_create(**kwargs):
+        captured["system"] = kwargs["messages"][0]["content"]
+        return _fake_qwen({
+            "verdict": "duzelt",
+            "issues": ["Merdiven çelik yapıldı ama 'gıcırdadı' kalmış - çelik gıcırdamaz."],
+            "note": "Bağlı detay güncellenmemiş.", "function_preservation": "A",
+        })
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.side_effect = fake_create
+        r = client.post("/ai/verify-rewrite", json={
+            "old_text": "Tahta merdivenden çıktı; basamaklar gıcırdadı.",
+            "new_text": "Çelik merdivenden çıktı; basamaklar gıcırdadı.",
+            "proposal_goal": "Merdiveni kanondaki gibi çelik yap",
+        }, headers=headers)
+    assert "BAĞLI DETAY" in captured["system"]
+    d = r.json()
+    assert d["verdict"] == "duzelt"
+    assert "gıcırdamaz" in d["issues"][0]

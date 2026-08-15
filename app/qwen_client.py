@@ -2331,9 +2331,15 @@ def fuse_diagnoses(db: Session, paragraph_text: str, findings: list,
             guven = max(0.0, min(1.0, float(d.get("confidence", 0.5))))
         except (TypeError, ValueError):
             guven = 0.5
+        # Ölçülemez ölçüt işe yaramaz - "daha edebi olsun" gibi ifadeler
+        # üreticiyi yönlendirmiyor, aynı eşanlamlıları ürettiriyor.
+        olcut = (d.get("success_criterion") or "").strip()[:300]
+        if sinif in ("tercih", "belirsiz"):
+            olcut = ""
         out.append({
             "title": d["title"].strip()[:200],
             "cls": sinif,
+            "success_criterion": olcut,
             "evidence": (d.get("evidence") or "").strip()[:120],
             "sources": [str(x)[:20] for x in (d.get("sources") or [])][:5],
             "confidence": guven,

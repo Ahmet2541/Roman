@@ -525,6 +525,12 @@ Sonra kontrol et:
 4. EYLEM SIRASI: Tamamlanmış bir eylem yeniden başlatılmış mı?
 5. KANON: Metinde/kanonda olmayan karakter geçmişi, olay, nesne, ilişki ya da
    motivasyon eklenmiş mi? Eklendiyse bu bir HATADIR.
+6. BAĞLI DETAY TUTARLILIĞI: bir olgu DEĞİŞTİRİLDİYSE (malzeme, mekân, zaman,
+   nesne, hava, mesafe), ona bağlı duyusal/fiziksel detaylar da güncellenmiş
+   mi? Değişiklikle ÇELİŞEN eski detay kalmış mı? Örnek: "tahta merdiven"
+   "çelik merdiven" yapıldıysa ama "gıcırdadı" duruyorsa bu bir HATADIR -
+   çelik gıcırdamaz. Aynı şekilde gece yapılan bir sahnede "gölgesi uzadı"
+   kalıntısı, ıslak zeminde "toz kalktı" kalıntısı.
 
 ÖNEMLİ: Cümle başındaki büyük harfli kelimeler ÖZEL İSİM DEĞİLDİR ("Ama",
 "Sonra", "Küçük"). Cümle yapısının değişmesi kayıp sayılmaz.
@@ -694,7 +700,28 @@ Yanıtın SADECE şu JSON olsun:
 {"diagnoses": [{"title": "tek cümlelik teşhis", "class": "hata|zayif|tercih|belirsiz",
   "evidence": "metinden en fazla 10 kelime", "sources": ["editor","okur"],
   "confidence": 0.0-1.0, "why": "tek cümle gerekçe",
-  "intent_note": "tercih ise: yazar bunu neden bilerek yapmış olabilir"}]}"""
+  "success_criterion": "ÖLÇÜLEBİLİR başarı koşulu",
+  "intent_note": "tercih ise: yazar bunu neden bilerek yapmış olabilir"}]}
+
+BAŞARI ÖLÇÜTÜ (success_criterion) - EN ÖNEMLİ ALAN:
+Her teşhis için "bu düzeltme başarılı sayılır EĞER ..." koşulunu yaz.
+Koşul SAYILABİLİR ya da KONTROL EDİLEBİLİR olmalı; yoksa üretici model
+neyi hedefleyeceğini bilemez ve aynı fikrin eşanlamlılarını üretip durur.
+
+İYİ örnekler:
+- "mendil için en fazla BİR duygusal tanımlayıcı kalırsa"
+- "yargı sıfatı ('huzurlu','sıradan') sayısı SIFIR olursa ve yerine
+   gözlemlenebilir bir detay gelirse"
+- "okur, karakterin korktuğunu 'korktu' kelimesi geçmeden anlarsa"
+- "aynı imge bu paragrafta yalnızca BİR kez geçerse"
+
+KÖTÜ örnekler (bunları YAZMA):
+- "daha edebi olursa"          (ölçülemez)
+- "alt metin güçlenirse"        (ne kadar?)
+- "okur daha iyi hissederse"    (kontrol edilemez)
+
+"tercih" ve "belirsiz" sınıflarında success_criterion BOŞ bırak - onlara
+düzeltme önerilmiyor."""
 
 
 TRADEOFF_PROMPT = """Sen titiz bir editörsün. Bir paragrafın ESKİ ve ÖNERİLEN

@@ -287,4 +287,29 @@ test('ayraçsız üç paragraf yine de ayrışır', () => {
   if (parseOptionBlocks(kisa).length !== 1) throw new Error('kısa parçalar seçenek sayıldı');
 });
 
+// --- 14. AŞIRI SİLME: üreteç, denetçinin reddedeceği metin üretiyordu ---
+// Gerçek Qwen testinde ortaya çıktı: üç seçeneğin ÜÇÜ DE paragrafın kapanış
+// vuruşunu sildi, oysa aynı model o silmeyi "işlev kaybı (C)" diye
+// reddediyordu. Bu deterministik kontrol aynı sorunu ÜCRETSİZ yakalar.
+test('kapanış vuruşu silinince uyarı verir', () => {
+  const orj = 'Başını salladı. Cebinden bir mendil çıkardı — karısının işlediği bir mendil '
+    + '— ve alnındaki teri sildi. Karısı, üç yıl önce ölmüştü. Depremde değil. Kanserde. '
+    + 'Ama deprem, onu da almıştı. Mendil kalmıştı. Sadece mendil.';
+
+  const kapanisSilinmis = 'Başını salladı. Cebinden karısının işlediği mendili çıkardı ve '
+    + 'alnındaki teri sildi. Karısı, üç yıl önce ölmüştü. Depremde değil. Kanserde. '
+    + 'Ama deprem, onu da almıştı.';
+  if (!overDeletionWarnings(orj, kapanisSilinmis).length) throw new Error('kapanış silinmesi yakalanmadı');
+
+  const dogruDuzeltme = 'Başını salladı. Cebinden bir mendil çıkardı ve alnındaki teri sildi. '
+    + 'Karısı, üç yıl önce ölmüştü. Depremde değil. Kanserde. Ama deprem, onu da almıştı. '
+    + 'Mendil kalmıştı. Sadece mendil.';
+  if (overDeletionWarnings(orj, dogruDuzeltme).length) throw new Error('doğru düzeltme yanlış uyarı aldı');
+
+  // Kapanış YENİDEN YAZILMIŞ ama korunmuşsa uyarı OLMAMALI (yanlış pozitif)
+  const yenidenYazilmis = 'Başını salladı. Cebinden mendili çıkardı, alnını sildi. '
+    + 'Karısı üç yıl önce ölmüştü. Depremde değil. Kanserde. Mendil kalmıştı, sadece o.';
+  if (overDeletionWarnings(orj, yenidenYazilmis).length) throw new Error('meşru yeniden yazım engellendi');
+});
+
 Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));
