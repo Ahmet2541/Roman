@@ -354,6 +354,13 @@ async function renderWorkshopParagraph(idx) {
       <span>${escapeHtml((effectiveParaPurpose(num).source) ? 'işlev: ' + effectiveParaPurpose(num).source : 'işlev tanımsız')}</span>
     </div>
     ${paragrafKontrolOzeti(num)}
+    ${(paraAnswers[num] || []).length ? `
+      <div style="margin-top:6px;font-size:11.5px;border-left:3px solid var(--gold);padding-left:8px;">
+        <div style="color:var(--text-muted);letter-spacing:0.3px;font-size:10.5px;">YAZARDAN ALINAN BİLGİ (her üretimde AI'ya gider)</div>
+        ${paraAnswers[num].map((c, i) => `
+          <div style="margin-top:2px;">• ${escapeHtml(c.cevap)}
+            <span class="ans-del" data-idx="${i}" style="cursor:pointer;opacity:0.5;" title="Kaldır">✕</span></div>`).join('')}
+      </div>` : ''}
 
     <div class="field" style="margin:8px 0;">
       <label style="font-size:10.5px;">🎯 BU PARAGRAFIN İŞİ</label>
@@ -403,6 +410,11 @@ async function renderWorkshopParagraph(idx) {
     const acik = liste.style.display !== 'none';
     liste.style.display = acik ? 'none' : 'block';
   });
+  document.querySelectorAll('.ans-del').forEach(b => b.addEventListener('click', () => {
+    (paraAnswers[num] || []).splice(parseInt(b.dataset.idx, 10), 1);
+    saveParaState();
+    renderWorkshopParagraph(workshopState.idx);
+  }));
   wireMicroEdit(ch, num);   // metinde ifade seçince mikro düzenleme çubuğu
   el('wsPurpose').addEventListener('input', (e) => {
     paraPurposes[num] = e.target.value; saveParaState();
@@ -617,8 +629,15 @@ function buildParagraphDirectives(num, kayitlar, paraText) {
   const kacin = (window.__styleBanned || []).slice(0, 8);
 
   const purpose = effectiveParaPurpose(num).text;
+  const cevaplar = (typeof paraAnswers !== 'undefined' && paraAnswers[num]) || [];
   const satirlar = [];
   if (purpose) satirlar.push(`İŞLEV (öncelikli ölçüt): ${purpose}`);
+  // YAZARDAN ALINAN BİLGİ: metinde olmayan ama kurguyu belirleyen gerçekler.
+  // AI bunları tahmin edemez - sorup öğrendikleri burada kalıcılaşır.
+  if (cevaplar.length) {
+    satirlar.push('YAZARDAN ALINAN BİLGİ (metinde yok ama BAĞLAYICI - kurgunun gerçeği budur):\n- '
+      + cevaplar.map(c => `${c.soru} → ${c.cevap}`).join('\n- '));
+  }
   if (degistir.length) satirlar.push('DEĞİŞTİR (testlerden çıkan bulgular):\n- ' + degistir.join('\n- '));
   if (koru.length) satirlar.push(
     'KORU - bu veriler yeni metinde AYNEN geçmeli (kontrol bunları arar): ' + koru.join(', '));
@@ -709,6 +728,13 @@ async function workshopFix(chapter, num, issue) {
     + 'açıklama yok, yargı sıfatı yok.\n'
     + 'ÜÇ FARKLI YAKLAŞIM üret (aynı fikrin varyasyonu DEĞİL): biri mikro detaya, '
     + 'biri sese/sessizliğe, biri harekete yaslansın.\n'
+    + 'SORU SORMA HAKKIN VAR: paragrafın kurgusal gerekçesi metinde YOKSA ve cevabı '
+    + 'yeniden yazımı DEĞİŞTİRECEKSE, tahmin etme - SOR. Örnek: bir uyarının ("dikkat et, '
+    + 'karışmasın") sebebi metinde açıklanmamışsa, o sebebi bilmeden doğru vurguyu kuramazsın. '
+    + 'En fazla 2 soru, her biri tek cümle. Biçim (seçeneklerden ÖNCE):\n'
+    + '###SORU: <soru metni>\n'
+    + 'Soru yoksa hiç yazma. Sorular seçenek üretmene ENGEL değil - yine üç seçenek ver, '
+    + 'ama belirsizliği soruyla belirt.\n'
     + (gorulenler.length
         ? 'DAHA ÖNCE ŞU VERSİYONLARI ÜRETTİN - HİÇBİRİNİ TEKRARLAMA, benzerini de yazma:\n'
           + gorulenler.map((t, i) => `(${i + 1}) ${t.slice(0, 180)}`).join('\n')
@@ -733,7 +759,13 @@ async function workshopFix(chapter, num, issue) {
       existing_text: para ? para.text : '',
       include_own_summary: true,   // bölümün ZAMAN/ATMOSFER/DUYGU bilgisi
     });
-    const secenekler = parseOptionBlocks(result.generated_text || '');
+    const ham = result.generated_text || '';
+    // AI'NIN SORULARI: kurgusal gerekçe metinde yoksa model tahmin etmek
+    // yerine sorabilir. Cevaplar direktiflere eklenir ve saklanır - aynı
+    // soru ikinci kez sorulmaz.
+    const sorular = [...ham.matchAll(/^###\s*SORU\s*:?\s*(.+)$/gim)]
+      .map(m => m[1].trim()).filter(Boolean).slice(0, 3);
+    const secenekler = parseOptionBlocks(ham.replace(/^###\s*SORU\s*:?.*$/gim, ''));
     // Üretilenleri belleğe al (sonraki turda dışlanacak - son 6 tanesi yeter)
     workshopState.seen[num] = [...gorulenler, ...secenekler.map(o => o.text)].slice(-6);
 
@@ -761,6 +793,19 @@ async function workshopFix(chapter, num, issue) {
     // hangi seçeneğin temiz olduğunu görüp doğrudan seçersin.
     secenekler.forEach(o => { o.quick = quickFactCheck(eskiMetin, o.text); });
     box.innerHTML = `
+      ${sorular.length ? `
+        <div style="border:1px solid var(--gold);border-radius:8px;padding:8px;margin-bottom:8px;background:#fffdf6;">
+          <div style="font-size:10.5px;color:var(--gold);font-weight:600;letter-spacing:0.4px;">❓ AI'NIN SORUSU — cevaplarsan öneriler isabetlenir</div>
+          ${sorular.map((q, i) => `
+            <div style="margin-top:6px;">
+              <div style="font-size:12.5px;">${escapeHtml(q)}</div>
+              <input type="text" class="ai-answer" data-idx="${i}" placeholder="cevabın…"
+                style="width:100%;font-size:12.5px;margin-top:3px;box-sizing:border-box;">
+            </div>`).join('')}
+          <button class="btn btn-sm btn-primary" id="wsAnswerGo" style="margin-top:8px;width:100%;font-size:11.5px;">
+            Cevapları kullanarak yeniden üret
+          </button>
+        </div>` : ''}
       ${tekSecenek || ayniOlanlar ? `<div style="font-size:11.5px;color:#b08d3f;margin-bottom:6px;padding:5px 8px;background:var(--paper-dim);border-radius:6px;">
         ${tekSecenek ? '⚠ AI tek seçenek döndürdü (üç istenmişti). ' : ''}${ayniOlanlar ? `⚠ ${ayniOlanlar} seçenek orijinalle AYNI - fark vurgusu boş görünür. ` : ''}
         <b>🔄 Farklı 3 öneri getir</b> ile tekrar dene ya da <b>💬 Konuş</b> ile yönlendir.
@@ -791,6 +836,18 @@ async function workshopFix(chapter, num, issue) {
       <button class="btn btn-sm" id="wsMoreOptions" style="width:100%;margin-top:6px;font-size:11.5px;">🔄 Farklı 3 öneri getir</button>
       <div id="wsPhraseBox"></div>`;
     wireOptionSwiper(box);
+
+    // Cevaplar kalıcı: direktiflere girer, aynı soru tekrar sorulmaz
+    el('wsAnswerGo').addEventListener('click', async (e) => {
+      const cevaplar = [...box.querySelectorAll('.ai-answer')]
+        .map((inp, i) => ({ soru: sorular[i], cevap: inp.value.trim() }))
+        .filter(x => x.cevap);
+      if (!cevaplar.length) { alert('Önce en az bir soruyu cevapla.'); return; }
+      paraAnswers[num] = [...(paraAnswers[num] || []), ...cevaplar].slice(-6);
+      saveParaState();
+      e.target.disabled = true; e.target.textContent = 'Cevaplarla yeniden üretiliyor…';
+      await workshopFix(chapter, num, issue);
+    });
 
     // BİRLİKTE DEĞERLENDİRME (otomatik, TEK istek): adaylar kıyaslanır -
     // hangisi bulguları gerçekten giderdi, hangisi yeni sorun getirdi.

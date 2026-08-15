@@ -132,6 +132,13 @@ function el(id) { return document.getElementById(id) || _NULL_EL; }
 // var: `const` bazı çalıştırma ortamlarında script'ler arası paylaşılmıyor
 var paraPurposes = {};
 
+// AI'NIN SORULARINA VERİLEN CEVAPLAR. Kurgusal gerekçe metinde olmayınca
+// model tahmin etmek yerine sorabiliyor; cevaplar burada birikir ve sonraki
+// TÜM üretimlerde direktif olarak gider - aynı soru tekrar sorulmaz.
+// Örnek: "Dikkat et, karışmasın" uyarısının sebebi (disk aynı bölümde imha
+// edilecek) metinde yok ama doğru vurguyu belirliyor.
+var paraAnswers = {};
+
 // PARAGRAF UZUNLUK SINIRI: bu eşiği aşan paragraf kaydedilmeden önce
 // bölünmesi istenir. Sert engel DEĞİL (yazının kaybolması en kötüsüdür)
 // ama geçmek için bilinçli bir onay gerekir - "farkında olmadan 300
@@ -236,12 +243,14 @@ function markParagraphResolved(number) {
 function saveParaState() {
   try {
     localStorage.setItem(`roman_para_state_${currentChapter?.id || 0}`,
-      JSON.stringify({ purposes: paraPurposes, chats: paraChatHistories, resolved: [...resolvedParas] }));
+      JSON.stringify({ purposes: paraPurposes, chats: paraChatHistories,
+                       resolved: [...resolvedParas], answers: paraAnswers }));
   } catch (e) { /* depolama dolu olabilir - sessiz geç */ }
 }
 function loadParaState(chapterId) {
   Object.keys(paraPurposes).forEach(k => delete paraPurposes[k]);
   Object.keys(paraChatHistories).forEach(k => delete paraChatHistories[k]);
+  Object.keys(paraAnswers).forEach(k => delete paraAnswers[k]);
   resolvedParas.clear();
   // Karşılaştırma temeli de bölüme özeldir - taşınırsa yanlış kıyas olur
   if (workshopState) workshopState.baseline = {};
@@ -252,6 +261,7 @@ function loadParaState(chapterId) {
     Object.assign(paraPurposes, data.purposes || {});
     Object.assign(paraChatHistories, data.chats || {});
     (data.resolved || []).forEach(x => resolvedParas.add(String(x)));
+    Object.assign(paraAnswers, data.answers || {});
   } catch (e) { /* bozuk kayıt - yoksay */ }
 }
 
@@ -508,5 +518,6 @@ async function renderHealthView(kap) {
 if (typeof window !== 'undefined') {
   window.workshopState = workshopState;
   window.paraPurposes = paraPurposes;
+  window.paraAnswers = paraAnswers;
   window.resolvedParas = typeof resolvedParas !== 'undefined' ? resolvedParas : new Set();
 }

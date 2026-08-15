@@ -306,6 +306,15 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   düzeltilmişse `✓5`). Puan bulgu sayısı ve ağırlığından türetilir;
   "tercih" sınıfı teşhisler puanı düşürmez. Hepsi inceleme önbelleğinden
   okunur - ek AI isteği yok, sayfa açılışında anında görünür.
+- **❓ AI soru sorabilir (yazardan bilgi alma)**: bir paragrafın kurgusal
+  gerekçesi METİNDE YOKSA ve cevabı yeniden yazımı değiştirecekse, model
+  tahmin etmek yerine SORAR. Örnek: "Dikkat et, karışmasın birbirine"
+  uyarısının sebebi (disk aynı bölümde imha edilecek) metinde geçmez ama
+  doğru vurguyu belirler - bunu ancak yazar bilir. Sorular seçeneklerin
+  üstünde çıkar, cevaplayıp "Cevapları kullanarak yeniden üret" dersin.
+  Cevaplar KALICI: sonraki tüm üretimlerde "YAZARDAN ALINAN BİLGİ (metinde
+  yok ama BAĞLAYICI)" direktifi olarak gider, aynı soru tekrar sorulmaz.
+  Paragraf ekranında görünür ve tek tek kaldırılabilir.
 - **🧪 Paragraf kontrol özeti**: her paragrafın üstünde "3/4 kontrol temiz"
   rozeti; dokununca hangi kontrolden geçtiği listelenir. Üç durum ayrılır:
   **✓ temiz** (çalıştı, bulgu yok), **⚠ bulgu var**, **○ çalışmadı**

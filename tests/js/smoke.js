@@ -254,4 +254,23 @@ test('önbellek hangi kontrollerin çalıştığını saklar', () => {
     calismayan.map(x => x.k.id).join(', '));
 });
 
+// --- 12. AI'nın soruları ve yazarın cevapları ---
+// Kurgusal gerekçe metinde olmayınca model TAHMİN etmek yerine sorabilmeli;
+// cevap bir kez verilince sonraki TÜM üretimlere direktif olarak girmeli.
+test('yazardan alınan bilgi direktiflere girer', () => {
+  const num = 20;
+  global.window.paraAnswers[num] = [
+    { soru: 'Disk neden karışmamalı?', cevap: 'Aynı bölümde imha edilecek.' },
+  ];
+  const d = buildParagraphDirectives(num, [], 'Dikkat et, karışmasın birbirine.');
+  if (!d.includes('YAZARDAN ALINAN BİLGİ')) throw new Error('cevaplar direktife girmedi');
+  if (!d.includes('imha edilecek')) throw new Error('cevap metni kayboldu');
+  if (!d.includes('BAĞLAYICI')) throw new Error('bağlayıcılık vurgusu yok');
+
+  // Cevap yoksa bölüm hiç oluşmaz (boşuna yer kaplamaz)
+  delete global.window.paraAnswers[num];
+  const d2 = buildParagraphDirectives(num, [], 'metin');
+  if (d2.includes('YAZARDAN ALINAN BİLGİ')) throw new Error('boş cevapla bölüm oluştu');
+});
+
 Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));
