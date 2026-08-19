@@ -452,17 +452,17 @@ function paragraphEntities(para) {
 // ekranda listeler ve tek tek bölmeyi sunar. Atölyeyle karıştırmamak için
 // ayrıldı - bu tamamen mekanik bir iş, edebî değerlendirmeyle ilgisi yok.
 // ---------------------------------------------------------------------------
-async function renderLengthCheckView(el) {
-  el.innerHTML = '<div class="empty-state">Fihrist yükleniyor…</div>';
+async function renderLengthCheckView(kapsayici) {
+  kapsayici.innerHTML = '<div class="empty-state">Fihrist yükleniyor…</div>';
   try {
     const tumu = await api.get('/chapters/');
     const hiyerarsi = buildChapterHierarchy(tumu);
     const metinliler = hiyerarsi.filter(it => (it.chapter.paragraph_count || 0) > 0);
     if (!metinliler.length) {
-      el.innerHTML = '<div class="empty-state">Henüz metin yazılmış bölüm yok.</div>';
+      kapsayici.innerHTML = '<div class="empty-state">Henüz metin yazılmış bölüm yok.</div>';
       return;
     }
-    el.innerHTML = `
+    kapsayici.innerHTML = `
       <p style="font-size:12.5px;color:var(--text-muted);max-width:680px;margin-top:0;">
         Sınır: <b>${PARA_WORD_LIMIT} kelime</b>. Uzun paragraf okuma temposunu düşürür ve düzenlemesi zorlaşır.
         Bölmede metnin kendisi <b>değişmez</b>; yalnızca nereye paragraf arası konacağına karar verilir ve
@@ -480,7 +480,7 @@ async function renderLengthCheckView(el) {
       <div id="lcResult"></div>`;
     el('lcScan').addEventListener('click', () => runLengthScan());
   } catch (err) {
-    el.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+    kapsayici.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   }
 }
 

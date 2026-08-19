@@ -220,6 +220,12 @@ function findFirstChapterUnder(dividerId) {
 
 async function loadChapterList(selectId, skipSelect) {
   const listEl = document.getElementById('chapterList');
+  // ROMAN GÖRÜNÜMÜ EKRANDA DEĞİLSE hiç uğraşma. Bu fonksiyon Denetim
+  // menüsünden de çağrılıyor (atölye kapanınca "değişiklikleri yansıt"
+  // diye) - o an #chapterList DOM'da yoktur ve her satırı null'a yazmaya
+  // çalışır. Liste zaten roman görünümü açılırken baştan yükleniyor,
+  // yani burada sessizce dönmek hiçbir şey kaybettirmez.
+  if (!listEl) return;
   try {
     const chapters = await api.get('/chapters/');
     lastLoadedChapters = chapters;
@@ -237,7 +243,13 @@ async function loadChapterList(selectId, skipSelect) {
     const firstRealChapter = chapters.find(c => c.kind === 'chapter');
     if (selectId || firstRealChapter) selectChapter(selectId || firstRealChapter.id);
   } catch (err) {
-    listEl.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+    // Hata yakalayıcının KENDİSİ çökmemeli: kullanıcı yanıt beklerken
+    // başka ekrana geçmiş olabilir, o zaman liste artık DOM'da olmaz ve
+    // buradaki yazım gerçek hatayı "Cannot set properties of null" ile
+    // maskeler - asıl sorun (ör. sunucudan 502) hiç görünmez.
+    const hedef = document.getElementById('chapterList');
+    if (hedef) hedef.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+    else console.warn('Bölüm listesi yüklenemedi (liste ekranda değil):', err);
   }
 }
 
@@ -245,6 +257,7 @@ async function loadChapterList(selectId, skipSelect) {
 // HTML'ini yeniden çizer - collapsedGroups değiştiğinde de bu çağrılır.
 function renderChapterListDOM() {
   const listEl = document.getElementById('chapterList');
+  if (!listEl) return;   // roman görünümü ekranda değil (bkz. loadChapterList)
   const chapters = lastLoadedChapters;
   const hierarchy = buildChapterHierarchy(chapters);
 
@@ -1181,7 +1194,7 @@ function renderReader(chapter) {
       if (!confirm('Bu paragraf silinip, metni bir ALT BAŞLIK girdisi olarak bu bölümün önüne konacak. Devam?')) return;
       try {
         await api.post(`/chapters/${chapter.id}/promote-paragraph/${btn.dataset.number}?kind=subtitle`, {});
-        await loadChapterList({ selectId: chapter.id });
+        await loadChapterList(chapter.id);
       } catch (err) { alert(err.message); }
     });
   });
