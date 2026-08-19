@@ -306,6 +306,14 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   düzeltilmişse `✓5`). Puan bulgu sayısı ve ağırlığından türetilir;
   "tercih" sınıfı teşhisler puanı düşürmez. Hepsi inceleme önbelleğinden
   okunur - ek AI isteği yok, sayfa açılışında anında görünür.
+- **💬 Paragraf sohbeti - iki mod**: kullanıcının mesajına göre davranış
+  değişir. **(A) Tartışma** - soru sorulduğunda ya da fikir istendiğinde
+  konuşur, metin üretmez. **(B) Uygulama** - kullanıcı KENDİ CÜMLESİNİ
+  yazdığında ya da somut öneri sunduğunda ("şöyle dese", "şunu ekle")
+  tartışmaz, doğrudan uygular ve taslak olarak verir. İki yasak: alternatif
+  metni sohbetin İÇİNE gömmek (oradan uygulanamaz, boşa gider) ve
+  "hangisini tercih edersin?" diye sorup durmak. Model yine de metni
+  sohbete gömerse tırnak içindeki en uzun blok otomatik taslağa çevrilir.
 - **🎯 Başarı ölçütü (üretimin hedefi)**: teşhis "neyin yanlış olduğunu"
   söylüyordu ama "neyin doğru sayılacağını" söylemiyordu - model hedefi
   bilmediği için aynı eksende EŞANLAMLILAR üretiyordu ("sürekli aynı
@@ -314,6 +322,14 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   sayısı SIFIR olursa". Ölçülemez ifadeler ("daha edebi olsun") yasak.
   Aynı ölçüt üç yere birden gider: üretime hedef, aday değerlendirmesine
   kıyas ölçüsü, kullanıcıya 🎯 rozeti olarak.
+- **✂ Aşırı silme koruması**: gerçek Qwen testinde ortaya çıktı - üreteç,
+  bulgunun işaret etmediği cümleleri de siliyordu (üç seçeneğin ÜÇÜ DE
+  paragrafın kapanış vuruşunu attı), oysa aynı model o silmeyi "işlev
+  kaybı" diye reddediyordu. İki katmanlı çözüm: üretim direktifinde silme
+  sınırı ("bir bulgu 'fazla sıfat' diyorsa çözüm sıfatı atmaktır, cümleyi
+  atmak değil") ve DETERMİNİSTİK kontrol - kapanışın ayırt edici
+  kelimelerinin %60'ından azı kaldıysa ya da cümle sayısı sert düştüyse
+  anında uyarı (AI çağrısı yok, ücretsiz).
 - **🔗 Bağlı detay zinciri**: bir olguyu değiştirmek tek kelimelik iş
   değildir. Malzeme/mekân/zaman/nesne değişirse ona bağlı duyusal ve
   fiziksel detaylar da değişmeli - tahta gıcırdar, çelik çınlar; ıslak
@@ -670,15 +686,29 @@ Kurallar:
 
 ## Testler
 
-**191 test** (21 dosya) - AI çağrıları `unittest.mock` ile sahte Qwen
+**192 test** (20 dosya, + 16 arayüz davranış testi) - AI çağrıları `unittest.mock` ile sahte Qwen
 yanıtlarıyla çalışır, gerçek bir `DASHSCOPE_API_KEY` gerekmez.
 
-Frontend tarafında iki katman test var: **modül bütünlüğü** (her modül tek
-başına geçerli mi, index.html hepsini doğru sırada yüklüyor mu, yinelenen
-tanım var mı) ve **davranış** (modüller Node'da minimal bir DOM taklidiyle
-yüklenip kritik fonksiyonlar çalıştırılır - tanımsız değişken, olmayan
-elemana yazma, ayrıştırma hataları yakalanır). Ayrıca arayüzün çağırdığı
-her AI ucunun backend'de var olduğu doğrulanır.
+Frontend tarafında iki katman test var:
+
+**Modül bütünlüğü** - her modül tek başına geçerli mi, index.html hepsini
+doğru sırada yüklüyor mu, yinelenen tanım var mı, kritik fonksiyonlar
+duruyor mu.
+
+**Davranış (16 test)** - modüller Node'da minimal bir DOM taklidiyle
+yüklenip gerçekten çalıştırılır. Kapsam: seçenek ayrıştırma (6 ayraç
+biçimi + ayraçsız bloklar), deterministik kontroller (cümle başı kelime
+isim sayılmaz, kapanış vuruşu silinmiş mi), direktif sentezi, fark
+vurgulama, kontrol kayıt defteri (bağımsız açılıp kapanma, kanıtsız bulgu
+eleme), kapsama özeti ("çalışmadı" ile "temiz" ayrımı), önbellek
+bütünlüğü, yazardan alınan bilginin direktife girmesi ve **tam akış**
+("Düzenlemeye devam et" düğmesinden paragraf ekranına kadar).
+
+Bu testler, kullanıcının bildirdiği gerçek hataların sınıflarını yakalar:
+tanımsız değişken ("3 öneri çalışmıyor"), olmayan elemana yazma ("Cannot
+set properties of null"), zincirleme dinleyici kopması ("düğme çalışmıyor"),
+Türkçe I/ı yüzünden ayrıştırma çökmesi. Ayrıca arayüzün çağırdığı her AI
+ucunun backend'de var olduğu doğrulanır.
 
 Kapsam: evren/kitap paylaşımı, migration'lar, sections merge ve seçici
 gönderim, alias tespiti (Türkçe İ/ı dahil), mekan hiyerarşisi, kural
@@ -738,8 +768,12 @@ progression'da yanlış chapter_number) otomatik yakalar.
   (tanımsız değişken, olmayan elemana yazma, ayrıştırma hataları
   yakalanıyor). Tam kullanıcı akışları (tıkla → istek → ekran güncellensin)
   hâlâ test edilmiyor.
-- Tam kullanıcı akışı testi yok (tıkla → istek → ekran güncellensin).
-  Mevcut davranış testleri fonksiyon seviyesinde çalışıyor.
+- Davranış testleri bir tam akışı kapsıyor (atölye hazırlık → paragraf
+  ekranı); diğer akışlar (matris, fihrist, içe aktarma) hâlâ elle test
+  ediliyor.
+- Cümle düzeyi hedefleme yok: teşhisler paragraf düzeyinde. Mikro düzenleme
+  (ifade seçip değiştirme) bunu kısmen karşılıyor ama teşhis "hangi
+  cümlede" demiyor.
 - Maliyet ölçümü yok: bir paragrafı elden geçirmenin kaç AI çağrısına mal
   olduğu bilinmiyor (bilinçli olarak ertelendi - hata yakalamıyor).
 - CORS deploy'da `*` bırakılmamalı; rate limiter bellek-içi (tek worker

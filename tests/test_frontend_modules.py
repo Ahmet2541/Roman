@@ -85,3 +85,23 @@ def test_critical_functions_are_defined_somewhere():
     for ad in kritik:
         assert re.search(rf"^(?:async function|function|const)\s+{ad}\b", tumu, re.M), \
             f"{ad} hiçbir modülde tanımlı değil"
+
+
+def test_paragraph_chat_frame_has_two_clear_modes():
+    """SOHBET ÇERÇEVESİ ÇELİŞKİSİ: eskiden hem "paragrafı yeniden yazma"
+    hem "yeniden yazım isterse üret" deniyordu. Model çelişkiyi metni
+    SOHBETE GÖMEREK çözdü - kullanıcının önerisi uygulanamadan kayboldu
+    ve üstüne "hangisini tercih edersin?" diye sordu."""
+    modules = Path(__file__).resolve().parent.parent / "frontend" / "js" / "modules"
+    js = "\n".join(f.read_text(encoding="utf-8") for f in sorted(modules.glob("*.js")))
+
+    assert "İKİ MOD VAR" in js, "mod ayrımı yok"
+    assert "(A) TARTIŞMA" in js and "(B) UYGULAMA" in js
+    # Kullanıcının kendi cümlesi TARTIŞILMAZ, uygulanır
+    assert "KENDİ CÜMLESİNİ yazdıysa" in js
+    # Metni sohbete gömme yasağı
+    assert "sohbet cevabının İÇİNE yazma" in js
+    # İzin isteme yasağı
+    assert "hangisini tercih edersin" in js.lower()
+    # Çelişkili eski talimat kalmamalı
+    assert "Paragrafı YENİDEN YAZMA - kullanıcı hazır olduğunda" not in js

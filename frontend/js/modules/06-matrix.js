@@ -1522,8 +1522,16 @@ async function sendParagraphChat(chapter, number, neighborBlock, originalText) {
   const frame =
     `P${number} adlı TEK BİR PARAGRAF üzerinde konuşuyoruz. Şu anki hali:\n"${base}"\n`
     + (neighborBlock || '')
-    + '\nBu bir TARTIŞMA: fikrini söyle, sorun varsa göster, alternatif öner, gerekirse TEK soru sor. '
-    + 'Paragrafı YENİDEN YAZMA - kullanıcı hazır olduğunda ayrıca isteyecek.\n'
+    + '\nİKİ MOD VAR, KULLANICININ MESAJINA GÖRE SEÇ:\n'
+    + '(A) TARTIŞMA - kullanıcı soru soruyor ya da fikir istiyorsa: fikrini söyle, sorunu '
+    + 'göster, gerekirse TEK soru sor. Metin üretme.\n'
+    + '(B) UYGULAMA - kullanıcı KENDİ CÜMLESİNİ yazdıysa, somut bir öneri sunduysa ya da '
+    + 'yeniden yazım istediyse ("şöyle dese", "şunu ekle", "böyle olsun"): TARTIŞMA. '
+    + 'Öneriyi paragrafa UYGULA ve yeni hâli set_draft_result ile ver.\n'
+    + 'ASLA: alternatif metinleri sohbet cevabının İÇİNE yazma. Metin üreteceksen taslak '
+    + 'aracıyla ver - sohbete gömülen metin kullanıcı tarafından uygulanamaz, boşa gider.\n'
+    + 'ASLA: "hangisini tercih edersin?", "üçüncüsünü de hazırlayabilirim" deme. Tek en iyi '
+    + 'hâli üret; kullanıcı beğenmezse yönlendirir.\n'
     + 'UZUNLUK SINIRI (kesin): en fazla 6 CÜMLE. Madde işareti kullanma, başlık atma, '
     + 'aynı fikri farklı kelimelerle tekrarlama. Üç ayrı alternatif sıralama - EN İYİ bir ya da '
     + 'iki yolu söyle. Övgüyle başlama, doğrudan konuya gir.\n'
@@ -1548,7 +1556,14 @@ async function sendParagraphChat(chapter, number, neighborBlock, originalText) {
     // üretilen taslak yolda kayboluyordu - kullanıcı metni hiç görmüyordu.
     const yorum = (result.reply || '').trim();
     if (yorum) paraChatHistories[number].push({ role: 'assistant', content: yorum, isVersion: false });
-    const taslak = (result.draft_result || '').trim();
+    let taslak = (result.draft_result || '').trim();
+    // KURTARMA: model kurala rağmen metni sohbete gömdüyse, tırnak içindeki
+    // ya da numaralı alternatif olarak yazdığı en uzun bloğu taslak say -
+    // yoksa kullanıcının önerisi uygulanamadan kayboluyor.
+    if (!taslak && yorum) {
+      const adaylar = [...yorum.matchAll(/[“"']([^”"']{60,600})[”"']/g)].map(m => m[1].trim());
+      if (adaylar.length) taslak = adaylar.sort((a, b) => b.length - a.length)[0];
+    }
     if (taslak) {
       paraChatHistories[number].push({ role: 'assistant', content: taslak, isVersion: true });
       // Temel BURADA ilerlemez: taslak henüz uygulanmadı. Eskiden burada

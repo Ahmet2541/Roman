@@ -600,7 +600,11 @@ async function renderWorkshopParagraph(idx) {
         <textarea class="para-chat-input" data-number="${num}" placeholder="Ör: hüznü çıkar, masum kalsın" style="flex:1;min-height:38px;box-sizing:border-box;font-size:12.5px;"></textarea>
         <button class="btn btn-sm btn-primary" id="wsChatSend">Gönder</button>
       </div>
-      <button class="btn btn-sm" id="wsChatWrite" style="margin-top:6px;width:100%;font-size:11.5px;">✍️ Konuştuklarımıza göre yaz</button>`;
+      <button class="btn btn-sm btn-primary" id="wsChatWrite" style="margin-top:6px;width:100%;font-size:11.5px;">✍️ Konuştuklarımıza göre yeni versiyonu yaz</button>
+      <div style="font-size:10.5px;color:var(--text-muted);margin-top:3px;">
+        Kendi cümleni yazarsan AI onu doğrudan uygular; fikir sorarsan tartışır.
+        Sohbette metin görürsen bu düğmeyle taslağa çevir.
+      </div>`;
     renderParaChatLog(num);
     el('wsChatSend').addEventListener('click', () => sendParagraphChat(ch, num, '', para ? para.text : ''));
     el('wsChatWrite').addEventListener('click', () => writeParagraphVersion(ch, num, '', para ? para.text : ''));
