@@ -592,6 +592,9 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     const tumu = await api.get('/chapters/');
     chapters = buildChapterHierarchy(tumu).map(it => ({
       id: it.chapter.id, kind: it.chapter.kind, displayNumber: it.displayNumber,
+      // GERÇEK numara ayrıca tutulur: displayNumber görüntü içindir ("1.2"),
+      // API ise bölümün tam sayı numarasını bekler.
+      number: it.chapter.number,
       title: it.chapter.title, paragraphCount: it.chapter.paragraph_count || 0,
     }));
   } catch (e) { /* seçici olmadan devam */ }
@@ -688,7 +691,8 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       <div id="mcUyari"></div>
       <div class="form-actions">
         <button class="btn btn-primary" id="mCellSave">Kaydet</button>
-        <button class="btn" id="mcOnizle" title="AI'ya gidecek düz metin hâli">Önizle</button>
+        <button class="btn" id="mcOnizle" title="Bu hücrenin plan metni - sadece PLAN katmanı">Plan metni</button>
+        <button class="btn" id="mcTamOnizle" title="Bu bölüm yazılırken AI'ya gidecek BÜTÜN bağlam: kişi/mekan profilleri, kurallar, fihrist, üslup - hepsi">AI'ya gidecek tam bağlam</button>
         <button class="btn" id="mCellCancel">Kapat</button>
       </div>
       <div id="mCellError" class="error-text"></div>
@@ -1026,7 +1030,40 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     if (uzTarif) satir.push(`HEDEF UZUNLUK: ${uzTarif}…`);
     if (v.baglantilar.length) satir.push('BAĞLANTI: ' + v.baglantilar.map(b => `${b.kod}${b.tur ? ` (${b.tur})` : ''}${b.not ? ` → ${b.not}` : ''}`).join(' · '));
     document.getElementById('mcUyari').innerHTML =
-      `<pre style="white-space:pre-wrap;font-size:11.5px;background:var(--paper-dim);border:1px solid var(--border);border-radius:4px;padding:8px;margin-top:8px;">${escapeHtml(satir.join('\n')) || '(boş)'}</pre>`;
+      `<div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Bu SADECE plan katmanı. Kişi/mekan profilleri, kurallar ve fihrist ayrı katmanlardan gider - onları görmek için "AI'ya gidecek tam bağlam".</div>
+       <pre style="white-space:pre-wrap;font-size:11.5px;background:var(--paper-dim);border:1px solid var(--border);border-radius:4px;padding:8px;margin-top:4px;">${escapeHtml(satir.join('\n')) || '(boş)'}</pre>`;
+  });
+
+  // TAM BAĞLAM: sunucudan, /ai/context-preview ile. Hücrenin plan metni
+  // bağlamın SADECE BİR KATMANI - kişi/mekan profilleri, kurallar, fihrist,
+  // üslup uyarıları ayrı katmanlardan geliyor. "Neden mekan detayı yok"
+  // sorusunun cevabı buydu: yerel önizleme onları hiç görmüyor.
+  el('mcTamOnizle').addEventListener('click', async () => {
+    const kutu = document.getElementById('mcUyari');
+    const chapterVal = el('mCellChapter').value;
+    if (!chapterVal) {
+      kutu.innerHTML = '<div style="margin-top:8px;font-size:11.5px;color:var(--gold);">Bu hücre bir bölüme bağlı değil. Tam bağlam bölüm bazında oluşuyor - önce aşağıdan bölüm seç ve kaydet.</div>';
+      return;
+    }
+    const secili = chapters.find(c => c.id === parseInt(chapterVal, 10));
+    kutu.innerHTML = '<div class="empty-state">Bağlam oluşturuluyor…</div>';
+    try {
+      const r = await api.post('/ai/context-preview', {
+        selected_entities: [],
+        chapter_number: secili ? secili.number : null,
+        instruction: '', include_hidden: false,
+        include_chapter_text: false, text_scope: 'none',
+        include_own_summary: false,
+      });
+      const metin = r.context || '(boş)';
+      kutu.innerHTML = `
+        <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">
+          ${metin.length} karakter · Qwen'e istek atılmadı, ücretsiz.
+        </div>
+        <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper-dim);border:1px solid var(--border);border-radius:4px;padding:8px;margin-top:4px;max-height:400px;overflow-y:auto;">${escapeHtml(metin)}</pre>`;
+    } catch (err) {
+      kutu.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+    }
   });
 
   el('mCellCancel').addEventListener('click', () => { editor.innerHTML = ''; });
