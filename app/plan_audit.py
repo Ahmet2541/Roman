@@ -104,7 +104,9 @@ def build_audit_prompt(db, matrix, novel_id: int, column_id: int | None = None) 
     # Hücre bazlı uyarılar (mevcut yapı kilidi denetimi)
     hucre_uyarilari = []
     for c in cells:
-        uyarilar = plan_schema.cell_warnings(c.data, getattr(cols_by_id.get(c.column_id), "tur_data", None))
+        uyarilar = plan_schema.cell_warnings(
+            c.data, getattr(cols_by_id.get(c.column_id), "tur_data", None),
+            paralel=len(matrix.columns) > 1)
         if uyarilar:
             hucre_uyarilari.append(f"- {c.code or '?'}: " + " · ".join(uyarilar))
 

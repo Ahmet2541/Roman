@@ -26,8 +26,8 @@ def test_structured_cell_renders_to_content(client, headers):
             "olay": "Başkan sanığa mendili uzatır.",
             "zaman": {"tarih": "12 Mart", "saat": "21:40", "tip": "SAYAC"},
             "mekan": "VIP Salonu",
-            "duygu": {"baslangic": "güven", "bitis": "şüphe"},
-            "kisiler": [{"id": None, "ad": "Vicdan"}],
+            "kisiler": [{"id": None, "ad": "Vicdan",
+                         "duygu": {"baslangic": "güven", "bitis": "şüphe"}}],
             "giris": "İlk repliği reddeder.",
             "gelisme": "Baskı artar.",
             "sonuc": "ÇÖZÜN kelimesi havada kalır.",
@@ -38,7 +38,7 @@ def test_structured_cell_renders_to_content(client, headers):
     c = r.json()["content"]
     assert "OLAY: Başkan sanığa mendili uzatır." in c
     assert "ZAMAN: 12 Mart 21:40 (SAYAÇ)" in c
-    assert "DUYGU: güven → şüphe" in c
+    assert "KİŞİLER: Vicdan (güven → şüphe)" in c
     assert "SONUÇ: ÇÖZÜN kelimesi havada kalır." in c
     assert "BAĞLANTI: MP7 (ayna) → T1·G1" in c
 
@@ -158,18 +158,78 @@ def test_sayac_needs_subject(client, headers):
     assert "ZAMAN: 21:40 (SAYAÇ: ambulans bekleme süresi)" in r2.json()["content"]
 
 
-def test_duygu_has_owner(client, headers):
-    """Sahipsiz duygu atmosfer olur, karakter olmaz."""
+def test_person_without_emotion_is_flagged(client, headers):
+    """Yayı olmayan kişi sahnede sadece dekordur."""
     m = _matris(client, headers)
     ortak = {"column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"]}
     r = client.put(f"/matrix/{m['id']}/cells", json={
-        **ortak, "data": {"olay": "x", "duygu": {"baslangic": "güven", "bitis": "şüphe"}},
+        **ortak, "data": {"olay": "x", "kisiler": [{"ad": "Palyaço"}]},
     }, headers=headers)
-    assert any("kime ait" in w for w in r.json()["warnings"])
+    assert any("Palyaço" in w and "duygu" in w for w in r.json()["warnings"])
     r2 = client.put(f"/matrix/{m['id']}/cells", json={
-        **ortak, "data": {"olay": "x", "duygu": {"kim": "Palyaço", "baslangic": "güven", "bitis": "şüphe"}},
+        **ortak, "data": {"olay": "x", "kisiler": [
+            {"ad": "Palyaço", "duygu": {"baslangic": "güven", "bitis": "şüphe"}}]},
     }, headers=headers)
-    assert "DUYGU: Palyaço: güven → şüphe" in r2.json()["content"]
+    assert "KİŞİLER: Palyaço (güven → şüphe)" in r2.json()["content"]
+
+
+def test_two_people_two_arcs_in_one_cell(client, headers):
+    """Kişi başına yay: iki bilinç sahneyi BÖLMEDEN taşınabilmeli."""
+    m = _matris(client, headers)
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "İkisi binaya yürür.", "kisiler": [
+            {"ad": "Genç Mühendis", "duygu": {"baslangic": "umut", "bitis": "gurur"}},
+            {"ad": "İhtiyar Teknisyen", "duygu": {"baslangic": "nostalji", "bitis": "yorgunluk"}}]},
+    }, headers=headers)
+    assert ("KİŞİLER: Genç Mühendis (umut → gurur), "
+            "İhtiyar Teknisyen (nostalji → yorgunluk)") in r.json()["content"]
+
+
+def test_multiple_beats_are_numbered(client, headers):
+    """Tekli bölümlerde bir aşamada birden çok bağımsız hareket olabilir."""
+    m = _matris(client, headers)
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "x", "gelisme": ["İhtiyar mendille terini siler.",
+                                          "Genç twit atar."]},
+    }, headers=headers)
+    metin = r.json()["content"]
+    assert "GELİŞME 1: İhtiyar mendille terini siler." in metin
+    assert "GELİŞME 2: Genç twit atar." in metin
+    # Tek beat varsa numara konmaz - gereksiz gürültü
+    r2 = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "x", "gelisme": ["Tek hareket."]},
+    }, headers=headers)
+    assert "GELİŞME: Tek hareket." in r2.json()["content"]
+
+
+def test_parallel_matrix_wants_one_person_one_beat(client, headers):
+    """Paralel matriste turlar KARŞILIKLI ilerler: bir turda ihtiyarın
+    sorusu varsa ötekinde öğrencininki - tek kişi, tek beat."""
+    tekli = client.post("/matrix/", json={
+        "name": "Tekli", "columns": [{"label": "K"}], "rows": [{"label": "S"}]},
+        headers=headers).json()
+    coklu = client.post("/matrix/", json={
+        "name": "Paralel", "columns": [{"label": "Tur 1"}, {"label": "Tur 2"}],
+        "rows": [{"label": "S"}]}, headers=headers).json()
+    veri = {"olay": "x",
+            "kisiler": [{"ad": "A", "duygu": {"baslangic": "umut"}},
+                        {"ad": "B", "duygu": {"baslangic": "korku"}}],
+            "gelisme": ["bir", "iki"]}
+
+    t = client.put(f"/matrix/{tekli['id']}/cells", json={
+        "column_id": tekli["columns"][0]["id"], "row_id": tekli["rows"][0]["id"],
+        "data": veri}, headers=headers)
+    assert not any("Paralel matriste" in w for w in t.json()["warnings"]), \
+        "tekli bölümde çoklu yapı serbest olmalı"
+
+    p = client.put(f"/matrix/{coklu['id']}/cells", json={
+        "column_id": coklu["columns"][0]["id"], "row_id": coklu["rows"][0]["id"],
+        "data": veri}, headers=headers)
+    uyarilar = " · ".join(p.json()["warnings"])
+    assert "tek kişi olmalı" in uyarilar and "tek beat olmalı" in uyarilar
 
 
 def test_odak_required_when_multiple_objects(client, headers):
@@ -305,7 +365,7 @@ def test_audit_prompt_clean_matrix_reports_no_faults(client, headers):
         "data": {"olay": "Sorgu başlar.", "mekan": "Salon",
                  "zaman": {"tip": "NOKTA"},
                  "ortam": {"baslangic": "beklenti"},
-                 "duygu": {"kim": "Vicdan", "baslangic": "merak"},
+                 "kisiler": [{"ad": "Vicdan", "duygu": {"baslangic": "merak"}}],
                  "giris": "Kapı açılır.", "gelisme": "Soru sorulur.",
                  "sonuc": "ÇÖZÜN masada kalır."},
     }, headers=headers)
@@ -546,11 +606,12 @@ def test_ortam_and_person_emotion_are_separate_arcs(client, headers):
         "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
         "data": {"olay": "x", "mekan": "VIP Salonu",
                  "ortam": {"baslangic": "endişe", "bitis": "korku"},
-                 "duygu": {"kim": "Başkan", "baslangic": "soğukkanlılık", "bitis": "panik"}},
+                 "kisiler": [{"ad": "Başkan", "duygu": {"baslangic": "soğukkanlılık",
+                                                        "bitis": "panik"}}]},
     }, headers=headers)
     metin = r.json()["content"]
     assert "ORTAM: endişe → korku" in metin
-    assert "DUYGU: Başkan: soğukkanlılık → panik" in metin
+    assert "KİŞİLER: Başkan (soğukkanlılık → panik)" in metin
     # ORTAM satırı MEKAN'dan hemen sonra gelmeli - ikisi sahnenin yeri ve havası
     satirlar = metin.split("\n")
     assert satirlar[satirlar.index("MEKAN: VIP Salonu") + 1].startswith("ORTAM:")
@@ -562,12 +623,12 @@ def test_identical_ortam_and_person_emotion_is_flagged(client, headers):
     ortak = {"column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"]}
     ayni = client.put(f"/matrix/{m['id']}/cells", json={
         **ortak, "data": {"olay": "x", "ortam": {"baslangic": "gerilim"},
-                          "duygu": {"kim": "Başkan", "baslangic": "gerilim"}},
+                          "kisiler": [{"ad": "Başkan", "duygu": {"baslangic": "gerilim"}}]},
     }, headers=headers)
     assert any("birebir aynı" in w for w in ayni.json()["warnings"])
     farkli = client.put(f"/matrix/{m['id']}/cells", json={
         **ortak, "data": {"olay": "x", "ortam": {"baslangic": "gerilim"},
-                          "duygu": {"kim": "Başkan", "baslangic": "korku"}},
+                          "kisiler": [{"ad": "Başkan", "duygu": {"baslangic": "korku"}}]},
     }, headers=headers)
     assert not any("birebir aynı" in w for w in farkli.json()["warnings"])
 

@@ -127,14 +127,21 @@ def bos_hucre() -> dict:
         # Kişininki gibi yay tutar (endişe → korku), çünkü oda da sahne
         # içinde döner.
         "ortam": {"baslangic": "", "bitis": ""},
-        "duygu": {"kim": "", "baslangic": "", "bitis": ""},
-        "kisiler": [],   # [{"id": int|None, "ad": str}]
+        # KİŞİLER artık kendi duygu yayını taşır. Tek bir "duygu" alanı
+        # varken iki kişilik bir sahnede ikinci kişinin yayı kaydedilemiyordu;
+        # sahneyi bölmek zorunda kalıyordun. Kişi başına yay, iki bilinci
+        # sahneyi parçalamadan taşır.
+        "kisiler": [],   # [{"id", "ad", "duygu": {"baslangic", "bitis"}}]
         "nesneler": [],  # [{"id": int|None, "ad": str}]
         "odak": "",      # nesneler içinden dramatik ağırlığı taşıyan tek nesne
         "uzunluk": "normal",  # ozet | normal | uzun - plandan çıkacak metnin ölçüsü
-        "giris": "",
-        "gelisme": "",
-        "sonuc": "",
+        # BEAT'LER LİSTE: tekli (paralel olmayan) bölümlerde bir aşamada
+        # birden çok bağımsız hareket olabilir - ihtiyar mendilini siler,
+        # genç twit atar. Paralel bölümlerde tek beat kalır (bkz. paralel
+        # uyarıları), çünkü orada turlar yapıca aynı ilerlemek zorunda.
+        "giris": [],
+        "gelisme": [],
+        "sonuc": [],
         "baglantilar": [],  # [{"kod": "MP7", "tur": "ayna", "not": ""}]
     }
 
@@ -147,10 +154,18 @@ def normalize_cell(data: Any) -> dict:
     if not isinstance(data, dict):
         return out
 
-    for key in ("olay", "giris", "gelisme", "sonuc", "mekan", "odak"):
+    for key in ("olay", "mekan", "odak"):
         val = data.get(key)
         if isinstance(val, str):
             out[key] = val.strip()
+
+    # Beat'ler: eski kayıtlarda düz metin, yenilerde liste. İkisi de kabul.
+    for key, _, _ in YAY_ALANLARI:
+        val = data.get(key)
+        if isinstance(val, str):
+            out[key] = [val.strip()] if val.strip() else []
+        elif isinstance(val, list):
+            out[key] = [str(x).strip() for x in val if str(x or "").strip()]
 
     # Bilinmeyen ya da boş değer "normal"e düşer: uzunluksuz plan, modelin
     # her sahnede kendi ölçüsünü seçmesi demek - bölümler arası tutarsızlığın
@@ -180,29 +195,55 @@ def normalize_cell(data: Any) -> dict:
             "bitis": str(ortam.get("bitis") or "").strip(),
         }
 
-    duygu = data.get("duygu")
-    if isinstance(duygu, dict):
-        out["duygu"] = {
-            # Duygu kime ait: sahipsiz duygu atmosfer olur, karakter olmaz.
-            "kim": str(duygu.get("kim") or "").strip(),
-            "baslangic": str(duygu.get("baslangic") or "").strip(),
-            "bitis": str(duygu.get("bitis") or "").strip(),
-        }
+    items = data.get("nesneler")
+    if isinstance(items, list):
+        temiz = []
+        for it in items:
+            if isinstance(it, dict):
+                ad = str(it.get("ad") or "").strip()
+                if not ad:
+                    continue
+                eid = it.get("id")
+                temiz.append({"id": eid if isinstance(eid, int) else None, "ad": ad})
+            elif isinstance(it, str) and it.strip():
+                temiz.append({"id": None, "ad": it.strip()})
+        out["nesneler"] = temiz
 
-    for key in ("kisiler", "nesneler"):
-        items = data.get(key)
-        if isinstance(items, list):
-            temiz = []
-            for it in items:
-                if isinstance(it, dict):
-                    ad = str(it.get("ad") or "").strip()
-                    if not ad:
-                        continue
-                    eid = it.get("id")
-                    temiz.append({"id": eid if isinstance(eid, int) else None, "ad": ad})
-                elif isinstance(it, str) and it.strip():
-                    temiz.append({"id": None, "ad": it.strip()})
-            out[key] = temiz
+    kisiler = data.get("kisiler")
+    if isinstance(kisiler, list):
+        temiz = []
+        for it in kisiler:
+            if isinstance(it, str) and it.strip():
+                temiz.append({"id": None, "ad": it.strip(),
+                              "duygu": {"baslangic": "", "bitis": ""}})
+                continue
+            if not isinstance(it, dict):
+                continue
+            ad = str(it.get("ad") or "").strip()
+            if not ad:
+                continue
+            duy = it.get("duygu") if isinstance(it.get("duygu"), dict) else {}
+            eid = it.get("id")
+            temiz.append({
+                "id": eid if isinstance(eid, int) else None,
+                "ad": ad,
+                "duygu": {"baslangic": str(duy.get("baslangic") or "").strip(),
+                          "bitis": str(duy.get("bitis") or "").strip()},
+            })
+        out["kisiler"] = temiz
+
+    # ESKİ KAYIT: tek "duygu" alanı kişi listesine taşınır, kaybolmasın.
+    eski = data.get("duygu")
+    if isinstance(eski, dict) and (eski.get("baslangic") or eski.get("bitis")):
+        kim = str(eski.get("kim") or "").strip()
+        yay = {"baslangic": str(eski.get("baslangic") or "").strip(),
+               "bitis": str(eski.get("bitis") or "").strip()}
+        hedef = next((k for k in out["kisiler"]
+                      if kim and _tr_lower(k["ad"]) == _tr_lower(kim)), None)
+        if hedef and not any(hedef["duygu"].values()):
+            hedef["duygu"] = yay
+        elif not hedef and kim:
+            out["kisiler"].append({"id": None, "ad": kim, "duygu": yay})
 
     baglar = data.get("baglantilar")
     if isinstance(baglar, list):
@@ -240,11 +281,13 @@ def normalize_meta(data: Any, alanlar: list) -> dict:
 def hucre_bos_mu(data: dict) -> bool:
     """Hiç doldurulmamış hücre - render ve uyarı üretilmez."""
     d = normalize_cell(data)
-    if any(d[k] for k in ("olay", "giris", "gelisme", "sonuc", "mekan", "odak")):
+    if d["olay"] or d["mekan"] or d["odak"]:
+        return False
+    if any(d[k] for k, _, _ in YAY_ALANLARI):
         return False
     if d["kisiler"] or d["nesneler"] or d["baglantilar"]:
         return False
-    if any(d["zaman"].values()) or any(d["duygu"].values()):
+    if any(d["zaman"].values()) or any(d["ortam"].values()):
         return False
     return True
 
@@ -286,24 +329,31 @@ def render_cell(data: Any) -> str:
                else (ort["baslangic"] or ort["bitis"]))
         satirlar.append(f"ORTAM: {yay}")
 
-    duy = d["duygu"]
-    if duy["baslangic"] or duy["bitis"]:
-        yay = (f"{duy['baslangic']} → {duy['bitis']}"
-               if duy["baslangic"] and duy["bitis"]
-               else (duy["baslangic"] or duy["bitis"]))
-        sahip = f"{duy['kim']}: " if duy["kim"] else ""
-        satirlar.append(f"DUYGU: {sahip}{yay}")
-
     if d["kisiler"]:
-        satirlar.append("KİŞİLER: " + ", ".join(k["ad"] for k in d["kisiler"]))
+        parcalar = []
+        for k in d["kisiler"]:
+            duy = k["duygu"]
+            if duy["baslangic"] and duy["bitis"]:
+                parcalar.append(f"{k['ad']} ({duy['baslangic']} → {duy['bitis']})")
+            elif duy["baslangic"] or duy["bitis"]:
+                parcalar.append(f"{k['ad']} ({duy['baslangic'] or duy['bitis']})")
+            else:
+                parcalar.append(k["ad"])
+        satirlar.append("KİŞİLER: " + ", ".join(parcalar))
     if d["nesneler"]:
         satirlar.append("NESNELER: " + ", ".join(n["ad"] for n in d["nesneler"]))
     if d["odak"]:
         satirlar.append(f"ODAK: {d['odak']} (dikkat bu nesnede toplanır)")
 
+    # Beat'ler numaralanır ki AI her birini AYRI bir hareket olarak görsün;
+    # tek beat varsa numara konmaz (gereksiz gürültü).
     for key, etiket, _ in YAY_ALANLARI:
-        if d[key]:
-            satirlar.append(f"{etiket}: {d[key]}")
+        beatler = d[key]
+        if len(beatler) == 1:
+            satirlar.append(f"{etiket}: {beatler[0]}")
+        else:
+            for i, b in enumerate(beatler, start=1):
+                satirlar.append(f"{etiket} {i}: {b}")
 
     tarif = dict((k, t) for k, _, t in UZUNLUK_SEVIYELERI).get(d["uzunluk"])
     if tarif:
@@ -350,10 +400,16 @@ def render_miras(tur_data: Any, parca_data: Any, row_instructions: str = "") -> 
 
 # --- Denetim ---------------------------------------------------------------
 
-def cell_warnings(data: Any, tur_data: Any = None) -> list[str]:
+def cell_warnings(data: Any, tur_data: Any = None, paralel: bool = False) -> list[str]:
     """Eksik/tutarsız alanları listeler. KAYDI ENGELLEMEZ - uygulamanın her
-    yerindeki çizgi bu: denetle, göster, karar yazarın olsun. Boş hücre hiç
-    uyarı üretmez (henüz yazılmamış olmak bir hata değil)."""
+    yerindeki çizgi bu: denetle, göster, karar yazarın olsun.
+
+    paralel=True ise hücre çok sütunlu (paralel) bir matriste demektir.
+    Orada turlar yapıca aynı ilerlemek zorunda olduğu için hücre TEK KİŞİ
+    ve aşama başına TEK BEAT taşımalı - biri ihtiyarın sorusu, öteki
+    öğrencininki. Tekli bölümlerde böyle bir kısıt yok: orada ne kadar
+    çok durum varsa sahne o kadar zengin olur.
+    """
     d = normalize_cell(data)
     if hucre_bos_mu(d):
         return []
@@ -375,47 +431,58 @@ def cell_warnings(data: Any, tur_data: Any = None) -> list[str]:
             + " yazılmamış")
     if not (d["ortam"]["baslangic"] or d["ortam"]["bitis"]):
         uyarilar.append("ORTAM duygusu boş - mekânın o andaki hâli yazılmamış")
-    if not (d["duygu"]["baslangic"] or d["duygu"]["bitis"]):
-        uyarilar.append("DUYGU boş")
-    elif not d["duygu"]["kim"]:
-        uyarilar.append("DUYGU kime ait belirtilmemiş")
-    # Birden çok nesne varken odak seçilmezse dikkat dağılır - tek nesnede
-    # odak zaten bellidir, uyarmaya gerek yok.
+
+    # Kişi başına duygu: yayı olmayan kişi sahnede sadece dekordur.
+    if not d["kisiler"]:
+        uyarilar.append("KİŞİ yok - sahneyi kim taşıyor?")
+    for k in d["kisiler"]:
+        if not any(k["duygu"].values()):
+            uyarilar.append(f"\"{k['ad']}\" için duygu yazılmamış")
+
+    # ORTAM ile kişilerin hepsi aynıysa ayrımdan yararlanılmıyor.
+    def _yay(x):
+        return f"{x['baslangic']}→{x['bitis']}".casefold()
+    if (any(d["ortam"].values()) and d["kisiler"]
+            and all(any(k["duygu"].values()) for k in d["kisiler"])
+            and all(_yay(k["duygu"]) == _yay(d["ortam"]) for k in d["kisiler"])):
+        uyarilar.append("ORTAM ve kişi duyguları birebir aynı - aradaki fark "
+                        "sahnenin motoruydu, şu an kullanılmıyor")
+
     if len(d["nesneler"]) > 1 and not d["odak"]:
         uyarilar.append(f"ODAK nesnesi seçilmemiş ({len(d['nesneler'])} nesne var)")
     for b in d["baglantilar"]:
         if not b["not"]:
             uyarilar.append(f"{b['kod']} bağlantısı ne yapılacağını söylemiyor")
 
-    # BEAT ŞİŞMESİ: şemada GİRİŞ/GELİŞME/SONUÇ birer ANDIR - açılış,
-    # dönme, kapanış. Buraya olay dizisi yazıldığında sahne planlanmış
-    # olmaz, yazılmış olur; yazan model sahneyi kurmak yerine verilen
-    # diziyi doldurur ve tek yaratıcı alanı doku örmeye iner.
+    # PARALEL MATRİS KISITI: turlar karşılıklı ilerler - bir turun bu
+    # sahnesinde ihtiyarın sorusu varsa, ötekinde öğrencininki olmalı.
+    # Tek kişi, aşama başına tek beat.
+    if paralel:
+        if len(d["kisiler"]) > 1:
+            uyarilar.append(
+                f"Paralel matriste tek kişi olmalı ({len(d['kisiler'])} kişi var) - "
+                "turlar karşılıklı ilerler")
+        for key, etiket, _ in YAY_ALANLARI:
+            if len(d[key]) > 1:
+                uyarilar.append(
+                    f"Paralel matriste {etiket} tek beat olmalı ({len(d[key])} beat var)")
+
+    # Damga kilidi: turun damga kelimesi SONUÇ beat'inde asılı kalmalı.
+    damga = normalize_meta(tur_data, TUR_ALANLARI).get("damga", "")
+    sonuc_metni = " ".join(d["sonuc"])
+    if damga and sonuc_metni:
+        kalip = r"(?<!\w)" + re.escape(_tr_lower(damga)) + r"(?!\w)"
+        if not re.search(kalip, _tr_lower(sonuc_metni)):
+            uyarilar.append(f"Damga kelimesi (\"{damga}\") SONUÇ'ta geçmiyor")
+
+    # BEAT ŞİŞMESİ: her beat tek bir AN olmalı.
     if len(d["olay"]) > OLAY_SINIRI:
         uyarilar.append("OLAY tek cümleyi aşmış - sahne kimliği özet değil")
     for key, etiket, _ in YAY_ALANLARI:
-        if len(d[key]) > BEAT_SINIRI:
-            uyarilar.append(f"{etiket} bir beat değil olay dizisi olmuş "
-                            f"({len(d[key])} karakter) - yazana kuracak yer bırakmıyor")
-
-    # ORTAM ile KİŞİ aynıysa ayrımdan yararlanılmıyor. İki alanın varlık
-    # sebebi aradaki FARK: oda ile kişi aynı şeyi hissediyorsa sahne bu
-    # gerilimi kullanmıyor demektir. Yasak değil, hatırlatma.
-    def _yay(x):
-        return f"{x['baslangic']}→{x['bitis']}".casefold()
-    if (any(d["ortam"].values()) and any(d["duygu"].values())
-            and _yay(d["ortam"]) == _yay(d["duygu"])):
-        uyarilar.append("ORTAM ve kişi duygusu birebir aynı - aradaki fark "
-                        "sahnenin motoruydu, şu an kullanılmıyor")
-
-    # Damga kilidi: turun damga kelimesi SONUÇ beat'inde asılı kalmalı.
-    # KELİME SINIRI şart: alt dize araması damgayı başka bir kelimenin
-    # içinde bulup uyarıyı yutuyordu ("ÇÖZÜN" damgası "çözünürlüğü"
-    # kelimesinde eşleşiyor, oysa damga hiç düşmemiş oluyor).
-    damga = normalize_meta(tur_data, TUR_ALANLARI).get("damga", "")
-    if damga and d["sonuc"]:
-        kalip = r"(?<!\w)" + re.escape(_tr_lower(damga)) + r"(?!\w)"
-        if not re.search(kalip, _tr_lower(d["sonuc"])):
-            uyarilar.append(f"Damga kelimesi (\"{damga}\") SONUÇ'ta geçmiyor")
+        for i, b in enumerate(d[key], start=1):
+            if len(b) > BEAT_SINIRI:
+                sira = f" {i}" if len(d[key]) > 1 else ""
+                uyarilar.append(f"{etiket}{sira} bir beat değil olay dizisi olmuş "
+                                f"({len(b)} karakter) - yazana kuracak yer bırakmıyor")
 
     return uyarilar

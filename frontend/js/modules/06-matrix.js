@@ -566,17 +566,10 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
         <div class="field" style="flex:1;"><label>→ (dönüyorsa)</label>
           <input type="text" id="mcOrtamB" list="mcDuyguList" value="${escapeHtml(ortam.bitis || '')}" placeholder="korku" autocomplete="off"></div>
       </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        <div class="field" style="flex:1;min-width:110px;"><label>KİŞİ DUYGUSU — kimin</label>
-          <input type="text" id="mcDuyguKim" list="mcKisiList" value="${escapeHtml(duygu.kim || '')}" placeholder="Palyaço"></div>
-        <div class="field" style="flex:1;min-width:90px;"><label>Başlangıç</label>
-          <input type="text" id="mcDuyguA" list="mcDuyguList" value="${escapeHtml(duygu.baslangic || '')}" placeholder="güven" autocomplete="off"></div>
-        <div class="field" style="flex:1;min-width:90px;"><label>→ (yay ise)</label>
-          <input type="text" id="mcDuyguB" list="mcDuyguList" value="${escapeHtml(duygu.bitis || '')}" placeholder="şüphe" autocomplete="off"></div>
-      </div>
-      <div class="field"><label>KİŞİLER <span style="font-weight:400;color:var(--text-muted);">(virgülle)</span></label>
-        <input type="text" id="mcKisiler" value="${escapeHtml(_adListesi(d.kisiler))}" placeholder="Vicdan, Palyaço" autocomplete="off">
-        <datalist id="mcKisiList">${_datalistSecenekleri(varliklar.kisiler)}</datalist></div>
+      <div style="font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">KİŞİLER <span style="font-weight:400;letter-spacing:0;">(her kişi KENDİ duygu yayını taşır)</span></div>
+      <div id="mcKisiListe"></div>
+      <button class="btn btn-sm" id="mcKisiEkle" style="margin-top:4px;">+ Kişi</button>
+      <datalist id="mcKisiList">${_datalistSecenekleri(varliklar.kisiler)}</datalist>
       <div class="field"><label>NESNELER <span style="font-weight:400;color:var(--text-muted);">(virgülle)</span></label>
         <input type="text" id="mcNesneler" value="${escapeHtml(_adListesi(d.nesneler))}" placeholder="mendil, şişe" autocomplete="off">
         <datalist id="mcNesneList">${_datalistSecenekleri(varliklar.nesneler)}</datalist></div>
@@ -592,9 +585,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       </div>
 
       <div style="margin-top:12px;font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">ALT — YAY</div>
-      ${alan('mcGiris', 'GİRİŞ', d.giris, '(açılış beat\'i: ilk replik / ret)')}
-      ${alan('mcGelisme', 'GELİŞME', d.gelisme, '(dönme beat\'i: baskı / tehdit / tanıma)', 72)}
-      ${alan('mcSonuc', 'SONUÇ', d.sonuc, tur.damga ? `(kapanış beat'i — "${escapeHtml(tur.damga)}" burada asılı kalmalı)` : '(kapanış beat\'i)')}
+      <div id="mcYay"></div>
 
       <div style="margin-top:12px;font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">BAĞLANTI</div>
       <div id="mcBagListe"></div>
@@ -645,6 +636,101 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
   cizBaglar();
   el('mcBagEkle').addEventListener('click', () => { baglar.push({ kod: '', tur: '', not: '' }); cizBaglar(); });
 
+  // ---- KİŞİLER: her biri kendi duygu yayıyla ----
+  // Tek bir duygu alanı varken iki kişilik sahnede ikinci kişinin yayı
+  // kaydedilemiyor, sahneyi bölmek gerekiyordu. Kişi başına yay, iki
+  // bilinci sahneyi parçalamadan taşır.
+  let kisiler = Array.isArray(d.kisiler) ? d.kisiler.map(k => ({
+    id: k.id || null, ad: k.ad || '',
+    duygu: { baslangic: (k.duygu || {}).baslangic || '', bitis: (k.duygu || {}).bitis || '' },
+  })) : [];
+
+  function cizKisiler() {
+    const kutu = document.getElementById('mcKisiListe');
+    if (!kutu) return;
+    if (!kisiler.length) { kutu.innerHTML = '<div style="font-size:11.5px;color:var(--text-muted);">(kişi yok - sahneyi kim taşıyor?)</div>'; return; }
+    kutu.innerHTML = kisiler.map((k, i) => {
+      const esti = varliklar.kisiler.some(x => _trLowerJs(x.name || '') === _trLowerJs(k.ad));
+      return `
+      <div style="display:flex;gap:4px;align-items:flex-end;margin-bottom:4px;flex-wrap:wrap;">
+        <div class="field" style="flex:2;min-width:120px;margin:0;">
+          <input type="text" class="mc-k-ad" data-i="${i}" list="mcKisiList" value="${escapeHtml(k.ad)}" placeholder="Genç Mühendis" autocomplete="off">
+          <span class="eslesme-rozet${esti ? '' : ' yok'}" style="font-size:10px;" title="${esti ? 'Kayıtlı kişi - ID ile bağlanacak' : 'Kayıtta yok - serbest metin olarak gidecek'}">${esti ? '✓' : '?'}</span>
+        </div>
+        <div class="field" style="flex:1;min-width:90px;margin:0;">
+          <input type="text" class="mc-k-a" data-i="${i}" list="mcDuyguList" value="${escapeHtml(k.duygu.baslangic)}" placeholder="umut" autocomplete="off">
+        </div>
+        <div class="field" style="flex:1;min-width:90px;margin:0;">
+          <input type="text" class="mc-k-b" data-i="${i}" list="mcDuyguList" value="${escapeHtml(k.duygu.bitis)}" placeholder="→ gurur" autocomplete="off">
+        </div>
+        <button class="btn-icon-sm mc-k-sil" data-i="${i}" title="Kişiyi çıkar">✕</button>
+      </div>`;
+    }).join('');
+    kutu.querySelectorAll('.mc-k-ad').forEach(x => x.addEventListener('input', () => { kisiler[+x.dataset.i].ad = x.value; }));
+    kutu.querySelectorAll('.mc-k-ad').forEach(x => x.addEventListener('change', () => { kisiler[+x.dataset.i].ad = x.value; cizKisiler(); }));
+    kutu.querySelectorAll('.mc-k-a').forEach(x => x.addEventListener('input', () => { kisiler[+x.dataset.i].duygu.baslangic = x.value; }));
+    kutu.querySelectorAll('.mc-k-b').forEach(x => x.addEventListener('input', () => { kisiler[+x.dataset.i].duygu.bitis = x.value; }));
+    kutu.querySelectorAll('.mc-k-sil').forEach(x => x.addEventListener('click', () => { kisiler.splice(+x.dataset.i, 1); cizKisiler(); }));
+  }
+  cizKisiler();
+  el('mcKisiEkle').addEventListener('click', () => {
+    kisiler.push({ id: null, ad: '', duygu: { baslangic: '', bitis: '' } });
+    cizKisiler();
+  });
+
+  // ---- YAY: aşama başına birden çok beat ----
+  // Tekli bölümlerde bir aşamada birden çok bağımsız hareket olabilir
+  // (ihtiyar mendilini siler, genç twit atar). Paralel matriste tek beat
+  // kalmalı - kaydedince uyarı çıkar, engellenmez.
+  const YAY = [
+    ['giris', 'GİRİŞ', "açılış beat'i: ilk replik / ret"],
+    ['gelisme', 'GELİŞME', "dönme beat'i: baskı / tehdit / tanıma"],
+    ['sonuc', 'SONUÇ', tur.damga ? `kapanış beat'i — "${tur.damga}" burada asılı kalmalı` : "kapanış beat'i"],
+  ];
+  const beatler = {};
+  YAY.forEach(([k]) => {
+    const v = d[k];
+    beatler[k] = Array.isArray(v) ? v.slice() : (v ? [v] : ['']);
+    if (!beatler[k].length) beatler[k] = [''];
+  });
+
+  function cizYay() {
+    const kutu = document.getElementById('mcYay');
+    if (!kutu) return;
+    kutu.innerHTML = YAY.map(([k, etiket, ipucu]) => `
+      <div style="margin-bottom:8px;">
+        <label style="font-size:12px;font-weight:600;">${etiket}
+          <span style="font-weight:400;color:var(--text-muted);">(${escapeHtml(ipucu)})</span></label>
+        ${beatler[k].map((b, i) => `
+          <div style="display:flex;gap:4px;align-items:flex-start;margin-top:3px;">
+            ${beatler[k].length > 1 ? `<span style="font-size:11px;color:var(--text-muted);padding-top:8px;min-width:14px;">${i + 1}</span>` : ''}
+            <textarea class="mc-beat" data-k="${k}" data-i="${i}" style="min-height:48px;flex:1;">${escapeHtml(b)}</textarea>
+            ${beatler[k].length > 1 ? `<button class="btn-icon-sm mc-beat-sil" data-k="${k}" data-i="${i}" title="Bu beat'i kaldır">✕</button>` : ''}
+          </div>
+          <div class="mc-beat-sayac" data-k="${k}" data-i="${i}" style="font-size:10.5px;text-align:right;"></div>`).join('')}
+        <button class="btn btn-sm mc-beat-ekle" data-k="${k}" style="margin-top:2px;">+ ${etiket}</button>
+      </div>`).join('');
+
+    const sayacGuncelle = (t) => {
+      const n = t.value.length;
+      const s = kutu.querySelector(`.mc-beat-sayac[data-k="${t.dataset.k}"][data-i="${t.dataset.i}"]`);
+      if (!s) return;
+      s.textContent = n > 160 ? `${n}/160 — beat değil olay dizisi` : `${n}/160`;
+      s.style.color = n > 160 ? 'var(--gold)' : 'var(--text-muted)';
+    };
+    kutu.querySelectorAll('.mc-beat').forEach(t => {
+      sayacGuncelle(t);
+      t.addEventListener('input', () => { beatler[t.dataset.k][+t.dataset.i] = t.value; sayacGuncelle(t); });
+    });
+    kutu.querySelectorAll('.mc-beat-ekle').forEach(b => b.addEventListener('click', () => {
+      beatler[b.dataset.k].push(''); cizYay();
+    }));
+    kutu.querySelectorAll('.mc-beat-sil').forEach(b => b.addEventListener('click', () => {
+      beatler[b.dataset.k].splice(+b.dataset.i, 1); cizYay();
+    }));
+  }
+  cizYay();
+
   // Sayaç alanı yalnızca ATLAMA/SAYAÇ için anlamlı; NOKTA seçiliyse
   // gizlenir. Boş bir alanın orada durması "burayı da doldurmam mı
   // gerekiyor" sorusunu doğuruyordu.
@@ -674,10 +760,8 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
 
   // Kişi/nesne alanları çoklu - kendi öneri listesi. Mekan ve duygu
   // sahibi tek değerli olduğu için tarayıcının datalist'i orada yeterli.
-  wireMultiAutocomplete('mcKisiler', varliklar.kisiler);
   wireMultiAutocomplete('mcNesneler', varliklar.nesneler);
   wireSingleMatch('mcMekan', varliklar.mekanlar);
-  wireSingleMatch('mcDuyguKim', varliklar.kisiler);
 
   // ODAK yalnızca BU hücreye yazılmış nesneler arasından seçilmeli -
   // sahnede olmayan bir nesneye odaklanmak anlamsız. Liste, NESNELER
@@ -696,7 +780,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
   // Buraya olay dizisi yazıldığında yazan model sahneyi kurmaz, verileni
   // doldurur - sınır aşılınca alan uyarı rengine döner (backend'deki
   // BEAT_SINIRI ile aynı: 160, OLAY için 120).
-  [['mcOlay', 120], ['mcGiris', 160], ['mcGelisme', 160], ['mcSonuc', 160]].forEach(([id, sinir]) => {
+  [['mcOlay', 120]].forEach(([id, sinir]) => {
     const alanEl = el(id);
     if (!alanEl || !alanEl.parentElement) return;
     const sayac = document.createElement('div');
@@ -718,14 +802,16 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       mekan: el('mcMekan').value,
       mekan_id: (_varlikEslestir(el('mcMekan').value, varliklar.mekanlar) || {}).id || null,
       ortam: { baslangic: el('mcOrtamA').value, bitis: el('mcOrtamB').value },
-      duygu: { kim: el('mcDuyguKim').value, baslangic: el('mcDuyguA').value, bitis: el('mcDuyguB').value },
-      kisiler: _adlariAyristir(el('mcKisiler').value, varliklar.kisiler),
+      kisiler: kisiler.filter(k => (k.ad || '').trim()).map(k => {
+        const es = _varlikEslestir(k.ad, varliklar.kisiler) || {};
+        return { id: es.id || null, ad: k.ad.trim(), duygu: k.duygu };
+      }),
       nesneler: _adlariAyristir(el('mcNesneler').value, varliklar.nesneler),
       odak: el('mcOdak').value,
       uzunluk: el('mcUzunluk').value,
-      giris: el('mcGiris').value,
-      gelisme: el('mcGelisme').value,
-      sonuc: el('mcSonuc').value,
+      giris: beatler.giris.map(x => x.trim()).filter(Boolean),
+      gelisme: beatler.gelisme.map(x => x.trim()).filter(Boolean),
+      sonuc: beatler.sonuc.map(x => x.trim()).filter(Boolean),
       baglantilar: baglar.filter(b => (b.kod || '').trim()),
     };
   }
@@ -742,12 +828,15 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     }
     if (v.mekan) satir.push(`MEKAN: ${v.mekan}`);
     if (v.ortam.baslangic || v.ortam.bitis) satir.push(`ORTAM: ${[v.ortam.baslangic, v.ortam.bitis].filter(Boolean).join(' → ')}`);
-    if (v.duygu.baslangic || v.duygu.bitis) satir.push(`DUYGU: ${v.duygu.kim ? `${v.duygu.kim}: ` : ''}${[v.duygu.baslangic, v.duygu.bitis].filter(Boolean).join(' → ')}`);
-    if (v.kisiler.length) satir.push(`KİŞİLER: ${_adListesi(v.kisiler)}`);
+    if (v.kisiler.length) satir.push('KİŞİLER: ' + v.kisiler.map(k => {
+      const y = [k.duygu.baslangic, k.duygu.bitis].filter(Boolean).join(' → ');
+      return y ? `${k.ad} (${y})` : k.ad;
+    }).join(', '));
     if (v.nesneler.length) satir.push(`NESNELER: ${_adListesi(v.nesneler)}`);
     if (v.odak) satir.push(`ODAK: ${v.odak} (dikkat bu nesnede toplanır)`);
     ['giris', 'gelisme', 'sonuc'].forEach((k, i) => {
-      if (v[k]) satir.push(`${['GİRİŞ', 'GELİŞME', 'SONUÇ'][i]}: ${v[k]}`);
+      const etiket = ['GİRİŞ', 'GELİŞME', 'SONUÇ'][i];
+      v[k].forEach((b, j) => satir.push(`${etiket}${v[k].length > 1 ? ` ${j + 1}` : ''}: ${b}`));
     });
     const uzTarif = { ozet: 'ÖZET — 1-2 paragraf', normal: 'NORMAL — 4-6 paragraf', uzun: 'UZUN METİN — 8+ paragraf' }[v.uzunluk];
     if (uzTarif) satir.push(`HEDEF UZUNLUK: ${uzTarif}…`);

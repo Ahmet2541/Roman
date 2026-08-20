@@ -419,4 +419,20 @@ test('duygu listesi temel kategorileri kapsiyor', () => {
   if (new Set(liste).size !== liste.length) throw new Error('listede tekrar var');
 });
 
+// --- 20. HÜCRE FORMU: kişi başına duygu + çoklu beat ---
+// Formun eriştiği her eleman gerçekten üretiliyor mu, ve kaldırdığım
+// eski tek-değerli alanlara artık referans kalmış mı?
+test('hucre formu eski tek-deger alanlarina referans birakmadi', () => {
+  const fs = require('fs');
+  const kaynak = fs.readFileSync(__dirname + '/../../frontend/js/modules/06-matrix.js', 'utf8');
+  for (const olu of ["el('mcDuyguKim')", "el('mcDuyguA')", "el('mcGiris')",
+                     "el('mcGelisme')", "el('mcSonuc')", "el('mcKisiler')"]) {
+    if (kaynak.includes(olu)) throw new Error(`kaldirilan alana referans kaldi: ${olu}`);
+  }
+  // Yeni dinamik kapsayıcılar üretiliyor mu?
+  for (const id of ['mcKisiListe', 'mcKisiEkle', 'mcYay']) {
+    if (!kaynak.includes(`id="${id}"`)) throw new Error(`kapsayici uretilmiyor: ${id}`);
+  }
+});
+
 Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));

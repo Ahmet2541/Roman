@@ -43,7 +43,8 @@ def _get_matrix(db: Session, matrix_id: int, novel_id: int) -> models.PlanMatrix
     return m
 
 
-def _cell_out(db: Session, cell: models.MatrixCell, column=None) -> schemas.MatrixCellOut:
+def _cell_out(db: Session, cell: models.MatrixCell, column=None,
+              paralel: bool | None = None) -> schemas.MatrixCellOut:
     """column verilirse damga kilidi de denetlenir (turun damga kelimesi
     SONUÇ beat'inde geçiyor mu). Verilmezse o tek kontrol atlanır - diğer
     eksik alan uyarıları yine üretilir."""
@@ -54,13 +55,19 @@ def _cell_out(db: Session, cell: models.MatrixCell, column=None) -> schemas.Matr
     if column is None:
         column = db.query(models.MatrixColumn).filter(
             models.MatrixColumn.id == cell.column_id).first()
+    if paralel is None:
+        # Paralel matris = birden çok sütun. Orada turlar karşılıklı
+        # ilerlediği için hücre tek kişi/tek beat taşımalı.
+        paralel = db.query(models.MatrixColumn).filter(
+            models.MatrixColumn.matrix_id == cell.matrix_id).count() > 1
     data = plan_schema.normalize_cell(cell.data)
     return schemas.MatrixCellOut(
         id=cell.id, column_id=cell.column_id, row_id=cell.row_id,
         content=cell.content or "", chapter_id=cell.chapter_id,
         chapter_number=chapter_number, code=cell.code,
         data=data,
-        warnings=plan_schema.cell_warnings(data, column.tur_data if column else None),
+        warnings=plan_schema.cell_warnings(
+            data, column.tur_data if column else None, paralel=paralel),
     )
 
 
@@ -93,7 +100,8 @@ def _matrix_out(db: Session, m: models.PlanMatrix) -> schemas.MatrixOut:
             instructions=r.instructions or "",
             parca_data=plan_schema.normalize_meta(r.parca_data, plan_schema.PARCA_ALANLARI),
         ) for r in m.rows],
-        cells=[_cell_out(db, c, cols_by_id.get(c.column_id)) for c in m.cells],
+        cells=[_cell_out(db, c, cols_by_id.get(c.column_id), paralel=len(m.columns) > 1)
+               for c in m.cells],
     )
 
 
@@ -496,7 +504,7 @@ def upsert_cell(
     db.commit()
     db.refresh(cell)
     column = next((c for c in m.columns if c.id == cell.column_id), None)
-    return _cell_out(db, cell, column)
+    return _cell_out(db, cell, column, paralel=len(m.columns) > 1)
 
 
 # ---- Fihrist üretimi --------------------------------------------------------
