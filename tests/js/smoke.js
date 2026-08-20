@@ -384,4 +384,39 @@ test('eşleşen ve eşleşmeyen adlar ayrı rozet alır', () => {
   if (!/robot ?\?/.test(durum.innerHTML)) throw new Error('eşleşmeyen soru işareti almadı');
 });
 
+// --- 18. TARİH NORMALLEŞTİRME ---
+// "03,05,27" gibi kısa yazım okunur tarihe çevrilir; TANINMAYAN metin
+// olduğu gibi kalır - romanda "üçüncü gün" yazabilmek engellenmemeli.
+test('tarih kisayolu okunur tarihe cevrilir', () => {
+  const beklenen = {
+    '03,05,27': '03 Mayıs 2027',
+    '3.5.2027': '03 Mayıs 2027',
+    '03/05/27': '03 Mayıs 2027',
+    '12-11-2030': '12 Kasım 2030',
+    '1 1 27': '01 Ocak 2027',
+  };
+  for (const [girdi, cikti] of Object.entries(beklenen)) {
+    const sonuc = normalizeTarih(girdi);
+    if (sonuc !== cikti) throw new Error(`${girdi} -> ${sonuc}, beklenen ${cikti}`);
+  }
+  // Dokunulmaması gerekenler
+  for (const ham of ['üçüncü gün', '12 Mart 2027', 'kapanıştan iki hafta sonra', '']) {
+    if (normalizeTarih(ham) !== ham) throw new Error(`serbest metin bozuldu: ${ham}`);
+  }
+  // Geçersiz gün/ay tarih sayılmamalı
+  for (const ham of ['45,05,27', '03,13,27', '0,5,27']) {
+    if (normalizeTarih(ham) !== ham) throw new Error(`gecersiz tarih cevrildi: ${ham}`);
+  }
+});
+
+// --- 19. DUYGU LİSTESİ ---
+test('duygu listesi temel kategorileri kapsiyor', () => {
+  const liste = global.DUYGU_LISTESI || global.window.DUYGU_LISTESI;
+  const olmasiGereken = ['mutluluk', 'sevgi', 'üzüntü', 'korku', 'öfke', 'iğrenme', 'şaşkınlık'];
+  for (const d of olmasiGereken) {
+    if (!liste.includes(d)) throw new Error(`temel duygu eksik: ${d}`);
+  }
+  if (new Set(liste).size !== liste.length) throw new Error('listede tekrar var');
+});
+
 Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));

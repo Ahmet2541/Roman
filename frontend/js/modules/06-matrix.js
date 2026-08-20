@@ -322,6 +322,50 @@ const ZAMAN_TIPLERI = [
   ['SAYAC', 'SAYAÇ — sahne boyunca işleyen süre'],
 ];
 
+// DUYGU LİSTESİ - temel duygular ve alt tonları, kategori sırasıyla.
+// Açılır listede öneri olarak çıkar ama SERBEST METİN engellenmez:
+// "tören havası" gibi listede olmayan bir hâli de yazabilmelisin.
+const DUYGU_LISTESI = [
+  // Mutluluk
+  'mutluluk', 'neşe', 'huzur', 'memnuniyet', 'keyif', 'coşku', 'minnettarlık', 'gurur', 'umut',
+  // Sevgi
+  'sevgi', 'şefkat', 'merhamet', 'bağlılık', 'hayranlık', 'koruma içgüdüsü', 'yakınlık',
+  // Üzüntü
+  'üzüntü', 'keder', 'hüzün', 'yalnızlık', 'çaresizlik', 'pişmanlık', 'melankoli', 'yas',
+  // Korku
+  'korku', 'endişe', 'panik', 'tedirginlik', 'güvensizlik', 'dehşet', 'ürkeklik', 'stres', 'gerilim',
+  // Öfke
+  'öfke', 'sinir', 'hiddet', 'kızgınlık', 'hayal kırıklığı', 'tahammülsüzlük', 'intikam arzusu',
+  // İğrenme
+  'iğrenme', 'tiksinti', 'nefret', 'aşağılama',
+  // Şaşkınlık
+  'şaşkınlık', 'hayret', 'afallama', 'merak', 'şok',
+  // Karmaşık (ikincil)
+  'kıskançlık', 'suçluluk', 'utanç', 'heyecan', 'nostalji', 'soğukkanlılık', 'beklenti',
+];
+// const bildirimleri modül dışına taşmıyor; 07b-checks.js'teki KONTROLLER
+// gibi window'a asılır ki testler ve diğer modüller görebilsin.
+if (typeof window !== 'undefined') window.DUYGU_LISTESI = DUYGU_LISTESI;
+
+// TARİH NORMALLEŞTİRME: "03,05,27" -> "03 Mayıs 2027".
+// Ayraç olarak virgül, nokta, eğik çizgi, tire ve boşluk kabul edilir.
+// TANINMAYAN metin OLDUĞU GİBİ kalır - romanda "üçüncü gün" ya da
+// "kapanıştan iki hafta sonra" yazabilmelisin, biçim dayatılmamalı.
+const AYLAR_TR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+                  'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+
+function normalizeTarih(metin) {
+  const ham = (metin || '').trim();
+  const m = ham.match(/^(\d{1,2})\s*[,./\-\s]\s*(\d{1,2})\s*[,./\-\s]\s*(\d{2,4})$/);
+  if (!m) return ham;
+  const gun = parseInt(m[1], 10);
+  const ay = parseInt(m[2], 10);
+  let yil = parseInt(m[3], 10);
+  if (gun < 1 || gun > 31 || ay < 1 || ay > 12) return ham;  // tarih değil, dokunma
+  if (m[3].length <= 2) yil += 2000;   // "27" -> 2027
+  return `${String(gun).padStart(2, '0')} ${AYLAR_TR[ay - 1]} ${yil}`;
+}
+
 // Backend'deki plan_schema.UZUNLUK_SEVIYELERI ile aynı anahtarlar.
 // Somut karşılık AI'ya backend'den gider; buradaki kısa açıklama sadece
 // yazarken hangi ölçüyü seçtiğini hatırlatmak için.
@@ -501,7 +545,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       ${alan('mcOlay', 'OLAY', d.olay, '(tek cümle: kim kime ne yapar)', 44)}
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
         <div class="field" style="flex:1;min-width:110px;"><label>Tarih</label>
-          <input type="text" id="mcTarih" value="${escapeHtml(zaman.tarih || '')}" placeholder="12 Mart 2027" title="Serbest metin: '12 Mart 2027' de yazabilirsin, 'üçüncü gün' de"></div>
+          <input type="text" id="mcTarih" value="${escapeHtml(zaman.tarih || '')}" placeholder="03,05,27 → 03 Mayıs 2027" title="03,05,27 yazarsan 03 Mayıs 2027 olur. Nokta, eğik çizgi, tire de olur. 'üçüncü gün' gibi serbest metin de yazabilirsin - dokunulmaz."></div>
         <div class="field" style="flex:1;min-width:90px;"><label>Saat</label>
           <input type="text" id="mcSaat" value="${escapeHtml(zaman.saat || '')}" placeholder="21:40"></div>
         <div class="field" style="flex:1;min-width:110px;"><label>Tip</label>
@@ -515,19 +559,20 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       <div class="field"><label>MEKAN</label>
         <input type="text" id="mcMekan" list="mcMekanList" value="${escapeHtml(d.mekan || '')}" placeholder="VIP Salonu">
         <datalist id="mcMekanList">${_datalistSecenekleri(varliklar.mekanlar)}</datalist></div>
+      <datalist id="mcDuyguList">${DUYGU_LISTESI.map(x => `<option value="${escapeHtml(x)}"></option>`).join('')}</datalist>
       <div style="display:flex;gap:6px;">
         <div class="field" style="flex:1;"><label>ORTAM <span style="font-weight:400;color:var(--text-muted);">(odanın hâli)</span></label>
-          <input type="text" id="mcOrtamA" value="${escapeHtml(ortam.baslangic || '')}" placeholder="endişe"></div>
+          <input type="text" id="mcOrtamA" list="mcDuyguList" value="${escapeHtml(ortam.baslangic || '')}" placeholder="endişe" autocomplete="off"></div>
         <div class="field" style="flex:1;"><label>→ (dönüyorsa)</label>
-          <input type="text" id="mcOrtamB" value="${escapeHtml(ortam.bitis || '')}" placeholder="korku"></div>
+          <input type="text" id="mcOrtamB" list="mcDuyguList" value="${escapeHtml(ortam.bitis || '')}" placeholder="korku" autocomplete="off"></div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
         <div class="field" style="flex:1;min-width:110px;"><label>KİŞİ DUYGUSU — kimin</label>
           <input type="text" id="mcDuyguKim" list="mcKisiList" value="${escapeHtml(duygu.kim || '')}" placeholder="Palyaço"></div>
         <div class="field" style="flex:1;min-width:90px;"><label>Başlangıç</label>
-          <input type="text" id="mcDuyguA" value="${escapeHtml(duygu.baslangic || '')}" placeholder="güven"></div>
+          <input type="text" id="mcDuyguA" list="mcDuyguList" value="${escapeHtml(duygu.baslangic || '')}" placeholder="güven" autocomplete="off"></div>
         <div class="field" style="flex:1;min-width:90px;"><label>→ (yay ise)</label>
-          <input type="text" id="mcDuyguB" value="${escapeHtml(duygu.bitis || '')}" placeholder="şüphe"></div>
+          <input type="text" id="mcDuyguB" list="mcDuyguList" value="${escapeHtml(duygu.bitis || '')}" placeholder="şüphe" autocomplete="off"></div>
       </div>
       <div class="field"><label>KİŞİLER <span style="font-weight:400;color:var(--text-muted);">(virgülle)</span></label>
         <input type="text" id="mcKisiler" value="${escapeHtml(_adListesi(d.kisiler))}" placeholder="Vicdan, Palyaço" autocomplete="off">
@@ -620,6 +665,10 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       kutu.style.display = 'none';
     }
   }
+  // Tarih alanı odaktan çıkınca normalleşir: "03,05,27" -> "03 Mayıs 2027".
+  el('mcTarih').addEventListener('blur', () => {
+    el('mcTarih').value = normalizeTarih(el('mcTarih').value);
+  });
   el('mcZamanTip').addEventListener('change', sayacAlaniniAyarla);
   sayacAlaniniAyarla();
 
@@ -665,7 +714,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
   function formuTopla() {
     return {
       olay: el('mcOlay').value,
-      zaman: { tarih: el('mcTarih').value, saat: el('mcSaat').value, tip: el('mcZamanTip').value, sayac: el('mcSayac').value },
+      zaman: { tarih: normalizeTarih(el('mcTarih').value), saat: el('mcSaat').value, tip: el('mcZamanTip').value, sayac: el('mcSayac').value },
       mekan: el('mcMekan').value,
       mekan_id: (_varlikEslestir(el('mcMekan').value, varliklar.mekanlar) || {}).id || null,
       ortam: { baslangic: el('mcOrtamA').value, bitis: el('mcOrtamB').value },
