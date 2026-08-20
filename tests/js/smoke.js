@@ -412,11 +412,21 @@ test('tarih kisayolu okunur tarihe cevrilir', () => {
 // --- 19. DUYGU LİSTESİ ---
 test('duygu listesi temel kategorileri kapsiyor', () => {
   const liste = global.DUYGU_LISTESI || global.window.DUYGU_LISTESI;
+  const gruplar = global.DUYGU_GRUPLARI || global.window.DUYGU_GRUPLARI;
   const olmasiGereken = ['mutluluk', 'sevgi', 'üzüntü', 'korku', 'öfke', 'iğrenme', 'şaşkınlık'];
   for (const d of olmasiGereken) {
     if (!liste.includes(d)) throw new Error(`temel duygu eksik: ${d}`);
   }
   if (new Set(liste).size !== liste.length) throw new Error('listede tekrar var');
+  // Düz liste GRUPLARDAN türetilmeli - iki ayrı yerde tutulursa ayrışır
+  const turetilmis = gruplar.flatMap(([, t]) => t);
+  if (turetilmis.join('|') !== liste.join('|'))
+    throw new Error('duz liste gruplardan turetilmemis');
+  const grupAdlari = gruplar.map(([a]) => a);
+  for (const g of ['Mutluluk', 'Sevgi', 'Üzüntü', 'Korku', 'Öfke', 'İğrenme', 'Şaşkınlık', 'Karmaşık']) {
+    if (!grupAdlari.includes(g)) throw new Error(`grup eksik: ${g}`);
+  }
+  if (gruplar.some(([, t]) => !t.length)) throw new Error('bos grup var');
 });
 
 // --- 20. HÜCRE FORMU: kişi başına duygu + çoklu beat ---
@@ -433,6 +443,36 @@ test('hucre formu eski tek-deger alanlarina referans birakmadi', () => {
   for (const id of ['mcKisiListe', 'mcKisiEkle', 'mcYay']) {
     if (!kaynak.includes(`id="${id}"`)) throw new Error(`kapsayici uretilmiyor: ${id}`);
   }
+});
+
+// --- 21. VARLIK TANIMA: metinde geçen kayıtlı varlıkları bulur ---
+// Açılır liste yerine tanıma: yazmayı kesmez, yazım hatasını ele verir
+// (rozet çıkmazsa isim kayıtla tutmuyor demektir).
+test('varlik tanima takma adlari ve kelime sinirini gozetir', () => {
+  const kayitlar = [
+    { id: 1, name: 'İhtiyar Teknisyen', aliases: ['usta'] },
+    { id: 2, name: 'Genç Mühendis', aliases: [] },
+    { id: 3, name: 'Leyla', aliases: [] },
+  ];
+  const ad = (m) => taraVarliklar(m, kayitlar).map(x => x.ad).sort();
+
+  // Tam ad
+  if (ad('İhtiyar Teknisyen araçtan iner').join() !== 'İhtiyar Teknisyen')
+    throw new Error('tam ad bulunamadi');
+  // Takma ad
+  if (ad('Hadi usta, içeride bekliyorlar').join() !== 'İhtiyar Teknisyen')
+    throw new Error('takma ad bulunamadi');
+  // Kelime sınırı: "usta" -> "ustalık" içinde eşleşmemeli
+  if (ad('ustalıkla yaptı').length !== 0)
+    throw new Error('kelime siniri gozetilmedi');
+  // Yazım hatası eşleşmemeli - kullanıcı hatayı rozetin YOKLUĞUNDAN anlar
+  if (ad('Genç Mühendüs twit atar').length !== 0)
+    throw new Error('yazim hatasi eslesti');
+  // Birden çok varlık
+  if (ad('Leyla ve Genç Mühendis konuşur').join() !== 'Genç Mühendis,Leyla')
+    throw new Error('coklu eslesme hatali');
+  // Kısa metin taranmaz
+  if (taraVarliklar('a', kayitlar).length !== 0) throw new Error('kisa metin tarandi');
 });
 
 Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));

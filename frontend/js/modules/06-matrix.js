@@ -325,27 +325,79 @@ const ZAMAN_TIPLERI = [
 // DUYGU LİSTESİ - temel duygular ve alt tonları, kategori sırasıyla.
 // Açılır listede öneri olarak çıkar ama SERBEST METİN engellenmez:
 // "tören havası" gibi listede olmayan bir hâli de yazabilmelisin.
-const DUYGU_LISTESI = [
-  // Mutluluk
-  'mutluluk', 'neşe', 'huzur', 'memnuniyet', 'keyif', 'coşku', 'minnettarlık', 'gurur', 'umut',
-  // Sevgi
-  'sevgi', 'şefkat', 'merhamet', 'bağlılık', 'hayranlık', 'koruma içgüdüsü', 'yakınlık',
-  // Üzüntü
-  'üzüntü', 'keder', 'hüzün', 'yalnızlık', 'çaresizlik', 'pişmanlık', 'melankoli', 'yas',
-  // Korku
-  'korku', 'endişe', 'panik', 'tedirginlik', 'güvensizlik', 'dehşet', 'ürkeklik', 'stres', 'gerilim',
-  // Öfke
-  'öfke', 'sinir', 'hiddet', 'kızgınlık', 'hayal kırıklığı', 'tahammülsüzlük', 'intikam arzusu',
-  // İğrenme
-  'iğrenme', 'tiksinti', 'nefret', 'aşağılama',
-  // Şaşkınlık
-  'şaşkınlık', 'hayret', 'afallama', 'merak', 'şok',
-  // Karmaşık (ikincil)
-  'kıskançlık', 'suçluluk', 'utanç', 'heyecan', 'nostalji', 'soğukkanlılık', 'beklenti',
+const DUYGU_GRUPLARI = [
+  ['Mutluluk', ['mutluluk', 'neşe', 'huzur', 'memnuniyet', 'keyif', 'coşku', 'minnettarlık', 'gurur', 'umut']],
+  ['Sevgi', ['sevgi', 'şefkat', 'merhamet', 'bağlılık', 'hayranlık', 'koruma içgüdüsü', 'yakınlık']],
+  ['Üzüntü', ['üzüntü', 'keder', 'hüzün', 'yalnızlık', 'çaresizlik', 'pişmanlık', 'melankoli', 'yas']],
+  ['Korku', ['korku', 'endişe', 'panik', 'tedirginlik', 'güvensizlik', 'dehşet', 'ürkeklik', 'stres', 'gerilim']],
+  ['Öfke', ['öfke', 'sinir', 'hiddet', 'kızgınlık', 'hayal kırıklığı', 'tahammülsüzlük', 'intikam arzusu']],
+  ['İğrenme', ['iğrenme', 'tiksinti', 'nefret', 'aşağılama']],
+  ['Şaşkınlık', ['şaşkınlık', 'hayret', 'afallama', 'merak', 'şok']],
+  ['Karmaşık', ['kıskançlık', 'suçluluk', 'utanç', 'heyecan', 'nostalji', 'soğukkanlılık', 'beklenti', 'ilgisizlik']],
 ];
-// const bildirimleri modül dışına taşmıyor; 07b-checks.js'teki KONTROLLER
-// gibi window'a asılır ki testler ve diğer modüller görebilsin.
-if (typeof window !== 'undefined') window.DUYGU_LISTESI = DUYGU_LISTESI;
+
+// Düz liste GRUPLARDAN TÜRETİLİR - iki yerde ayrı ayrı tutulursa
+// biri güncellenip öteki unutulur. Yazarken süzme (datalist) bunu kullanır.
+const DUYGU_LISTESI = DUYGU_GRUPLARI.flatMap(([, tonlar]) => tonlar);
+if (typeof window !== 'undefined') {
+  window.DUYGU_LISTESI = DUYGU_LISTESI;
+  window.DUYGU_GRUPLARI = DUYGU_GRUPLARI;
+}
+
+// GRUPLU DUYGU SEÇİCİ: tek bir kayan pencere, hangi alan tetiklediyse
+// ona yazar. Her alan için ayrı pencere kurmak yerine tek pencere -
+// kişi satırları yeniden çizildiğinde kaybolmasın diye.
+// Masaüstünde grubun üzerine gelince, dokunmatikte tıklayınca açılır.
+function duyguSeciciAc(hedefInput, dugme) {
+  let pencere = document.getElementById('duyguSecici');
+  if (!pencere) {
+    pencere = document.createElement('div');
+    pencere.id = 'duyguSecici';
+    pencere.style.cssText = 'position:absolute;z-index:9999;display:flex;'
+      + 'background:var(--paper);border:1px solid var(--border);border-radius:6px;'
+      + 'box-shadow:0 4px 16px rgba(0,0,0,0.18);font-size:12px;overflow:hidden;';
+    document.body.appendChild(pencere);
+  }
+  pencere.style.display = 'flex';
+
+  function ciz(acikGrup) {
+    pencere.innerHTML = `
+      <div style="min-width:120px;border-right:1px solid var(--border);max-height:260px;overflow-y:auto;">
+        ${DUYGU_GRUPLARI.map(([ad], i) => `
+          <div class="ds-grup" data-i="${i}" style="padding:6px 10px;cursor:pointer;white-space:nowrap;
+               ${i === acikGrup ? 'background:var(--paper-dim);font-weight:600;' : ''}">
+            ${escapeHtml(ad)} <span style="opacity:0.5;">›</span></div>`).join('')}
+      </div>
+      <div style="min-width:140px;max-height:260px;overflow-y:auto;">
+        ${DUYGU_GRUPLARI[acikGrup][1].map(t => `
+          <div class="ds-ton" data-ton="${escapeHtml(t)}" style="padding:6px 10px;cursor:pointer;white-space:nowrap;">
+            ${escapeHtml(t)}</div>`).join('')}
+      </div>`;
+    pencere.querySelectorAll('.ds-grup').forEach(g => {
+      g.addEventListener('mouseenter', () => ciz(+g.dataset.i));
+      g.addEventListener('click', () => ciz(+g.dataset.i));
+    });
+    pencere.querySelectorAll('.ds-ton').forEach(t => {
+      t.addEventListener('mouseenter', () => { t.style.background = 'var(--paper-dim)'; });
+      t.addEventListener('mouseleave', () => { t.style.background = ''; });
+      t.addEventListener('click', () => {
+        hedefInput.value = t.dataset.ton;
+        hedefInput.dispatchEvent(new Event('input'));
+        duyguSeciciKapat();
+      });
+    });
+  }
+  ciz(0);
+
+  const r = dugme.getBoundingClientRect ? dugme.getBoundingClientRect() : { bottom: 0, left: 0 };
+  pencere.style.top = `${(r.bottom || 0) + (window.scrollY || 0) + 4}px`;
+  pencere.style.left = `${Math.max(4, (r.left || 0) + (window.scrollX || 0) - 120)}px`;
+}
+
+function duyguSeciciKapat() {
+  const p = document.getElementById('duyguSecici');
+  if (p) p.style.display = 'none';
+}
 
 // TARİH NORMALLEŞTİRME: "03,05,27" -> "03 Mayıs 2027".
 // Ayraç olarak virgül, nokta, eğik çizgi, tire ve boşluk kabul edilir.
@@ -489,6 +541,30 @@ function wireSingleMatch(inputId, kayitlar) {
   ciz();
 }
 
+// VARLIK TANIMA: yazılan metinde geçen kayıtlı Kişi/Mekan/Nesne'leri bulur.
+// Açılır liste yerine TANIMA tercih edildi: yazarken her kelimede liste
+// açmak cümle kurmayı böler, üstelik listeden kelime seçerek cümle
+// kurulmuyor. Rozet ise yazmayı kesmez ve iki işe birden yarar -
+// "Genç Mühendüs" yazarsan rozet çıkmaz (yazım hatası görünür), çıkan
+// rozete dokununca varlık doğrudan hücrenin listesine eklenir.
+// Takma adlar da taranır: "usta" yazınca İhtiyar Teknisyen yakalanır.
+function taraVarliklar(metin, kayitlar) {
+  const hedef = _trLowerJs(metin || '');
+  if (hedef.length < 2) return [];
+  const bulunan = [];
+  for (const k of kayitlar) {
+    const adaylar = [k.name, ...(Array.isArray(k.aliases) ? k.aliases : [])]
+      .filter(x => x && String(x).trim().length >= 3);
+    for (const aday of adaylar) {
+      const a = _trLowerJs(String(aday));
+      // Kelime sınırı: "usta" kelimesi "ustalık" içinde eşleşmesin.
+      const kalip = new RegExp(`(^|[^\\p{L}\\p{N}])${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\p{L}\\p{N}]|$)`, 'u');
+      if (kalip.test(hedef)) { bulunan.push({ id: k.id, ad: k.name, gecen: String(aday) }); break; }
+    }
+  }
+  return bulunan;
+}
+
 function _adListesi(items) {
   return (items || []).map(x => x.ad).join(', ');
 }
@@ -562,9 +638,15 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       <datalist id="mcDuyguList">${DUYGU_LISTESI.map(x => `<option value="${escapeHtml(x)}"></option>`).join('')}</datalist>
       <div style="display:flex;gap:6px;">
         <div class="field" style="flex:1;"><label>ORTAM <span style="font-weight:400;color:var(--text-muted);">(odanın hâli)</span></label>
-          <input type="text" id="mcOrtamA" list="mcDuyguList" value="${escapeHtml(ortam.baslangic || '')}" placeholder="endişe" autocomplete="off"></div>
+          <div style="display:flex;gap:2px;">
+            <input type="text" id="mcOrtamA" list="mcDuyguList" value="${escapeHtml(ortam.baslangic || '')}" placeholder="endişe" autocomplete="off" style="flex:1;min-width:0;">
+            <button type="button" class="btn-icon-sm duygu-sec" data-hedef="mcOrtamA" title="Duygu listesinden seç">▾</button>
+          </div></div>
         <div class="field" style="flex:1;"><label>→ (dönüyorsa)</label>
-          <input type="text" id="mcOrtamB" list="mcDuyguList" value="${escapeHtml(ortam.bitis || '')}" placeholder="korku" autocomplete="off"></div>
+          <div style="display:flex;gap:2px;">
+            <input type="text" id="mcOrtamB" list="mcDuyguList" value="${escapeHtml(ortam.bitis || '')}" placeholder="korku" autocomplete="off" style="flex:1;min-width:0;">
+            <button type="button" class="btn-icon-sm duygu-sec" data-hedef="mcOrtamB" title="Duygu listesinden seç">▾</button>
+          </div></div>
       </div>
       <div style="font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">KİŞİLER <span style="font-weight:400;letter-spacing:0;">(her kişi KENDİ duygu yayını taşır)</span></div>
       <div id="mcKisiListe"></div>
@@ -636,6 +718,66 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
   cizBaglar();
   el('mcBagEkle').addEventListener('click', () => { baglar.push({ kod: '', tur: '', not: '' }); cizBaglar(); });
 
+  // ---- VARLIK TANIMA ŞERİDİ ----
+  // OLAY ve her beat'in altında, o metinde geçen kayıtlı varlıklar
+  // rozet olarak belirir. Hücrenin listesinde OLMAYAN bir varlık
+  // "+ ekle" olarak çıkar - tek dokunuşla listeye girer, böylece
+  // beat'te adı geçen ama listeye yazılmayı unutulan kişi kaçmaz.
+  function tanimaSeridi(hedefEl, metin) {
+    let serit = hedefEl.nextElementSibling;
+    if (!serit || !serit.classList || !serit.classList.contains('varlik-serit')) {
+      serit = document.createElement('div');
+      serit.className = 'varlik-serit eslesme-satiri';
+      hedefEl.parentElement.insertBefore(serit, hedefEl.nextSibling);
+    }
+    const k = taraVarliklar(metin, varliklar.kisiler);
+    const y = taraVarliklar(metin, varliklar.mekanlar);
+    const n = taraVarliklar(metin, varliklar.nesneler);
+    if (!k.length && !y.length && !n.length) { serit.innerHTML = ''; return; }
+
+    const parcalar = [];
+    for (const x of k) {
+      const zaten = kisiler.some(z => _trLowerJs(z.ad) === _trLowerJs(x.ad));
+      parcalar.push(`<span class="eslesme-rozet${zaten ? '' : ' yok'} vs-kisi" data-ad="${escapeHtml(x.ad)}" style="cursor:${zaten ? 'default' : 'pointer'};" title="${zaten ? 'Kişiler listesinde' : 'Dokun: Kişiler listesine ekle'}">${escapeHtml(x.ad)}${zaten ? '' : ' +'}</span>`);
+    }
+    for (const x of n) {
+      const zaten = el('mcNesneler').value.split(',').some(z => _trLowerJs(z.trim()) === _trLowerJs(x.ad));
+      parcalar.push(`<span class="eslesme-rozet${zaten ? '' : ' yok'} vs-nesne" data-ad="${escapeHtml(x.ad)}" style="cursor:${zaten ? 'default' : 'pointer'};" title="${zaten ? 'Nesneler listesinde' : 'Dokun: Nesneler listesine ekle'}">${escapeHtml(x.ad)}${zaten ? '' : ' +'}</span>`);
+    }
+    for (const x of y) {
+      const zaten = _trLowerJs(el('mcMekan').value.trim()) === _trLowerJs(x.ad);
+      parcalar.push(`<span class="eslesme-rozet${zaten ? '' : ' yok'} vs-mekan" data-ad="${escapeHtml(x.ad)}" style="cursor:${zaten ? 'default' : 'pointer'};" title="${zaten ? 'Mekan olarak seçili' : 'Dokun: MEKAN alanına yaz'}">${escapeHtml(x.ad)}${zaten ? '' : ' +'}</span>`);
+    }
+    serit.innerHTML = parcalar.join('');
+
+    serit.querySelectorAll('.vs-kisi').forEach(b => b.addEventListener('click', () => {
+      const ad = b.dataset.ad;
+      if (kisiler.some(z => _trLowerJs(z.ad) === _trLowerJs(ad))) return;
+      kisiler.push({ id: null, ad, duygu: { baslangic: '', bitis: '' } });
+      cizKisiler();
+      tumTanimalariTazele();
+    }));
+    serit.querySelectorAll('.vs-nesne').forEach(b => b.addEventListener('click', () => {
+      const mevcut = el('mcNesneler').value.split(',').map(x => x.trim()).filter(Boolean);
+      if (mevcut.some(z => _trLowerJs(z) === _trLowerJs(b.dataset.ad))) return;
+      mevcut.push(b.dataset.ad);
+      el('mcNesneler').value = mevcut.join(', ');
+      el('mcNesneler').dispatchEvent(new Event('input'));
+      tumTanimalariTazele();
+    }));
+    serit.querySelectorAll('.vs-mekan').forEach(b => b.addEventListener('click', () => {
+      el('mcMekan').value = b.dataset.ad;
+      el('mcMekan').dispatchEvent(new Event('input'));
+      tumTanimalariTazele();
+    }));
+  }
+
+  function tumTanimalariTazele() {
+    const olayEl = el('mcOlay');
+    if (olayEl && olayEl.parentElement) tanimaSeridi(olayEl, olayEl.value);
+    document.querySelectorAll('.mc-beat').forEach(t => tanimaSeridi(t, t.value));
+  }
+
   // ---- KİŞİLER: her biri kendi duygu yayıyla ----
   // Tek bir duygu alanı varken iki kişilik sahnede ikinci kişinin yayı
   // kaydedilemiyor, sahneyi bölmek gerekiyordu. Kişi başına yay, iki
@@ -669,8 +811,14 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
           <input type="text" class="mc-k-ad" data-i="${i}" list="mcKisiList" value="${escapeHtml(k.ad)}" placeholder="Genç Mühendis" autocomplete="off" style="flex:1;min-width:0;">
           ${rozet}
         </div>
-        <input type="text" class="mc-k-a" data-i="${i}" list="mcDuyguList" value="${escapeHtml(k.duygu.baslangic)}" placeholder="umut" autocomplete="off" style="flex:1;min-width:90px;">
-        <input type="text" class="mc-k-b" data-i="${i}" list="mcDuyguList" value="${escapeHtml(k.duygu.bitis)}" placeholder="gurur" autocomplete="off" style="flex:1;min-width:90px;">
+        <div style="flex:1;min-width:90px;display:flex;gap:2px;">
+          <input type="text" class="mc-k-a" data-i="${i}" list="mcDuyguList" value="${escapeHtml(k.duygu.baslangic)}" placeholder="umut" autocomplete="off" style="flex:1;min-width:0;">
+          <button type="button" class="btn-icon-sm duygu-sec" data-hedef=".mc-k-a[data-i='${i}']" title="Duygu listesinden seç">▾</button>
+        </div>
+        <div style="flex:1;min-width:90px;display:flex;gap:2px;">
+          <input type="text" class="mc-k-b" data-i="${i}" list="mcDuyguList" value="${escapeHtml(k.duygu.bitis)}" placeholder="gurur" autocomplete="off" style="flex:1;min-width:0;">
+          <button type="button" class="btn-icon-sm duygu-sec" data-hedef=".mc-k-b[data-i='${i}']" title="Duygu listesinden seç">▾</button>
+        </div>
         <button class="btn-icon-sm mc-k-sil" data-i="${i}" title="Kişiyi çıkar" style="flex:0 0 auto;">✕</button>
       </div>`;
     }).join('');
@@ -728,7 +876,12 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     };
     kutu.querySelectorAll('.mc-beat').forEach(t => {
       sayacGuncelle(t);
-      t.addEventListener('input', () => { beatler[t.dataset.k][+t.dataset.i] = t.value; sayacGuncelle(t); });
+      t.addEventListener('input', () => {
+        beatler[t.dataset.k][+t.dataset.i] = t.value;
+        sayacGuncelle(t);
+        tanimaSeridi(t, t.value);
+      });
+      tanimaSeridi(t, t.value);
     });
     kutu.querySelectorAll('.mc-beat-ekle').forEach(b => b.addEventListener('click', () => {
       beatler[b.dataset.k].push(''); cizYay();
@@ -738,6 +891,28 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     }));
   }
   cizYay();
+  tumTanimalariTazele();
+
+  // Duygu seçici düğmeleri OLAY YAKALAMA ile bağlanır: kişi satırları
+  // yeniden çizildiğinde düğmeler de yenileniyor, tek tek bağlamak
+  // her çizimde unutulmaya açık olurdu.
+  editor.addEventListener('click', (e) => {
+    const dugme = e.target.closest ? e.target.closest('.duygu-sec') : null;
+    if (!dugme) { duyguSeciciKapat(); return; }
+    e.preventDefault();
+    e.stopPropagation();
+    const sec = dugme.dataset.hedef;
+    const hedef = sec.startsWith('.') ? editor.querySelector(sec) : document.getElementById(sec);
+    if (hedef) duyguSeciciAc(hedef, dugme);
+  });
+  // Pencere dışına tıklanınca kapansın.
+  document.addEventListener('click', (e) => {
+    const p = document.getElementById('duyguSecici');
+    if (!p || p.style.display === 'none') return;
+    if (p.contains && p.contains(e.target)) return;
+    if (e.target.closest && e.target.closest('.duygu-sec')) return;
+    duyguSeciciKapat();
+  });
 
   // Sayaç alanı yalnızca ATLAMA/SAYAÇ için anlamlı; NOKTA seçiliyse
   // gizlenir. Boş bir alanın orada durması "burayı da doldurmam mı
@@ -788,6 +963,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
   // Buraya olay dizisi yazıldığında yazan model sahneyi kurmaz, verileni
   // doldurur - sınır aşılınca alan uyarı rengine döner (backend'deki
   // BEAT_SINIRI ile aynı: 160, OLAY için 120).
+  el('mcOlay').addEventListener('input', () => tanimaSeridi(el('mcOlay'), el('mcOlay').value));
   [['mcOlay', 120]].forEach(([id, sinir]) => {
     const alanEl = el(id);
     if (!alanEl || !alanEl.parentElement) return;
