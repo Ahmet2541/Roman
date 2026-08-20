@@ -579,3 +579,50 @@ def test_empty_ortam_is_warned(client, headers):
         "data": {"olay": "x"},
     }, headers=headers)
     assert any("ORTAM duygusu boş" in w for w in r.json()["warnings"])
+
+
+# --- Matris etiketi ve sırası -----------------------------------------------
+
+def test_matrix_label_is_derived_from_chapter_bindings(client, headers):
+    """Bölüm aralığı ELLE yazılmaz - bağlardan türetilir, böylece bağ
+    değişince ad kendiliğinden düzelir."""
+    m = client.post("/matrix/", json={
+        "name": "Tur Yapısı", "columns": [{"label": "T1"}, {"label": "T2"}],
+        "rows": [{"label": "S1"}],
+    }, headers=headers).json()
+    ozet = lambda: [x for x in client.get("/matrix/", headers=headers).json() if x["id"] == m["id"]][0]
+    assert ozet()["chapter_label"] is None, "bağ yokken aralık uydurulmamalı"
+
+    a = client.post("/chapters/", json={"number": 5, "title": "A"}, headers=headers).json()
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "chapter_id": a["id"], "data": {"olay": "x"}}, headers=headers)
+    assert ozet()["chapter_label"] == "5. Bölüm", "tek bölümde aralık gösterilmemeli"
+
+    b = client.post("/chapters/", json={"number": 12, "title": "B"}, headers=headers).json()
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][1]["id"], "row_id": m["rows"][0]["id"],
+        "chapter_id": b["id"], "data": {"olay": "y"}}, headers=headers)
+    o = ozet()
+    assert o["chapter_label"] == "5-12. Bölüm"
+    assert o["chapter_min"] == 5 and o["chapter_max"] == 12
+
+
+def test_matrix_order_and_move(client, headers):
+    """Araya ekleme: yeni matris sona açılır, sonra yerine taşınır."""
+    adlar = ["A", "B", "C"]
+    for ad in adlar:
+        client.post("/matrix/", json={"name": ad, "columns": [{"label": "K"}],
+                                      "rows": [{"label": "S"}]}, headers=headers)
+    sirala = lambda: [x["name"] for x in client.get("/matrix/", headers=headers).json()]
+    assert sirala() == ["A", "B", "C"]
+
+    c_id = [x for x in client.get("/matrix/", headers=headers).json() if x["name"] == "C"][0]["id"]
+    assert client.post(f"/matrix/{c_id}/move?direction=up", headers=headers).json()["moved"]
+    assert sirala() == ["A", "C", "B"]
+    assert client.post(f"/matrix/{c_id}/move?direction=up", headers=headers).json()["moved"]
+    assert sirala() == ["C", "A", "B"]
+    # Uçtaki matris daha yukarı gitmez ama hata da vermez
+    assert client.post(f"/matrix/{c_id}/move?direction=up", headers=headers).json()["moved"] is False
+    assert sirala() == ["C", "A", "B"]
+    assert client.post(f"/matrix/{c_id}/move?direction=yan", headers=headers).status_code == 400

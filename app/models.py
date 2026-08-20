@@ -491,6 +491,10 @@ class PlanMatrix(Base):
     id = Column(Integer, primary_key=True)
     novel_id = Column(Integer, ForeignKey("novels.id"), nullable=False)
     name = Column(EncryptedString, nullable=False)
+    # Matrislerin ekrandaki sırası. Eskiden id'ye göre diziliyordu, yani
+    # araya matris eklemek imkânsızdı - sonradan açtığın "5-8. bölüm"
+    # matrisi hep en sona düşüyordu.
+    position = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     columns = relationship("MatrixColumn", back_populates="matrix", cascade="all, delete-orphan", order_by="MatrixColumn.position")

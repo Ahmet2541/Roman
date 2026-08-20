@@ -23,13 +23,42 @@ async function loadMatrixList() {
     const list = await api.get('/matrix/');
     area.innerHTML = `
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        ${list.map(m => `<button class="btn btn-sm matrix-open ${currentMatrixId === m.id ? 'btn-primary' : ''}" data-id="${m.id}">${escapeHtml(m.name)} <span style="opacity:0.7;">(${m.column_count}×${m.row_count}, ${m.filled_cell_count} dolu)</span></button>`).join('')}
+        ${list.map((m, i) => {
+          // BÖLÜM ARALIĞI elle yazılmaz, hücrelerin bölüm bağlarından
+          // türetilir - bağ değişince ad kendiliğinden düzelir.
+          // Bağ yoksa bunu açıkça söyle: "hangi bölüm?" sorusu sekmede
+          // cevapsız kalmasın.
+          const aralik = m.chapter_label
+            ? `<b style="color:var(--gold);">${escapeHtml(m.chapter_label)}</b>`
+            : '<span style="opacity:0.55;">bölüm bağı yok</span>';
+          const secili = currentMatrixId === m.id;
+          // Taşıma okları yalnızca AÇIK matriste - her sekmede iki ok
+          // olsa şerit okunmaz hale gelirdi.
+          const oklar = (secili && list.length > 1)
+            ? `<button class="btn-icon-sm m-mat-move" data-id="${m.id}" data-dir="up" title="Sırada bir yukarı taşı" ${i === 0 ? 'disabled' : ''}>◀</button>
+               <button class="btn-icon-sm m-mat-move" data-id="${m.id}" data-dir="down" title="Sırada bir aşağı taşı" ${i === list.length - 1 ? 'disabled' : ''}>▶</button>`
+            : '';
+          return `<span style="display:inline-flex;align-items:center;gap:2px;">
+            <button class="btn btn-sm matrix-open ${secili ? 'btn-primary' : ''}" data-id="${m.id}">
+              ${aralik} · ${escapeHtml(m.name)}
+              <span style="opacity:0.7;">(${m.column_count}×${m.row_count}, ${m.filled_cell_count} dolu)</span>
+            </button>${oklar}</span>`;
+        }).join('')}
         <button class="btn btn-sm" id="newMatrixBtn">+ Yeni Matris</button>
       </div>`;
     area.querySelectorAll('.matrix-open').forEach(btn => btn.addEventListener('click', () => {
       currentMatrixId = parseInt(btn.dataset.id, 10);
       loadMatrixList();
       loadMatrixGrid();
+    }));
+    // Taşıma okları: sekmeyi açmasınlar, sadece sırayı değiştirsinler.
+    area.querySelectorAll('.m-mat-move').forEach(btn => btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (btn.disabled) return;
+      try {
+        await api.post(`/matrix/${btn.dataset.id}/move?direction=${btn.dataset.dir}`, {});
+        await loadMatrixList();
+      } catch (err) { alert(err.message); }
     }));
     el('newMatrixBtn').addEventListener('click', openNewMatrixDialog);
     if (currentMatrixId && list.some(m => m.id === currentMatrixId)) await loadMatrixGrid();

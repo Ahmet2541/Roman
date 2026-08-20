@@ -102,12 +102,32 @@ def list_matrices(
     db: Session = Depends(get_db), _user=Depends(get_current_user),
     novel_id: int = Depends(get_novel_id),
 ):
+    matrisler = (
+        db.query(models.PlanMatrix)
+        .filter(models.PlanMatrix.novel_id == novel_id)
+        .order_by(models.PlanMatrix.position, models.PlanMatrix.id)
+        .all()
+    )
+    # Bölüm numaralarını tek sorguda çek - matris başına sorgu atmak
+    # sekiz matriste sekiz gidiş dönüş demek.
+    numaralar = dict(
+        db.query(models.Chapter.id, models.Chapter.number)
+        .filter(models.Chapter.novel_id == novel_id).all()
+    )
     out = []
-    for m in db.query(models.PlanMatrix).filter(models.PlanMatrix.novel_id == novel_id).all():
+    for m in matrisler:
+        bagli = sorted({numaralar[c.chapter_id] for c in m.cells
+                        if c.chapter_id and c.chapter_id in numaralar})
+        etiket = kmin = kmax = None
+        if bagli:
+            kmin, kmax = bagli[0], bagli[-1]
+            etiket = f"{kmin}. Bölüm" if kmin == kmax else f"{kmin}-{kmax}. Bölüm"
         out.append(schemas.MatrixSummaryOut(
             id=m.id, name=m.name, created_at=m.created_at,
             column_count=len(m.columns), row_count=len(m.rows),
             filled_cell_count=sum(1 for c in m.cells if (c.content or "").strip()),
+            position=m.position or 0,
+            chapter_label=etiket, chapter_min=kmin, chapter_max=kmax,
         ))
     return out
 
@@ -118,7 +138,10 @@ def create_matrix(
     db: Session = Depends(get_db), _user=Depends(get_current_user),
     novel_id: int = Depends(get_novel_id),
 ):
-    m = models.PlanMatrix(novel_id=novel_id, name=payload.name)
+    son = (db.query(models.PlanMatrix.position)
+           .filter(models.PlanMatrix.novel_id == novel_id).all())
+    m = models.PlanMatrix(novel_id=novel_id, name=payload.name,
+                          position=max((p[0] or 0 for p in son), default=0) + 1)
     db.add(m)
     db.flush()  # id lazım
     for i, col in enumerate(payload.columns, start=1):
@@ -135,6 +158,39 @@ def create_matrix(
     db.commit()
     db.refresh(m)
     return _matrix_out(db, m)
+
+
+@router.post("/{matrix_id}/move")
+def move_matrix(
+    matrix_id: int, direction: str,
+    db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Matrisi listede bir sıra yukarı/aşağı taşır (komşusuyla yer değiştirir).
+
+    Araya ekleme bu şekilde yapılır: yeni matris sona açılır, sonra
+    yerine kadar taşınır. Ayrı bir "araya ekle" ucu yerine bunu tercih
+    ettim - tek işlem, geri alması kolay ve pozisyonları yeniden
+    numaralamayı gerektirmiyor."""
+    if direction not in ("up", "down"):
+        raise HTTPException(400, "direction 'up' veya 'down' olmalı")
+    m = _get_matrix(db, matrix_id, novel_id)
+    sirali = (db.query(models.PlanMatrix)
+              .filter(models.PlanMatrix.novel_id == novel_id)
+              .order_by(models.PlanMatrix.position, models.PlanMatrix.id).all())
+    idx = next(i for i, x in enumerate(sirali) if x.id == m.id)
+    hedef = idx - 1 if direction == "up" else idx + 1
+    if hedef < 0 or hedef >= len(sirali):
+        return {"moved": False, "reason": "zaten uçta"}
+    komsu = sirali[hedef]
+    # Pozisyonlar eşit ya da bozuksa (eski kayıtlar) önce baştan numarala.
+    if (m.position or 0) == (komsu.position or 0):
+        for i, x in enumerate(sirali, start=1):
+            x.position = i
+        db.flush()
+    m.position, komsu.position = komsu.position, m.position
+    db.commit()
+    return {"moved": True}
 
 
 @router.get("/export")

@@ -389,6 +389,13 @@ def _upgrade_matrix_tables(engine):
             if "data" not in cols:
                 logger.info("Göç: matrix_cells.data (yapı kilidi) ekleniyor")
                 conn.execute(text("ALTER TABLE matrix_cells ADD COLUMN data TEXT"))
+        if "plan_matrices" in existing:
+            cols = {c["name"] for c in inspector.get_columns("plan_matrices")}
+            if "position" not in cols:
+                logger.info("Göç: plan_matrices.position (sıralama) ekleniyor")
+                conn.execute(text("ALTER TABLE plan_matrices ADD COLUMN position INTEGER DEFAULT 0"))
+                # Mevcut matrisler id sırasını korusun - eskiden zaten öyleydi.
+                conn.execute(text("UPDATE plan_matrices SET position = id WHERE position IS NULL OR position = 0"))
         if "matrix_columns" in existing:
             cols = {c["name"] for c in inspector.get_columns("matrix_columns")}
             if "tur_data" not in cols:

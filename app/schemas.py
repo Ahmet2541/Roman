@@ -828,6 +828,13 @@ class MatrixSummaryOut(BaseModel):
     column_count: int
     row_count: int
     filled_cell_count: int
+    position: int = 0
+    # Bağlı bölüm aralığı - ELLE YAZILMAZ, hücrelerin bölüm bağlarından
+    # türetilir. Elle yazılan bir aralık, bağ değişince yalan söylemeye
+    # başlardı; türetilen hep doğrudur.
+    chapter_label: Optional[str] = None
+    chapter_min: Optional[int] = None
+    chapter_max: Optional[int] = None
 
 
 class GenerateChaptersResponse(BaseModel):
