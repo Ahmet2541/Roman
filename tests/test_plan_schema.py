@@ -37,7 +37,7 @@ def test_structured_cell_renders_to_content(client, headers):
     assert r.status_code == 200, r.text
     c = r.json()["content"]
     assert "OLAY: Başkan sanığa mendili uzatır." in c
-    assert "ZAMAN: 12 Mart 21:40 (SAYAC)" in c
+    assert "ZAMAN: 12 Mart 21:40 (SAYAÇ)" in c
     assert "DUYGU: güven → şüphe" in c
     assert "SONUÇ: ÇÖZÜN kelimesi havada kalır." in c
     assert "BAĞLANTI: MP7 (ayna) → T1·G1" in c
@@ -155,7 +155,7 @@ def test_sayac_needs_subject(client, headers):
                                                  "sayac": "ambulans bekleme süresi"}},
     }, headers=headers)
     assert not any("sayacı" in w for w in r2.json()["warnings"])
-    assert "ZAMAN: 21:40 (SAYAC: ambulans bekleme süresi)" in r2.json()["content"]
+    assert "ZAMAN: 21:40 (SAYAÇ: ambulans bekleme süresi)" in r2.json()["content"]
 
 
 def test_duygu_has_owner(client, headers):
@@ -509,3 +509,27 @@ def test_parallel_findings_also_reach_audit_prompt(client, headers):
     _doldur(client, headers, m, 1, 0)
     metin = client.get(f"/matrix/{m['id']}/audit-prompt", headers=headers).json()["prompt"]
     assert "PARALELLİK DELİĞİ" in metin
+
+
+def test_sayac_accepts_turkish_spelling_and_renders_it(client, headers):
+    """Kullanıcı 'SAYAÇ' yazsa da anahtar ASCII 'SAYAC' saklanır; ekranda
+    ve AI metninde Türkçesi görünür."""
+    m = _matris(client, headers)
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "x", "zaman": {"tarih": "12 Mart 2027", "tip": "SAYAÇ",
+                                        "sayac": "ambulansın gelişi"}},
+    }, headers=headers)
+    assert r.json()["data"]["zaman"]["tip"] == "SAYAC"
+    assert "ZAMAN: 12 Mart 2027 (SAYAÇ: ambulansın gelişi)" in r.json()["content"]
+
+
+def test_atlama_warning_asks_the_right_question(client, headers):
+    """ATLAMA'da sorulan şey 'neyin sayacı' değil 'neyden atlandığı'."""
+    m = _matris(client, headers)
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "x", "zaman": {"tip": "ATLAMA"}},
+    }, headers=headers)
+    uyari = [w for w in r.json()["warnings"] if "ATLAMA" in w]
+    assert uyari and "atlandığı" in uyari[0]

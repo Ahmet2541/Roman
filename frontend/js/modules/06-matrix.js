@@ -284,7 +284,14 @@ const TUR_ALANLARI = [
   ['ovgu', 'Övgü', 'Turun övgü kalıbı'],
 ];
 
-const ZAMAN_TIPLERI = ['NOKTA', 'ATLAMA', 'SAYAC'];
+// Anahtar ASCII 'SAYAC' olarak saklanır (eski kayıtlar bozulmasın),
+// ekranda 'SAYAÇ' yazılır. Açıklama etiketin içinde: kısaltmanın ne
+// demek olduğu açılır listeden anlaşılmalı, tahmin ettirmemeli.
+const ZAMAN_TIPLERI = [
+  ['NOKTA', 'NOKTA — tek bir an, süre işlemiyor'],
+  ['ATLAMA', 'ATLAMA — önceki sahneden zaman sıçraması'],
+  ['SAYAC', 'SAYAÇ — sahne boyunca işleyen süre'],
+];
 
 // Backend'deki plan_schema.UZUNLUK_SEVIYELERI ile aynı anahtarlar.
 // Somut karşılık AI'ya backend'den gider; buradaki kısa açıklama sadece
@@ -464,16 +471,16 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       ${alan('mcOlay', 'OLAY', d.olay, '(tek cümle: kim kime ne yapar)', 44)}
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
         <div class="field" style="flex:1;min-width:110px;"><label>Tarih</label>
-          <input type="text" id="mcTarih" value="${escapeHtml(zaman.tarih || '')}" placeholder="12 Mart"></div>
+          <input type="text" id="mcTarih" value="${escapeHtml(zaman.tarih || '')}" placeholder="12 Mart 2027" title="Serbest metin: '12 Mart 2027' de yazabilirsin, 'üçüncü gün' de"></div>
         <div class="field" style="flex:1;min-width:90px;"><label>Saat</label>
           <input type="text" id="mcSaat" value="${escapeHtml(zaman.saat || '')}" placeholder="21:40"></div>
         <div class="field" style="flex:1;min-width:110px;"><label>Tip</label>
           <select id="mcZamanTip">
             <option value="">(seç)</option>
-            ${ZAMAN_TIPLERI.map(t => `<option value="${t}" ${zaman.tip === t ? 'selected' : ''}>${t}</option>`).join('')}
+            ${ZAMAN_TIPLERI.map(([k, e]) => `<option value="${k}" ${zaman.tip === k ? 'selected' : ''}>${e}</option>`).join('')}
           </select></div>
       </div>
-      <div class="field"><label>Neyin sayacı / atlaması <span style="font-weight:400;color:var(--text-muted);">(SAYAC ve ATLAMA için)</span></label>
+      <div class="field" id="mcSayacKutu"><label id="mcSayacEtiket">Neyin sayacı / atlaması</label>
         <input type="text" id="mcSayac" value="${escapeHtml(zaman.sayac || '')}" placeholder="ambulans bekleme süresi"></div>
       <div class="field"><label>MEKAN</label>
         <input type="text" id="mcMekan" list="mcMekanList" value="${escapeHtml(d.mekan || '')}" placeholder="VIP Salonu">
@@ -557,6 +564,29 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
   cizBaglar();
   el('mcBagEkle').addEventListener('click', () => { baglar.push({ kod: '', tur: '', not: '' }); cizBaglar(); });
 
+  // Sayaç alanı yalnızca ATLAMA/SAYAÇ için anlamlı; NOKTA seçiliyse
+  // gizlenir. Boş bir alanın orada durması "burayı da doldurmam mı
+  // gerekiyor" sorusunu doğuruyordu.
+  function sayacAlaniniAyarla() {
+    const tip = el('mcZamanTip').value;
+    const kutu = document.getElementById('mcSayacKutu');
+    const etiket = document.getElementById('mcSayacEtiket');
+    if (!kutu) return;
+    if (tip === 'SAYAC') {
+      kutu.style.display = '';
+      etiket.textContent = 'Neyin sayacı?';
+      el('mcSayac').placeholder = 'ambulansın geliş süresi';
+    } else if (tip === 'ATLAMA') {
+      kutu.style.display = '';
+      etiket.textContent = 'Neyden ne kadar atlandı?';
+      el('mcSayac').placeholder = 'önceki sahneden üç gün sonra';
+    } else {
+      kutu.style.display = 'none';
+    }
+  }
+  el('mcZamanTip').addEventListener('change', sayacAlaniniAyarla);
+  sayacAlaniniAyarla();
+
   // Kişi/nesne alanları çoklu - kendi öneri listesi. Mekan ve duygu
   // sahibi tek değerli olduğu için tarayıcının datalist'i orada yeterli.
   wireMultiAutocomplete('mcKisiler', varliklar.kisiler);
@@ -620,7 +650,8 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     if (v.olay) satir.push(`OLAY: ${v.olay}`);
     const z = [v.zaman.tarih, v.zaman.saat].filter(Boolean).join(' ');
     if (z || v.zaman.tip) {
-      const tipMetin = v.zaman.tip ? ` (${v.zaman.tip}${v.zaman.sayac ? `: ${v.zaman.sayac}` : ''})` : '';
+      const tipGorunen = { NOKTA: 'NOKTA', ATLAMA: 'ATLAMA', SAYAC: 'SAYAÇ' }[v.zaman.tip] || v.zaman.tip;
+      const tipMetin = v.zaman.tip ? ` (${tipGorunen}${v.zaman.sayac ? `: ${v.zaman.sayac}` : ''})` : '';
       satir.push(`ZAMAN: ${z || '—'}${tipMetin}`);
     }
     if (v.mekan) satir.push(`MEKAN: ${v.mekan}`);

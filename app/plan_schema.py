@@ -43,7 +43,19 @@ OLAY_SINIRI = 120
 
 # --- Alan tanımları (arayüz formu da bu listelerden üretilir) ---------------
 
+# ZAMAN TİPİ - sahnenin zamanla ilişkisi:
+#   NOKTA  : sahne tek bir anda geçer, süre işlemez
+#   ATLAMA : önceki sahneden zaman sıçraması var (kaç sonra?)
+#   SAYAÇ  : sahne boyunca işleyen bir süre var (neyin sayacı?)
+# Anahtar "SAYAC" (ASCII) olarak SAKLANIR - eski kayıtlar bozulmasın diye -
+# ama ekranda ve AI'ya giden metinde "SAYAÇ" yazılır.
 ZAMAN_TIPLERI = ["NOKTA", "ATLAMA", "SAYAC"]
+ZAMAN_TIPI_GORUNEN = {"NOKTA": "NOKTA", "ATLAMA": "ATLAMA", "SAYAC": "SAYAÇ"}
+ZAMAN_TIPI_ACIKLAMA = {
+    "NOKTA": "tek bir an, süre işlemiyor",
+    "ATLAMA": "önceki sahneden zaman sıçraması",
+    "SAYAC": "sahne boyunca işleyen süre",
+}
 
 # HEDEF UZUNLUK: plandan çıkacak metnin ölçüsü. Etiketin tek başına
 # ("uzun") bir modele söylediği hiçbir şey yok - somut karşılığı da
@@ -94,6 +106,13 @@ YAY_ALANLARI = [
 ]
 
 
+def _zaman_tipi(deger) -> str:
+    """Girişi şemadaki anahtara oturtur. Kullanıcı ya da eski kayıt "SAYAÇ"
+    yazmış olabilir; saklanan anahtar her zaman ASCII "SAYAC"tır."""
+    ham = str(deger or "").strip().upper().replace("Ç", "C")
+    return ham if ham in ZAMAN_TIPLERI else ""
+
+
 def bos_hucre() -> dict:
     """Yeni bir hücrenin boş iskeleti - arayüz ve testler aynı şekli görsün."""
     return {
@@ -140,8 +159,8 @@ def normalize_cell(data: Any) -> dict:
         out["zaman"] = {
             "tarih": str(zaman.get("tarih") or "").strip(),
             "saat": str(zaman.get("saat") or "").strip(),
-            "tip": (str(zaman.get("tip") or "").strip().upper()
-                    if str(zaman.get("tip") or "").strip().upper() in ZAMAN_TIPLERI else ""),
+            # "SAYAÇ" yazılırsa da kabul et - anahtar ASCII "SAYAC" kalır.
+            "tip": _zaman_tipi(zaman.get("tip")),
             # SAYAÇ/ATLAMA tek başına boşlukta duruyordu: neyin sayacı,
             # neyin atlaması olduğu yazılmadan sahne zamanı belirsiz kalıyor.
             "sayac": str(zaman.get("sayac") or "").strip(),
@@ -239,7 +258,8 @@ def render_cell(data: Any) -> str:
     if zaman_parca or z["tip"]:
         tip = ""
         if z["tip"]:
-            tip = f" ({z['tip']}: {z['sayac']})" if z["sayac"] else f" ({z['tip']})"
+            gorunen = ZAMAN_TIPI_GORUNEN[z["tip"]]
+            tip = f" ({gorunen}: {z['sayac']})" if z["sayac"] else f" ({gorunen})"
         satirlar.append(f"ZAMAN: {zaman_parca or '—'}{tip}")
 
     if d["mekan"]:
@@ -326,9 +346,12 @@ def cell_warnings(data: Any, tur_data: Any = None) -> list[str]:
     if not d["mekan"]:
         uyarilar.append("MEKAN seçilmemiş")
     if not d["zaman"]["tip"]:
-        uyarilar.append("ZAMAN tipi seçilmemiş (NOKTA / ATLAMA / SAYAC)")
+        uyarilar.append("ZAMAN tipi seçilmemiş (NOKTA / ATLAMA / SAYAÇ)")
     elif d["zaman"]["tip"] in ("SAYAC", "ATLAMA") and not d["zaman"]["sayac"]:
-        uyarilar.append(f"{d['zaman']['tip']} neyin sayacı/atlaması yazılmamış")
+        uyarilar.append(
+            f"{ZAMAN_TIPI_GORUNEN[d['zaman']['tip']]} seçilmiş ama "
+            + ("neyin sayacı" if d["zaman"]["tip"] == "SAYAC" else "neyden atlandığı")
+            + " yazılmamış")
     if not (d["duygu"]["baslangic"] or d["duygu"]["bitis"]):
         uyarilar.append("DUYGU boş")
     elif not d["duygu"]["kim"]:
