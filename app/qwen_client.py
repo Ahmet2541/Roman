@@ -1063,10 +1063,18 @@ def chat_with_qwen(
 # ---------------------------------------------------------------------------
 
 
-def ask_qwen(context: str, instruction: str, existing_text: str | None = None) -> dict:
+def build_user_message(context: str, instruction: str, existing_text: str | None = None) -> str:
+    """Qwen'e giden KULLANICI mesajını kurar. ask_qwen ve önizleme AYNI
+    fonksiyonu kullanır - yoksa önizleme, gerçekte gönderilenden sapar ve
+    "AI bunu görüyor mu" sorusuna yalan cevap verir."""
     user_message = f"CONTEXT:\n{context}\n\nTALİMAT:\n{instruction}"
     if existing_text:
         user_message += f"\n\nMEVCUT METİN (bunun üzerinde düzenleme yap):\n{existing_text}"
+    return user_message
+
+
+def ask_qwen(context: str, instruction: str, existing_text: str | None = None) -> dict:
+    user_message = build_user_message(context, instruction, existing_text)
 
     client = get_client()
     response = client.chat.completions.create(

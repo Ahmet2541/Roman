@@ -542,6 +542,11 @@ class ContextPreviewResponse(BaseModel):
     context: str
     char_count: int
     approx_tokens: int
+    # QWEN'E GİDEN İSTEĞİN TAMAMI: sistem yönergesi + kullanıcı mesajı.
+    # context bunun sadece bir parçası - "AI bunu görüyor mu" sorusunun
+    # tam cevabı ancak gönderilenin bütünü gösterilerek verilebilir.
+    system_prompt: str = ""
+    full_prompt: str = ""
     # Şeffaflık: hangi katman ne kadar yer kaplıyor (en büyükten küçüğe)
     breakdown: List["ContextLayerSize"] = []
 

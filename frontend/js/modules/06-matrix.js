@@ -692,7 +692,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       <div class="form-actions">
         <button class="btn btn-primary" id="mCellSave">Kaydet</button>
         <button class="btn" id="mcOnizle" title="Bu hücrenin plan metni - sadece PLAN katmanı">Plan metni</button>
-        <button class="btn" id="mcTamOnizle" title="Bu bölüm yazılırken AI'ya gidecek BÜTÜN bağlam: kişi/mekan profilleri, kurallar, fihrist, üslup - hepsi">AI'ya gidecek tam bağlam</button>
+        <button class="btn" id="mcTamOnizle" title="Qwen'e giden isteğin TAMAMI: sistem yönergesi + bütün bağlam katmanları (kişi/mekan profilleri, kurallar, fihrist, üslup) + talimat">AI'ya giden tam prompt</button>
         <button class="btn" id="mCellCancel">Kapat</button>
       </div>
       <div id="mCellError" class="error-text"></div>
@@ -1055,12 +1055,25 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
         include_chapter_text: false, text_scope: 'none',
         include_own_summary: false,
       });
-      const metin = r.context || '(boş)';
+      // full_prompt = sistem yönergesi + bağlam + talimat, yani Qwen'e
+      // giden isteğin TAMAMI. Eski sürümlerde alan yoksa bağlama düşer.
+      const metin = r.full_prompt || r.context || '(boş)';
+      const katmanlar = (r.breakdown || [])
+        .map(b => `${escapeHtml(b.name || b.ad || '')}: ${b.char_count || b.chars || 0}`)
+        .join(' · ');
       kutu.innerHTML = `
         <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">
-          ${metin.length} karakter · Qwen'e istek atılmadı, ücretsiz.
+          ${metin.length} karakter · ~${r.approx_tokens || 0} token · Qwen'e istek atılmadı, ücretsiz.
+          ${katmanlar ? `<div style="margin-top:2px;">${katmanlar}</div>` : ''}
         </div>
+        <div style="margin-top:4px;"><button class="btn btn-sm" id="mcPromptKopya">Kopyala</button></div>
         <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper-dim);border:1px solid var(--border);border-radius:4px;padding:8px;margin-top:4px;max-height:400px;overflow-y:auto;">${escapeHtml(metin)}</pre>`;
+      el('mcPromptKopya').addEventListener('click', async () => {
+        const b = el('mcPromptKopya');
+        try { await navigator.clipboard.writeText(metin); b.textContent = 'Kopyalandı ✓'; }
+        catch (e) { b.textContent = 'Kopyalanamadı'; }
+        setTimeout(() => { b.textContent = 'Kopyala'; }, 2000);
+      });
     } catch (err) {
       kutu.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
     }

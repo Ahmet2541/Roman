@@ -732,3 +732,32 @@ def test_unregistered_names_do_not_break_context(client, headers):
     }, headers=headers)
     assert r.status_code == 200
     assert "KİŞİLER: Kayıtsız Kişi" in r.json()["context"]
+
+
+def test_context_preview_returns_full_prompt(client, headers):
+    """Önizleme, Qwen'e giden isteğin TAMAMINI göstermeli: sistem yönergesi
+    + bağlam + talimat. Sadece bağlamı göstermek 'AI bunu görüyor mu'
+    sorusuna eksik cevap veriyordu."""
+    client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers)
+    r = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 1,
+        "instruction": "Sahneyi yaz.",
+    }, headers=headers).json()
+    assert r["system_prompt"], "sistem yönergesi dönmedi"
+    assert "=== SİSTEM YÖNERGESİ ===" in r["full_prompt"]
+    assert "=== KULLANICI MESAJI ===" in r["full_prompt"]
+    assert "CONTEXT:" in r["full_prompt"] and "TALİMAT:" in r["full_prompt"]
+    assert "Sahneyi yaz." in r["full_prompt"]
+    assert r["context"] in r["full_prompt"], "bağlam tam istekte yok"
+
+
+def test_preview_matches_what_is_actually_sent(client, headers):
+    """Önizleme ile gerçek istek AYNI fonksiyondan kurulmalı - yoksa
+    önizleme zamanla gerçekte gidenden sapar ve yalan söyler."""
+    from app.qwen_client import build_user_message
+    client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers)
+    r = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 1, "instruction": "Yaz.",
+    }, headers=headers).json()
+    beklenen = build_user_message(r["context"], "Yaz.", None)
+    assert beklenen in r["full_prompt"]

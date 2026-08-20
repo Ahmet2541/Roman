@@ -70,9 +70,16 @@ def preview_context(
         include_own_summary=payload.include_own_summary,
     )
     chars, tokens, breakdown = estimate_context_size(context)
+    # Gönderilenin TAMAMI aynı fonksiyonlardan kurulur (ask_qwen ile ortak),
+    # yoksa önizleme gerçekte gidenden sapar.
+    from ..qwen_client import SYSTEM_PROMPT, build_user_message
+    kullanici = build_user_message(context, payload.instruction or "", None)
     return schemas.ContextPreviewResponse(
         context=context, char_count=chars, approx_tokens=tokens,
         breakdown=[schemas.ContextLayerSize(**b) for b in breakdown],
+        system_prompt=SYSTEM_PROMPT,
+        full_prompt=f"=== SİSTEM YÖNERGESİ ===\n{SYSTEM_PROMPT}\n\n"
+                    f"=== KULLANICI MESAJI ===\n{kullanici}",
     )
 
 
