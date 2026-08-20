@@ -687,3 +687,48 @@ def test_matrix_order_and_move(client, headers):
     assert client.post(f"/matrix/{c_id}/move?direction=up", headers=headers).json()["moved"] is False
     assert sirala() == ["C", "A", "B"]
     assert client.post(f"/matrix/{c_id}/move?direction=yan", headers=headers).status_code == 400
+
+
+def test_plan_cell_entities_reach_the_profile_layer(client, headers):
+    """Hücrede yazılı kişinin PROFİLİ de bağlama gitmeli. Eskiden plan
+    "KİŞİLER: Genç Mühendis" diyordu ama o kişinin kim olduğu sadece ELLE
+    seçilirse gidiyordu - model karakteri tanımadan yazıyordu."""
+    k = client.post("/characters/", json={
+        "name": "Genç Mühendis", "description": "Yirmi altı yaşında, aceleci."},
+        headers=headers).json()
+    y = client.post("/places/", json={
+        "name": "Lümen Vadisi", "description": "Cam kabuklu araştırma vadisi."},
+        headers=headers).json()
+
+    m = _matris(client, headers)
+    client.post(f"/matrix/{m['id']}/generate-chapters", headers=headers)
+    cell = client.get(f"/matrix/{m['id']}", headers=headers).json()["cells"][0]
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": cell["column_id"], "row_id": cell["row_id"],
+        "data": {"olay": "Varış.", "mekan": "Lümen Vadisi", "mekan_id": y["id"],
+                 "kisiler": [{"id": k["id"], "ad": "Genç Mühendis",
+                              "duygu": {"baslangic": "umut", "bitis": "gurur"}}]},
+    }, headers=headers)
+
+    # selected_entities BOŞ gönderiliyor - profiller yine de gitmeli
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": cell["chapter_number"],
+    }, headers=headers).json()["context"]
+    assert "Yirmi altı yaşında, aceleci." in ctx, "kişi profili bağlama gitmedi"
+    assert "Cam kabuklu araştırma vadisi." in ctx, "mekan profili bağlama gitmedi"
+
+
+def test_unregistered_names_do_not_break_context(client, headers):
+    """Serbest metin olarak yazılmış (kayıtsız) adlar profil aramaz."""
+    m = _matris(client, headers)
+    client.post(f"/matrix/{m['id']}/generate-chapters", headers=headers)
+    cell = client.get(f"/matrix/{m['id']}", headers=headers).json()["cells"][0]
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": cell["column_id"], "row_id": cell["row_id"],
+        "data": {"olay": "Varış.", "kisiler": [{"ad": "Kayıtsız Kişi"}]},
+    }, headers=headers)
+    r = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": cell["chapter_number"],
+    }, headers=headers)
+    assert r.status_code == 200
+    assert "KİŞİLER: Kayıtsız Kişi" in r.json()["context"]

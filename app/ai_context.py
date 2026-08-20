@@ -615,6 +615,47 @@ def build_plan_layer(db: Session, novel_id: int, chapter_number: int | None, ins
     return "\n\n".join(parts)
 
 
+def plan_hucre_varliklari(db: Session, novel_id: int, chapter_number: int | None) -> list:
+    """Bu bölüme bağlı plan hücresinin (ve alt sahnelerinin) KİŞİ/MEKAN/NESNE
+    listesini varlık referansına çevirir.
+
+    NEDEN: plan katmanı "KİŞİLER: Genç Mühendis (umut → gurur)" diyor ama
+    Genç Mühendis'in KİM OLDUĞU ayrı bir katmanda - ve o katman şimdiye
+    kadar sadece ELLE seçilenlerden besleniyordu. Yani hücrede kişiyi
+    yazıyordun, profili yazım anında AI'ya gitmiyordu; model karakteri
+    tanımadan yazıyordu. Hücre zaten sahnede kimin olduğunu biliyor,
+    profilleri oradan çekmek doğal olan.
+
+    Sadece ID'ye BAĞLI varlıklar döner - serbest metin olarak yazılmış
+    ("Panelvan ?" gibi kayıtsız) adların profili zaten yoktur.
+    """
+    if chapter_number is None:
+        return []
+    from . import plan_schema
+
+    ch = (db.query(models.Chapter)
+          .filter(models.Chapter.novel_id == novel_id,
+                  models.Chapter.number == chapter_number).first())
+    if ch is None:
+        return []
+    hucreler = (db.query(models.MatrixCell)
+                .filter(models.MatrixCell.chapter_id == ch.id).all())
+    if not hucreler:
+        return []
+
+    refs, gorulen = [], set()
+    for h in hucreler:
+        d = plan_schema.normalize_cell(h.data)
+        adaylar = [("character", k.get("id")) for k in d["kisiler"]]
+        adaylar += [("object", n.get("id")) for n in d["nesneler"]]
+        adaylar.append(("place", d.get("mekan_id")))
+        for tip, eid in adaylar:
+            if isinstance(eid, int) and (tip, eid) not in gorulen:
+                gorulen.add((tip, eid))
+                refs.append(schemas.EntityRef(entity_type=tip, entity_id=eid))
+    return refs
+
+
 def build_context(
     db: Session, novel_id: int, universe_id: int, selected_entities: list,
     chapter_number: int | None = None, instruction_text: str = "",
@@ -685,7 +726,16 @@ def build_context(
     # katman - bkz. style_scan.build_style_warning_layer.
     style_warnings = build_style_warning_layer(db, universe_id)
     plan = build_plan_layer(db, novel_id, chapter_number, instruction_text=instruction_text)
-    dynamic = build_dynamic_layer(db, universe_id, selected_entities, instruction_text=instruction_text, include_hidden=include_hidden)
+    # PLANDAN GELEN VARLIKLAR: hücrede yazılı kişi/mekan/nesne profilleri
+    # de gitsin. Elle seçilenlerle BİRLEŞTİRİLİR (üzerine yazmaz) - yazar
+    # sahne dışından bir karakteri de bilerek ekleyebilir.
+    plan_refs = plan_hucre_varliklari(db, novel_id, chapter_number)
+    birlesik = list(selected_entities or [])
+    mevcut = {(r.entity_type, r.entity_id) for r in birlesik}
+    for r in plan_refs:
+        if (r.entity_type, r.entity_id) not in mevcut:
+            birlesik.append(r)
+    dynamic = build_dynamic_layer(db, universe_id, birlesik, instruction_text=instruction_text, include_hidden=include_hidden)
     return "\n\n".join(part for part in [fixed, index, outline, matrix_map, referenced, style, style_warnings, plan, parallel, voice, forward, knowledge, own_summary, chapter_text, dynamic] if part)
 
 
