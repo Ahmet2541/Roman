@@ -649,21 +649,29 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     const kutu = document.getElementById('mcKisiListe');
     if (!kutu) return;
     if (!kisiler.length) { kutu.innerHTML = '<div style="font-size:11.5px;color:var(--text-muted);">(kişi yok - sahneyi kim taşıyor?)</div>'; return; }
-    kutu.innerHTML = kisiler.map((k, i) => {
+    // Rozet ad kutusunun YANINA girer, altına değil: alta düşünce o sütun
+    // uzuyor ve duygu kutuları bir satır aşağı kaymış gibi görünüyordu.
+    // Sütun başlıkları bir kez yazılır, her satırda tekrarlanmaz.
+    kutu.innerHTML = `
+      <div style="display:flex;gap:4px;font-size:10.5px;color:var(--text-muted);margin-bottom:2px;">
+        <div style="flex:2;min-width:120px;">Kişi</div>
+        <div style="flex:1;min-width:90px;">Başlangıç</div>
+        <div style="flex:1;min-width:90px;">→ Bitiş (yay ise)</div>
+        <div style="width:24px;"></div>
+      </div>` + kisiler.map((k, i) => {
       const esti = varliklar.kisiler.some(x => _trLowerJs(x.name || '') === _trLowerJs(k.ad));
+      const rozet = (k.ad || '').trim()
+        ? `<span class="eslesme-rozet${esti ? '' : ' yok'}" style="font-size:10px;flex:0 0 auto;" title="${esti ? 'Kayıtlı kişi - ID ile bağlanacak' : 'Kayıtta yok - serbest metin olarak gidecek'}">${esti ? '✓' : '?'}</span>`
+        : '';
       return `
-      <div style="display:flex;gap:4px;align-items:flex-end;margin-bottom:4px;flex-wrap:wrap;">
-        <div class="field" style="flex:2;min-width:120px;margin:0;">
-          <input type="text" class="mc-k-ad" data-i="${i}" list="mcKisiList" value="${escapeHtml(k.ad)}" placeholder="Genç Mühendis" autocomplete="off">
-          <span class="eslesme-rozet${esti ? '' : ' yok'}" style="font-size:10px;" title="${esti ? 'Kayıtlı kişi - ID ile bağlanacak' : 'Kayıtta yok - serbest metin olarak gidecek'}">${esti ? '✓' : '?'}</span>
+      <div style="display:flex;gap:4px;align-items:center;margin-bottom:4px;">
+        <div style="flex:2;min-width:120px;display:flex;align-items:center;gap:4px;">
+          <input type="text" class="mc-k-ad" data-i="${i}" list="mcKisiList" value="${escapeHtml(k.ad)}" placeholder="Genç Mühendis" autocomplete="off" style="flex:1;min-width:0;">
+          ${rozet}
         </div>
-        <div class="field" style="flex:1;min-width:90px;margin:0;">
-          <input type="text" class="mc-k-a" data-i="${i}" list="mcDuyguList" value="${escapeHtml(k.duygu.baslangic)}" placeholder="umut" autocomplete="off">
-        </div>
-        <div class="field" style="flex:1;min-width:90px;margin:0;">
-          <input type="text" class="mc-k-b" data-i="${i}" list="mcDuyguList" value="${escapeHtml(k.duygu.bitis)}" placeholder="→ gurur" autocomplete="off">
-        </div>
-        <button class="btn-icon-sm mc-k-sil" data-i="${i}" title="Kişiyi çıkar">✕</button>
+        <input type="text" class="mc-k-a" data-i="${i}" list="mcDuyguList" value="${escapeHtml(k.duygu.baslangic)}" placeholder="umut" autocomplete="off" style="flex:1;min-width:90px;">
+        <input type="text" class="mc-k-b" data-i="${i}" list="mcDuyguList" value="${escapeHtml(k.duygu.bitis)}" placeholder="gurur" autocomplete="off" style="flex:1;min-width:90px;">
+        <button class="btn-icon-sm mc-k-sil" data-i="${i}" title="Kişiyi çıkar" style="flex:0 0 auto;">✕</button>
       </div>`;
     }).join('');
     kutu.querySelectorAll('.mc-k-ad').forEach(x => x.addEventListener('input', () => { kisiler[+x.dataset.i].ad = x.value; }));
