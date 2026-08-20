@@ -10,9 +10,12 @@ aşamalar, hücreler = o kesişimin madde madde planı. İki kritik özellik:
    bir KISIM (part), her kolon×satır bir BÖLÜM olur ve hücreler otomatik
    bağlanır. 8×7'lik bir matris tek tıkla 8 kısım + 56 bölüm demektir.
 """
+import json
+from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -23,6 +26,8 @@ from ..migrations import _next_matrix_code
 from ..ratelimit import rate_limit
 from .. import qwen_client
 from ..outline import build_hierarchy, children_of
+from .. import plan_schema
+from .. import plan_audit
 
 router = APIRouter(prefix="/matrix", tags=["Plan Matrisi"])
 
@@ -38,24 +43,57 @@ def _get_matrix(db: Session, matrix_id: int, novel_id: int) -> models.PlanMatrix
     return m
 
 
-def _cell_out(db: Session, cell: models.MatrixCell) -> schemas.MatrixCellOut:
+def _cell_out(db: Session, cell: models.MatrixCell, column=None) -> schemas.MatrixCellOut:
+    """column verilirse damga kilidi de denetlenir (turun damga kelimesi
+    SONUÇ beat'inde geçiyor mu). Verilmezse o tek kontrol atlanır - diğer
+    eksik alan uyarıları yine üretilir."""
     chapter_number = None
     if cell.chapter_id:
         ch = db.query(models.Chapter).filter(models.Chapter.id == cell.chapter_id).first()
         chapter_number = ch.number if ch else None
+    if column is None:
+        column = db.query(models.MatrixColumn).filter(
+            models.MatrixColumn.id == cell.column_id).first()
+    data = plan_schema.normalize_cell(cell.data)
     return schemas.MatrixCellOut(
         id=cell.id, column_id=cell.column_id, row_id=cell.row_id,
         content=cell.content or "", chapter_id=cell.chapter_id,
         chapter_number=chapter_number, code=cell.code,
+        data=data,
+        warnings=plan_schema.cell_warnings(data, column.tur_data if column else None),
+    )
+
+
+def _column_out(col: models.MatrixColumn) -> schemas.MatrixColumnOut:
+    return schemas.MatrixColumnOut(
+        id=col.id, position=col.position, label=col.label,
+        character_id=col.character_id,
+        tur_data=plan_schema.normalize_meta(col.tur_data, plan_schema.TUR_ALANLARI),
+    )
+
+
+def _row_out(row: models.MatrixRow) -> schemas.MatrixRowOut:
+    return schemas.MatrixRowOut(
+        id=row.id, position=row.position, kind=row.kind or "main", label=row.label,
+        instructions=row.instructions or "",
+        parca_data=plan_schema.normalize_meta(row.parca_data, plan_schema.PARCA_ALANLARI),
     )
 
 
 def _matrix_out(db: Session, m: models.PlanMatrix) -> schemas.MatrixOut:
+    cols_by_id = {c.id: c for c in m.columns}
     return schemas.MatrixOut(
         id=m.id, name=m.name, created_at=m.created_at,
-        columns=[schemas.MatrixColumnOut(id=c.id, position=c.position, label=c.label, character_id=c.character_id) for c in m.columns],
-        rows=[schemas.MatrixRowOut(id=r.id, position=r.position, kind=r.kind or "main", label=r.label, instructions=r.instructions or "") for r in m.rows],
-        cells=[_cell_out(db, c) for c in m.cells],
+        columns=[schemas.MatrixColumnOut(
+            id=c.id, position=c.position, label=c.label, character_id=c.character_id,
+            tur_data=plan_schema.normalize_meta(c.tur_data, plan_schema.TUR_ALANLARI),
+        ) for c in m.columns],
+        rows=[schemas.MatrixRowOut(
+            id=r.id, position=r.position, kind=r.kind or "main", label=r.label,
+            instructions=r.instructions or "",
+            parca_data=plan_schema.normalize_meta(r.parca_data, plan_schema.PARCA_ALANLARI),
+        ) for r in m.rows],
+        cells=[_cell_out(db, c, cols_by_id.get(c.column_id)) for c in m.cells],
     )
 
 
@@ -84,12 +122,55 @@ def create_matrix(
     db.add(m)
     db.flush()  # id lazım
     for i, col in enumerate(payload.columns, start=1):
-        db.add(models.MatrixColumn(matrix_id=m.id, position=i, label=col.label, character_id=col.character_id))
+        db.add(models.MatrixColumn(
+            matrix_id=m.id, position=i, label=col.label, character_id=col.character_id,
+            tur_data=plan_schema.normalize_meta(col.tur_data, plan_schema.TUR_ALANLARI),
+        ))
     for i, row in enumerate(payload.rows, start=1):
-        db.add(models.MatrixRow(matrix_id=m.id, position=i, label=row.label))
+        db.add(models.MatrixRow(
+            matrix_id=m.id, position=i, label=row.label,
+            kind=row.kind, instructions=row.instructions,
+            parca_data=plan_schema.normalize_meta(row.parca_data, plan_schema.PARCA_ALANLARI),
+        ))
     db.commit()
     db.refresh(m)
     return _matrix_out(db, m)
+
+
+@router.get("/export")
+def export_matrices(
+    format: str = "json", matrix_id: int | None = None,
+    db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Plan matrislerini toplu indirir. format=json makine okunur tam
+    döküm (yapılandırılmış hücre verisi, miras alanları, bölüm bağları,
+    uyarılar), format=md insan okunur.
+
+    ÖNEMLİ: bu yol /{matrix_id} kalıbından ÖNCE tanımlı olmalı - sonra
+    gelirse FastAPI "export" kelimesini matris kimliği sanar ve 422 döner.
+    """
+    if format not in ("json", "md"):
+        raise HTTPException(400, "format 'json' veya 'md' olmalı")
+    q = db.query(models.PlanMatrix).filter(models.PlanMatrix.novel_id == novel_id)
+    if matrix_id is not None:
+        q = q.filter(models.PlanMatrix.id == matrix_id)
+    matrisler = q.order_by(models.PlanMatrix.id).all()
+    if not matrisler:
+        raise HTTPException(404, "Dışa aktarılacak matris yok")
+
+    damga = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H%M")
+    if format == "md":
+        govde = plan_audit.export_markdown(db, matrisler, novel_id)
+        tur, uzanti = "text/markdown; charset=utf-8", "md"
+    else:
+        govde = json.dumps(plan_audit.export_json(db, matrisler, novel_id),
+                           ensure_ascii=False, indent=2)
+        tur, uzanti = "application/json; charset=utf-8", "json"
+    return Response(
+        content=govde, media_type=tur,
+        headers={"Content-Disposition": f'attachment; filename="plan-matrisleri-{damga}.{uzanti}"'},
+    )
 
 
 @router.get("/outline-tree", response_model=List[schemas.OutlineNode])
@@ -179,11 +260,15 @@ def add_column(
         position = anchor.position + 1
     else:
         position = max((c.position for c in m.columns), default=0) + 1
-    col = models.MatrixColumn(matrix_id=m.id, position=position, label=payload.label, character_id=payload.character_id)
+    col = models.MatrixColumn(
+        matrix_id=m.id, position=position, label=payload.label,
+        character_id=payload.character_id,
+        tur_data=plan_schema.normalize_meta(payload.tur_data, plan_schema.TUR_ALANLARI),
+    )
     db.add(col)
     db.commit()
     db.refresh(col)
-    return schemas.MatrixColumnOut(id=col.id, position=col.position, label=col.label, character_id=col.character_id)
+    return _column_out(col)
 
 
 @router.put("/{matrix_id}/columns/{column_id}", response_model=schemas.MatrixColumnOut)
@@ -200,8 +285,12 @@ def rename_column(
         raise HTTPException(404, "Kolon bulunamadı")
     col.label = payload.label
     col.character_id = payload.character_id
+    # tur_data yollanmadıysa mevcut miras korunur (adı değiştirmek turun
+    # damgasını silmemeli).
+    if payload.tur_data is not None:
+        col.tur_data = plan_schema.normalize_meta(payload.tur_data, plan_schema.TUR_ALANLARI)
     db.commit()
-    return schemas.MatrixColumnOut(id=col.id, position=col.position, label=col.label, character_id=col.character_id)
+    return _column_out(col)
 
 
 @router.delete("/{matrix_id}/columns/{column_id}", status_code=204)
@@ -239,11 +328,15 @@ def add_row(
         position = anchor.position + 1
     else:
         position = max((r.position for r in m.rows), default=0) + 1
-    row = models.MatrixRow(matrix_id=m.id, position=position, kind=payload.kind, label=payload.label, instructions=payload.instructions)
+    row = models.MatrixRow(
+        matrix_id=m.id, position=position, kind=payload.kind,
+        label=payload.label, instructions=payload.instructions,
+        parca_data=plan_schema.normalize_meta(payload.parca_data, plan_schema.PARCA_ALANLARI),
+    )
     db.add(row)
     db.commit()
     db.refresh(row)
-    return schemas.MatrixRowOut(id=row.id, position=row.position, kind=row.kind, label=row.label)
+    return _row_out(row)
 
 
 @router.put("/{matrix_id}/rows/{row_id}", response_model=schemas.MatrixRowOut)
@@ -261,8 +354,10 @@ def rename_row(
     row.label = payload.label
     row.kind = payload.kind
     row.instructions = payload.instructions
+    if payload.parca_data is not None:
+        row.parca_data = plan_schema.normalize_meta(payload.parca_data, plan_schema.PARCA_ALANLARI)
     db.commit()
-    return schemas.MatrixRowOut(id=row.id, position=row.position, kind=row.kind, label=row.label, instructions=row.instructions or "")
+    return _row_out(row)
 
 
 @router.delete("/{matrix_id}/rows/{row_id}", status_code=204)
@@ -304,23 +399,48 @@ def upsert_cell(
         if not ch:
             raise HTTPException(404, "Bölüm bu romanda bulunamadı")
 
+    # YAPI KİLİDİ: data geldiyse tek gerçek kaynak odur - content ondan
+    # üretilir. Gelmediyse (eski/serbest metin yolu) content aynen yazılır.
+    if payload.data is not None:
+        data = plan_schema.normalize_cell(payload.data)
+        content = plan_schema.render_cell(data)
+    elif "content" in payload.model_fields_set:
+        data = None
+        content = payload.content
+    else:
+        # NE data NE content yollandı: istek yalnızca bölüm bağını
+        # değiştiriyor. content'i yazmamak ŞART - yoksa varsayılan boş
+        # dize planın üstüne yazılır ve hücrede yazılmış her şey silinir.
+        data = None
+        content = None
+
     cell = db.query(models.MatrixCell).filter(
         models.MatrixCell.column_id == payload.column_id,
         models.MatrixCell.row_id == payload.row_id,
     ).first()
     if cell:
-        cell.content = payload.content
-        cell.chapter_id = payload.chapter_id
+        if content is not None:
+            cell.content = content
+        if data is not None:
+            cell.data = data
+        # BÖLÜM BAĞI: alan İSTEKTE HİÇ YOKSA mevcut bağ korunur; açıkça
+        # null yollandıysa bağ koparılır ("(bağlı değil)" seçeneği). Eskiden
+        # ikisi ayrıştırılmıyordu: yalnızca içerik güncelleyen bir istek
+        # bağı sessizce koparıyor, plan o bölüm yazılırken AI'ya gitmiyordu.
+        if "chapter_id" in payload.model_fields_set:
+            cell.chapter_id = payload.chapter_id
     else:
         cell = models.MatrixCell(
             matrix_id=m.id, column_id=payload.column_id, row_id=payload.row_id,
-            content=payload.content, chapter_id=payload.chapter_id,
+            content=content or "", chapter_id=payload.chapter_id,
+            data=data if data is not None else {},
             code=_next_matrix_code(db, novel_id),
         )
         db.add(cell)
     db.commit()
     db.refresh(cell)
-    return _cell_out(db, cell)
+    column = next((c for c in m.columns if c.id == cell.column_id), None)
+    return _cell_out(db, cell, column)
 
 
 # ---- Fihrist üretimi --------------------------------------------------------
@@ -368,6 +488,7 @@ def generate_chapters(
                 cell.chapter_id = ch.id
                 if not cell.code:
                     cell.code = _next_matrix_code(db, novel_id)
+                    db.flush()  # autoflush kapalı: sıradaki kod hesabı bunu görsün
             else:
                 db.add(models.MatrixCell(
                     matrix_id=m.id, column_id=col.id, row_id=row.id,
@@ -507,6 +628,13 @@ def quick_plan(
         db.flush()
         db.add(models.MatrixColumn(matrix_id=matrix.id, position=1, label="Plan"))
         db.flush()
+    # Kullanıcı matris ekranından bu matrisin tek kolonunu silmiş olabilir -
+    # o zaman columns[0] çöker. Kolon yoksa yeniden açılır (hızlı plan
+    # kestirmesi her koşulda çalışmalı).
+    if not matrix.columns:
+        db.add(models.MatrixColumn(matrix_id=matrix.id, position=1, label="Plan"))
+        db.flush()
+        db.refresh(matrix)
     column = matrix.columns[0]
     row_label = f"Bölüm {chapter.number}" + (f" — {chapter.title}" if chapter.title else "")
     position = max((r.position for r in matrix.rows), default=0) + 1
@@ -521,6 +649,26 @@ def quick_plan(
     db.add(cell)
     db.commit()
     return schemas.QuickPlanResponse(code=cell.code, matrix_name=matrix.name, content=cell.content)
+
+
+@router.get("/{matrix_id}/audit-prompt", response_model=schemas.MatrixAuditPrompt)
+def audit_prompt(
+    matrix_id: int, column_id: int | None = None,
+    db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Tamamlanmış planı dışarıdan denetletmek için hazır metin üretir.
+
+    Sayılabilir kusurlar (boş hücre, bağsız plan, kayıp MP referansı, çift
+    bağ, damgasız tur) burada DETERMİNİSTİK olarak bulunur ve metnin
+    başına konur - bunları bir modele sormak hem para yakar hem yanıltır.
+    Metnin geri kalanı anlam gerektiren sorular içindir. Qwen'e hiç
+    gidilmez; kullanıcı çıktıyı kopyalar."""
+    m = _get_matrix(db, matrix_id, novel_id)
+    if column_id is not None and not any(c.id == column_id for c in m.columns):
+        raise HTTPException(404, "Kolon bu matriste yok")
+    metin, ozet = plan_audit.build_audit_prompt(db, m, novel_id, column_id)
+    return schemas.MatrixAuditPrompt(prompt=metin, summary=ozet)
 
 
 @router.post("/{matrix_id}/columns/{column_id}/bind-outline", response_model=schemas.ColumnBindResult)
@@ -564,6 +712,7 @@ def bind_column_to_outline(
             cell.chapter_id = hedef.id
             if not cell.code:
                 cell.code = _next_matrix_code(db, novel_id)
+                db.flush()  # autoflush kapalı: sıradaki kod hesabı bunu görsün
         else:
             db.add(models.MatrixCell(
                 matrix_id=m.id, column_id=column.id, row_id=row.id,

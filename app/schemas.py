@@ -731,6 +731,10 @@ class StyleScanReport(BaseModel):
 class MatrixColumnCreate(BaseModel):
     label: str
     character_id: Optional[int] = None
+    # TUR MİRASI (yapı kilidi): konu, suç, misafir, güven kelimesi,
+    # matematik çifti, damga, koltuğun altı, övgü. Verilmezse dokunulmaz -
+    # None ile "boşalt" arasındaki farkı korumak için Optional.
+    tur_data: Optional[dict] = None
     # Verilirse yeni kolon BU kolonun hemen SAĞINA girer (araya ekleme);
     # verilmezse en sağa. Yeniden adlandırmada (PUT) yok sayılır.
     after_column_id: Optional[int] = None
@@ -740,6 +744,9 @@ class MatrixRowCreate(BaseModel):
     label: str
     instructions: str = ""  # Talimat Kasası: bu aşamanın kalıcı yazım kısıtları
     kind: str = "main"  # main (ana başlık) | sub (ara başlık)
+    # PARÇA MİRASI (yapı kilidi): no, süre. Başlık = label, stil kuralları
+    # = instructions.
+    parca_data: Optional[dict] = None
     # Verilirse yeni satır BU satırın hemen ALTINA girer (araya ekleme);
     # verilmezse en sona eklenir. Yeniden adlandırmada (PUT) yok sayılır.
     after_row_id: Optional[int] = None
@@ -770,6 +777,7 @@ class MatrixColumnOut(BaseModel):
     position: int
     label: str
     character_id: Optional[int] = None
+    tur_data: dict = {}
 
 
 class MatrixRowOut(BaseModel):
@@ -778,6 +786,7 @@ class MatrixRowOut(BaseModel):
     kind: str = "main"
     label: str
     instructions: str = ""
+    parca_data: dict = {}
 
 
 class MatrixCellUpsert(BaseModel):
@@ -785,6 +794,10 @@ class MatrixCellUpsert(BaseModel):
     row_id: int
     content: str = ""
     chapter_id: Optional[int] = None
+    # YAPI KİLİDİ: doluysa content BUNDAN üretilir (plan_schema.render_cell)
+    # ve gönderilen content yok sayılır - tek gerçek kaynak yapılandırılmış
+    # veri olsun, iki kopya birbirinden ayrışmasın diye.
+    data: Optional[dict] = None
 
 
 class MatrixCellOut(BaseModel):
@@ -795,6 +808,8 @@ class MatrixCellOut(BaseModel):
     chapter_id: Optional[int] = None
     chapter_number: Optional[int] = None  # bağlıysa, fihristteki sırası
     code: Optional[str] = None  # sabit referans kodu (MP1, MP2, ...)
+    data: dict = {}            # yapılandırılmış sahne (yapı kilidi)
+    warnings: List[str] = []   # eksik alanlar - kaydı ENGELLEMEZ, uyarır
 
 
 class MatrixOut(BaseModel):
@@ -917,6 +932,13 @@ class ColumnBindRequest(BaseModel):
     alt girdileriyle SIRAYLA eşleştirilir (1. satır -> 1. alt girdi ...)."""
     parent_chapter_id: int
     overwrite: bool = False   # zaten bağlı hücrelerin bağı değişsin mi
+
+
+class MatrixAuditPrompt(BaseModel):
+    """Kopyalanıp dışarıdaki bir modele yapıştırılacak denetim metni +
+    özet sayılar. Hiçbir AI çağrısı yapılmaz - mevcut verinin dökümü."""
+    prompt: str
+    summary: dict
 
 
 class ColumnBindResult(BaseModel):

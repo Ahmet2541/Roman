@@ -61,6 +61,8 @@ async function loadMatrixGrid() {
         <button class="btn btn-sm btn-primary" id="mGenChapters" title="Her kolon bir Kısım, her hücre bir Bölüm olur - fihristin sonuna eklenir, hücreler otomatik bağlanır">⚡ Fihristi Oluştur</button>
         <button class="btn btn-sm" id="mAiFill" title="Üstte işaretlediğin kolonların BOŞ hücrelerini, dolu hücrelerdeki kalıbı izleyerek AI taslaklar - hiçbiri onaysız kaydedilmez">🤖 Seçili Kolonların Eksiklerini AI Doldursun</button>
         <button class="btn btn-sm" id="mImport" title="Satır satır 'Aşama adı: içerik' formatında yapıştırılan metni, seçtiğin kolonun hücrelerine dağıtır">📥 Metinden Doldur</button>
+        <button class="btn btn-sm" id="mExport" title="Bütün plan matrislerini tek dosyada indir - yapılandırılmış veri, miras alanları, bölüm bağları dahil">⬇ Toplu İndir</button>
+        <button class="btn btn-sm" id="mAudit" title="Tamamlanmış planı dışarıdan denetletmek için hazır metin - kopyalayıp Qwen'e yapıştır">🧪 Denetim Promptu</button>
         <button class="btn btn-sm" id="mDelMatrix" style="margin-left:auto;">Matrisi Sil</button>
       </div>
       ${boundChaptersStrip(m)}
@@ -68,12 +70,22 @@ async function loadMatrixGrid() {
         <table style="border-collapse:collapse;width:max-content;">
           <tr>
             <th style="${th}"></th>
-            ${m.columns.map(c => `<th style="${th}">
+            ${m.columns.map(c => {
+              // Katlanmış gruplardaki boş hücreler ızgarada görünmüyor;
+              // sayaç onları ele verir. Hiç başlanmamış tur için sayaç
+              // gösterilmez - 8 turdan 7'si boşken "0/16" gürültüsü olur.
+              const doluSayi = m.cells.filter(x => x.column_id === c.id && (x.content || '').trim()).length;
+              const sayac = doluSayi
+                ? `<div style="font-weight:400;font-size:10px;color:${doluSayi < m.rows.length ? 'var(--gold)' : 'var(--text-muted)'};" title="${doluSayi} satır dolu, ${m.rows.length - doluSayi} boş">${doluSayi}/${m.rows.length}${doluSayi < m.rows.length ? ' ⚠' : ''}</div>`
+                : '';
+              return `<th style="${th}">
               <input type="checkbox" class="m-col-check" data-id="${c.id}" title="AI doldurma için bu kolonu seç" style="margin-right:4px;">
               <span class="m-col-edit" data-id="${c.id}" style="cursor:pointer;" title="Adı değiştir">${escapeHtml(c.label)}</span>
               <button class="btn-icon-sm m-col-ins" data-id="${c.id}" title="Bu kolonun SAĞINA yeni kolon ekle">⊕</button>
               <button class="btn-icon-sm m-col-del" data-id="${c.id}" title="Kolonu sil (hücreleriyle)">✕</button>
-            </th>`).join('')}
+              ${sayac}
+            </th>`;
+            }).join('')}
           </tr>
           ${m.rows.map((r, ri) => {
             // GRUPLAMA: bağlı hücresi olan satır bir BÖLÜM başlığıdır;
@@ -99,10 +111,32 @@ async function loadMatrixGrid() {
             ${m.columns.map(c => {
               const cell = cellMap[`${c.id}:${r.id}`];
               const filled = cell && (cell.content || '').trim();
-              const preview = filled ? escapeHtml(cell.content.trim().slice(0, 60)) + (cell.content.length > 60 ? '…' : '') : '<span style="opacity:0.35;">—</span>';
+              // Yapılandırılmış hücrede ilk satır zaten OLAY - ızgarada
+              // sahnenin kimliği görünsün, ham metnin başı değil.
+              const ozet = filled
+                ? (cell.data && cell.data.olay ? cell.data.olay : cell.content.trim().split('\n')[0])
+                : '';
+              const preview = filled
+                ? escapeHtml(ozet.slice(0, 60)) + (ozet.length > 60 ? '…' : '')
+                : '<span style="opacity:0.35;">—</span>';
               const chBadge = cell && cell.chapter_number ? `<span style="font-size:10px;background:var(--paper-dim);border:1px solid var(--border);border-radius:3px;padding:0 4px;" title="Bölüm ${cell.chapter_number}'e bağlı - plan o bölümde AI'ya gider">B${cell.chapter_number}</span>` : '';
               const codeBadge = cell && cell.code ? `<span style="font-size:10px;color:var(--text-muted);" title="Sabit referans kodu - başka bir bölümün talimatında '${cell.code}' yazarsan bu plan kıyas için AI'ya gider">${cell.code}</span>` : '';
-              const badge = codeBadge + (codeBadge && chBadge ? ' ' : '') + chBadge;
+              // YAPI KİLİDİ: eksik alanı olan hücre ⚠ ile işaretlenir.
+              // Kaydı engellemez - sadece "burada iş var" der, böylece
+              // 56 hücreyi tek tek açmadan nerede boşluk kaldığı görünür.
+              const uyariSayisi = (cell && cell.warnings) ? cell.warnings.length : 0;
+              const warnBadge = uyariSayisi
+                ? `<span style="font-size:10px;color:var(--gold);" title="${escapeHtml(cell.warnings.join(' · '))}">⚠${uyariSayisi}</span>`
+                : '';
+              // HEDEF UZUNLUK harfi: ızgarada görünmezse her hücreyi tek tek
+              // açmadan fark edilemez. Aynı satırda farklı harf = paralel
+              // sahneler farklı boyda çıkacak demek.
+              const uzKisa = { ozet: 'Ö', normal: 'N', uzun: 'U' };
+              const uz = (cell && cell.data && cell.data.uzunluk) || null;
+              const uzBadge = (filled && uz)
+                ? `<span style="font-size:10px;color:var(--text-muted);border:1px solid var(--border);border-radius:3px;padding:0 3px;" title="Hedef uzunluk: ${uz}">${uzKisa[uz] || '?'}</span>`
+                : '';
+              const badge = [codeBadge, chBadge, uzBadge, warnBadge].filter(Boolean).join(' ');
               return `<td style="${td}${filled ? '' : 'background:transparent;'}" class="m-cell" data-col="${c.id}" data-row="${r.id}">
                 <div style="display:flex;justify-content:space-between;gap:4px;">${badge}<span style="opacity:0.5;font-size:10px;">${filled ? '●' : ''}</span></div>
                 <div style="white-space:pre-wrap;">${preview}</div>
@@ -113,6 +147,8 @@ async function loadMatrixGrid() {
         </table>
       </div>`;
 
+    el('mExport').addEventListener('click', () => openMatrixExport(m));
+    el('mAudit').addEventListener('click', () => openAuditPrompt(m));
     el('mAddCol').addEventListener('click', () => addMatrixColumn(m, null));
     area.querySelectorAll('.m-col-ins').forEach(btn => btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -223,67 +259,533 @@ async function addMatrixRow(m, afterRowId) {
   } catch (err) { alert(err.message); }
 }
 
+// ---------------------------------------------------------------------------
+// YAPI KİLİDİ v1.0 - hücre formu.
+//
+// Bir hücre artık serbest metin değil, sabit bir sahne şeması:
+//   ÜST  : OLAY · ZAMAN (tarih+saat+tip) · MEKAN · DUYGU
+//   YAY  : GİRİŞ · GELİŞME · SONUÇ  (damga kelime SONUÇ'ta asılı kalır)
+//   BAĞ  : MP kodları + tür (ayna / ileri / geri)
+// MİRAS (tur damgası, parça no/süre) burada YOK - kolon/satır kaydında
+// durur, AI'ya oradan canlı gider. Varlıklar (kişi/mekan/nesne) düz metin
+// değil, autocomplete ile mevcut kayıtlara ID'yle bağlanır: "aynı varlık =
+// aynı ID" kuralı böylece veri düzeyinde kilitlenir.
+// ---------------------------------------------------------------------------
+
+// Backend'deki plan_schema.TUR_ALANLARI ile aynı anahtarlar ve sıra.
+const TUR_ALANLARI = [
+  ['konu', 'Konu', 'Bu turun ekseni'],
+  ['suc', 'Suç', 'Turun suçu / iddiası'],
+  ['misafir', 'Misafir', 'Bu turun misafiri'],
+  ['guven_kelimesi', 'Güven kelimesi', 'Turun güven sözcüğü'],
+  ['matematik_cifti', 'Matematik çifti', 'Sayı/oran çifti'],
+  ['damga', 'Damga', "SONUÇ beat'inde asılı kalmalı"],
+  ['koltugun_alti', 'Koltuğun altı', 'Koltuk altındaki şey'],
+  ['ovgu', 'Övgü', 'Turun övgü kalıbı'],
+];
+
+const ZAMAN_TIPLERI = ['NOKTA', 'ATLAMA', 'SAYAC'];
+
+// Backend'deki plan_schema.UZUNLUK_SEVIYELERI ile aynı anahtarlar.
+// Somut karşılık AI'ya backend'den gider; buradaki kısa açıklama sadece
+// yazarken hangi ölçüyü seçtiğini hatırlatmak için.
+const UZUNLUK_SEVIYELERI = [
+  ['ozet', 'Özet', '1-2 paragraf, sahne açılmaz'],
+  ['normal', 'Normal', '4-6 paragraf, sahne tam açılır'],
+  ['uzun', 'Uzun metin', '8+ paragraf, ritim yavaşlar'],
+];
+const BAGLANTI_TURLERI = ['ayna', 'ileri', 'geri'];
+
+// Varlık listeleri hücreden hücreye değişmiyor - bir kez çekilip saklanır
+// (8x7'lik matriste her hücre açılışında üç istek atmanın anlamı yok).
+let _varlikOnbellek = null;
+async function loadVarliklar() {
+  if (_varlikOnbellek) return _varlikOnbellek;
+  const cek = async (yol) => { try { return await api.get(yol); } catch (e) { return []; } };
+  const [kisiler, mekanlar, nesneler] = await Promise.all([
+    cek('/characters/'), cek('/places/'), cek('/objects/'),
+  ]);
+  _varlikOnbellek = { kisiler, mekanlar, nesneler };
+  return _varlikOnbellek;
+}
+function invalidateVarlikCache() { _varlikOnbellek = null; }
+
+function _datalistSecenekleri(kayitlar) {
+  return kayitlar.map(k => `<option value="${escapeHtml(k.name)}"></option>`).join('');
+}
+
+// Yazılan adı kayıt listesinde arar (birebir, büyük/küçük harf duyarsız).
+// Bulursa ID'yi de taşır - bulamazsa serbest metin olarak kalır, çünkü
+// yazarken henüz açılmamış bir varlığı yazabilmek engellenmemeli.
+function _varlikEslestir(ad, kayitlar) {
+  const temiz = (ad || '').trim();
+  if (!temiz) return null;
+  const hedef = _trLowerJs(temiz);
+  const bulunan = kayitlar.find(k => _trLowerJs(k.name || '') === hedef);
+  return { id: bulunan ? bulunan.id : null, ad: temiz };
+}
+
+// ÇOKLU ALAN AUTOCOMPLETE: tarayıcının <datalist>'i alanın TAMAMINI
+// eşleştirir - "Vicdan, Pal" yazınca hiçbir öneri çıkmaz, yani ilk
+// isimden sonra öneri ölür. Bu yüzden virgülle çoklu giriş alan
+// alanlarda (KİŞİLER, NESNELER) son virgülden sonraki parçaya bakan
+// kendi öneri listemizi kullanıyoruz. Dokunmatikte de çalışsın diye
+// öneriler tıklanabilir düğmeler.
+function wireMultiAutocomplete(inputId, kayitlar) {
+  const girdi = document.getElementById(inputId);
+  if (!girdi || !girdi.parentElement) return;
+  const kutu = document.createElement('div');
+  kutu.style.cssText = 'display:none;flex-wrap:wrap;gap:4px;margin-top:4px;';
+  girdi.parentElement.appendChild(kutu);
+
+  const sonParca = () => {
+    const p = girdi.value.split(',');
+    return { onceki: p.slice(0, -1), aranan: p[p.length - 1].trim() };
+  };
+
+  function ciz() {
+    const { aranan } = sonParca();
+    if (!aranan) { kutu.style.display = 'none'; return; }
+    const hedef = _trLowerJs(aranan);
+    // Zaten yazılmış olanları önerme.
+    const secili = new Set(girdi.value.split(',').slice(0, -1).map(x => _trLowerJs(x.trim())));
+    const eslesen = kayitlar
+      .filter(k => _trLowerJs(k.name || '').includes(hedef) && !secili.has(_trLowerJs(k.name || '')))
+      .slice(0, 8);
+    if (!eslesen.length) { kutu.style.display = 'none'; return; }
+    kutu.style.display = 'flex';
+    kutu.innerHTML = eslesen.map(k =>
+      `<button type="button" class="btn btn-sm ac-oner" data-ad="${escapeHtml(k.name)}" style="padding:2px 8px;font-size:11.5px;">${escapeHtml(k.name)}</button>`
+    ).join('');
+    kutu.querySelectorAll('.ac-oner').forEach(b => b.addEventListener('click', () => {
+      const { onceki } = sonParca();
+      girdi.value = onceki.concat(b.dataset.ad).map(x => x.trim()).filter(Boolean).join(', ') + ', ';
+      girdi.focus();
+      ciz();
+      girdi.dispatchEvent(new Event('change'));
+    }));
+  }
+
+  // EŞLEŞME SATIRI: yazılan her ad kayıtlı bir varlıkla tutuyor mu?
+  // Dolu yaldız = veri bağı kuruldu (aynı varlık = aynı ID). Kesikli
+  // soluk = kayıtta yok, serbest metin olarak gidecek - yanlış yazım mı,
+  // yoksa henüz açılmamış bir varlık mı, orada görünür.
+  const durum = document.createElement('div');
+  durum.className = 'eslesme-satiri';
+  girdi.parentElement.appendChild(durum);
+
+  function durumCiz() {
+    const adlar = girdi.value.split(',').map(x => x.trim()).filter(Boolean);
+    if (!adlar.length) { durum.innerHTML = ''; return; }
+    durum.innerHTML = adlar.map(ad => {
+      const esti = kayitlar.some(k => _trLowerJs(k.name || '') === _trLowerJs(ad));
+      return `<span class="eslesme-rozet${esti ? '' : ' yok'}" title="${esti ? 'Kayıtlı varlık - ID ile bağlanacak' : 'Kayıtta yok - serbest metin olarak gidecek'}">${escapeHtml(ad)}${esti ? '' : ' ?'}</span>`;
+    }).join('');
+  }
+
+  girdi.addEventListener('input', () => { ciz(); durumCiz(); });
+  girdi.addEventListener('change', durumCiz);
+  girdi.addEventListener('focus', ciz);
+  durumCiz();
+  // Alan dışına tıklanınca kapansın - listenin kendisine tıklama sayılmaz.
+  girdi.addEventListener('blur', () => setTimeout(() => { kutu.style.display = 'none'; }, 180));
+}
+
+// Tek değerli alanlar için aynı gösterge: alanın altında tek rozet.
+function wireSingleMatch(inputId, kayitlar) {
+  const girdi = document.getElementById(inputId);
+  if (!girdi || !girdi.parentElement) return;
+  const durum = document.createElement('div');
+  durum.className = 'eslesme-satiri';
+  girdi.parentElement.appendChild(durum);
+  const ciz = () => {
+    const ad = (girdi.value || '').trim();
+    if (!ad) { durum.innerHTML = ''; return; }
+    const esti = kayitlar.some(k => _trLowerJs(k.name || '') === _trLowerJs(ad));
+    durum.innerHTML = `<span class="eslesme-rozet${esti ? '' : ' yok'}" title="${esti ? 'Kayıtlı varlık - ID ile bağlanacak' : 'Kayıtta yok - serbest metin olarak gidecek'}">${escapeHtml(ad)}${esti ? '' : ' ?'}</span>`;
+  };
+  girdi.addEventListener('input', ciz);
+  girdi.addEventListener('change', ciz);
+  ciz();
+}
+
+function _adListesi(items) {
+  return (items || []).map(x => x.ad).join(', ');
+}
+function _adlariAyristir(metin, kayitlar) {
+  return (metin || '').split(',').map(s => s.trim()).filter(Boolean)
+    .map(ad => _varlikEslestir(ad, kayitlar)).filter(Boolean);
+}
+
 async function openMatrixCellEditor(m, colId, rowId, cellMap) {
   const editor = document.getElementById('matrixCellEditor');
   const col = m.columns.find(c => c.id === colId);
   const row = m.rows.find(r => r.id === rowId);
   const cell = cellMap[`${colId}:${rowId}`] || null;
+  const d = (cell && cell.data) ? cell.data : {};
+  const zaman = d.zaman || {};
+  const duygu = d.duygu || {};
+  const tur = (col && col.tur_data) || {};
+
+  editor.innerHTML = '<div class="empty-state">Yükleniyor…</div>';
+  const varliklar = await loadVarliklar();
+
   let chapters = [];
-  // Tür filtresi YOK: kullanıcının metni Kısım/Alt Başlık girdilerinde de
-  // durabiliyor; filtre yüzünden liste boş görünüyordu ("bağlı değil"den
-  // başka seçenek çıkmıyordu). Hiyerarşik numarayla listelenir.
   try {
     const tumu = await api.get('/chapters/');
-    const hiyerarsi = buildChapterHierarchy(tumu);
-    chapters = hiyerarsi.map(it => ({
-      id: it.chapter.id,
-      number: it.chapter.number,
-      kind: it.chapter.kind,
-      displayNumber: it.displayNumber,
-      title: it.chapter.title,
-      paragraphCount: it.chapter.paragraph_count || 0,
+    chapters = buildChapterHierarchy(tumu).map(it => ({
+      id: it.chapter.id, kind: it.chapter.kind, displayNumber: it.displayNumber,
+      title: it.chapter.title, paragraphCount: it.chapter.paragraph_count || 0,
     }));
   } catch (e) { /* seçici olmadan devam */ }
+
+  // Turun mirası formun tepesinde HATIRLATMA olarak durur - hücreye
+  // kopyalanmaz, sadece yazarken görünür (özellikle damga kelimesi).
+  const mirasSatiri = [
+    tur.damga ? `damga: <b>${escapeHtml(tur.damga)}</b>` : '',
+    tur.guven_kelimesi ? `güven: ${escapeHtml(tur.guven_kelimesi)}` : '',
+    tur.suc ? `suç: ${escapeHtml(tur.suc)}` : '',
+    tur.matematik_cifti ? `matematik: ${escapeHtml(tur.matematik_cifti)}` : '',
+  ].filter(Boolean).join(' · ');
+
+  const alan = (id, etiket, deger, ipucu, satir) => `
+    <div class="field">
+      <label>${etiket}${ipucu ? ` <span style="font-weight:400;color:var(--text-muted);">${ipucu}</span>` : ''}</label>
+      <textarea id="${id}" style="min-height:${satir || 54}px;">${escapeHtml(deger || '')}</textarea>
+    </div>`;
 
   editor.innerHTML = `
     <div class="panel">
       <b>${escapeHtml(col.label)} × ${escapeHtml(row.label)}</b>
-      ${cell && cell.code ? `<span style="margin-left:8px;font-size:12px;color:var(--text-muted);">Kod: <b>${cell.code}</b> - başka bir bölümün talimatında bu kodu yazarsan plan kıyas için AI'ya gider</span>` : ''}
-      <div class="field" style="margin-top:8px;">
-        <label>Plan (madde madde - bu bölümde ne OLACAK)</label>
-        <textarea id="mCellContent" style="min-height:140px;">${escapeHtml(cell ? cell.content : '')}</textarea>
+      ${cell && cell.code ? `<span style="margin-left:8px;font-size:12px;color:var(--text-muted);">Kod: <b>${cell.code}</b></span>` : ''}
+      ${mirasSatiri ? `<div style="margin-top:6px;font-size:11.5px;color:var(--text-muted);background:var(--paper-dim);border:1px solid var(--border);border-radius:4px;padding:4px 8px;">TUR MİRASI — ${mirasSatiri}</div>` : ''}
+
+      <div style="margin-top:10px;font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">ÜST — SAHNE KİMLİĞİ</div>
+      ${alan('mcOlay', 'OLAY', d.olay, '(tek cümle: kim kime ne yapar)', 44)}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <div class="field" style="flex:1;min-width:110px;"><label>Tarih</label>
+          <input type="text" id="mcTarih" value="${escapeHtml(zaman.tarih || '')}" placeholder="12 Mart"></div>
+        <div class="field" style="flex:1;min-width:90px;"><label>Saat</label>
+          <input type="text" id="mcSaat" value="${escapeHtml(zaman.saat || '')}" placeholder="21:40"></div>
+        <div class="field" style="flex:1;min-width:110px;"><label>Tip</label>
+          <select id="mcZamanTip">
+            <option value="">(seç)</option>
+            ${ZAMAN_TIPLERI.map(t => `<option value="${t}" ${zaman.tip === t ? 'selected' : ''}>${t}</option>`).join('')}
+          </select></div>
       </div>
-      <div class="field">
+      <div class="field"><label>Neyin sayacı / atlaması <span style="font-weight:400;color:var(--text-muted);">(SAYAC ve ATLAMA için)</span></label>
+        <input type="text" id="mcSayac" value="${escapeHtml(zaman.sayac || '')}" placeholder="ambulans bekleme süresi"></div>
+      <div class="field"><label>MEKAN</label>
+        <input type="text" id="mcMekan" list="mcMekanList" value="${escapeHtml(d.mekan || '')}" placeholder="VIP Salonu">
+        <datalist id="mcMekanList">${_datalistSecenekleri(varliklar.mekanlar)}</datalist></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <div class="field" style="flex:1;min-width:110px;"><label>DUYGU — kimin</label>
+          <input type="text" id="mcDuyguKim" list="mcKisiList" value="${escapeHtml(duygu.kim || '')}" placeholder="Palyaço"></div>
+        <div class="field" style="flex:1;min-width:90px;"><label>Başlangıç</label>
+          <input type="text" id="mcDuyguA" value="${escapeHtml(duygu.baslangic || '')}" placeholder="güven"></div>
+        <div class="field" style="flex:1;min-width:90px;"><label>→ (yay ise)</label>
+          <input type="text" id="mcDuyguB" value="${escapeHtml(duygu.bitis || '')}" placeholder="şüphe"></div>
+      </div>
+      <div class="field"><label>KİŞİLER <span style="font-weight:400;color:var(--text-muted);">(virgülle)</span></label>
+        <input type="text" id="mcKisiler" value="${escapeHtml(_adListesi(d.kisiler))}" placeholder="Vicdan, Palyaço" autocomplete="off">
+        <datalist id="mcKisiList">${_datalistSecenekleri(varliklar.kisiler)}</datalist></div>
+      <div class="field"><label>NESNELER <span style="font-weight:400;color:var(--text-muted);">(virgülle)</span></label>
+        <input type="text" id="mcNesneler" value="${escapeHtml(_adListesi(d.nesneler))}" placeholder="mendil, şişe" autocomplete="off">
+        <datalist id="mcNesneList">${_datalistSecenekleri(varliklar.nesneler)}</datalist></div>
+      <div class="field"><label>ODAK <span style="font-weight:400;color:var(--text-muted);">(yukarıdakilerden hangisi dramatik ağırlığı taşıyor)</span></label>
+        <input type="text" id="mcOdak" list="mcOdakList" value="${escapeHtml(d.odak || '')}" placeholder="Tetraoksin-7 şişesi" autocomplete="off">
+        <datalist id="mcOdakList"></datalist></div>
+
+      <div class="field" style="margin-top:12px;">
+        <label>HEDEF UZUNLUK <span style="font-weight:400;color:var(--text-muted);">(bu plandan çıkacak metnin ölçüsü)</span></label>
+        <select id="mcUzunluk">
+          ${UZUNLUK_SEVIYELERI.map(([k, e, a]) => `<option value="${k}" ${(d.uzunluk || 'normal') === k ? 'selected' : ''}>${e} — ${a}</option>`).join('')}
+        </select>
+      </div>
+
+      <div style="margin-top:12px;font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">ALT — YAY</div>
+      ${alan('mcGiris', 'GİRİŞ', d.giris, '(açılış beat\'i: ilk replik / ret)')}
+      ${alan('mcGelisme', 'GELİŞME', d.gelisme, '(dönme beat\'i: baskı / tehdit / tanıma)', 72)}
+      ${alan('mcSonuc', 'SONUÇ', d.sonuc, tur.damga ? `(kapanış beat'i — "${escapeHtml(tur.damga)}" burada asılı kalmalı)` : '(kapanış beat\'i)')}
+
+      <div style="margin-top:12px;font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">BAĞLANTI</div>
+      <div id="mcBagListe"></div>
+      <button class="btn btn-sm" id="mcBagEkle" style="margin-top:4px;">+ Bağlantı</button>
+
+      <div class="field" style="margin-top:12px;">
         <label>Bağlı bölüm <span style="font-weight:400;color:var(--text-muted);">(plan SADECE bu bölüm yazılırken AI'ya gider)</span></label>
         <select id="mCellChapter">
           <option value="">(bağlı değil)</option>
           ${chapters.map(c => {
-            const tur = c.kind === 'part' ? 'ÜST' : (c.kind === 'subtitle' ? 'ARA' : 'metin');
+            const t = c.kind === 'part' ? 'ÜST' : (c.kind === 'subtitle' ? 'ARA' : 'metin');
             const par = c.paragraphCount ? `, ${c.paragraphCount} par.` : '';
-            return `<option value="${c.id}" ${cell && cell.chapter_id === c.id ? 'selected' : ''}>#${c.displayNumber} [${tur}${par}] ${escapeHtml(stripMarkdownArtifacts(c.title) || '(başlıksız)')}</option>`;
+            return `<option value="${c.id}" ${cell && cell.chapter_id === c.id ? 'selected' : ''}>#${c.displayNumber} [${t}${par}] ${escapeHtml(stripMarkdownArtifacts(c.title) || '(başlıksız)')}</option>`;
           }).join('')}
         </select>
       </div>
+
+      <div id="mcUyari"></div>
       <div class="form-actions">
         <button class="btn btn-primary" id="mCellSave">Kaydet</button>
+        <button class="btn" id="mcOnizle" title="AI'ya gidecek düz metin hâli">Önizle</button>
         <button class="btn" id="mCellCancel">Kapat</button>
       </div>
       <div id="mCellError" class="error-text"></div>
     </div>`;
   editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
+  // --- Bağlantı satırları (dinamik) ---
+  let baglar = Array.isArray(d.baglantilar) ? d.baglantilar.slice() : [];
+  function cizBaglar() {
+    const kutu = document.getElementById('mcBagListe');
+    if (!baglar.length) { kutu.innerHTML = '<div style="font-size:11.5px;color:var(--text-muted);">(yok)</div>'; return; }
+    kutu.innerHTML = baglar.map((b, i) => `
+      <div style="display:flex;gap:4px;align-items:center;margin-bottom:4px;">
+        <input type="text" class="mc-bag-kod" data-i="${i}" value="${escapeHtml(b.kod || '')}" placeholder="MP7" style="width:70px;">
+        <select class="mc-bag-tur" data-i="${i}" style="width:88px;">
+          <option value="">(tür)</option>
+          ${BAGLANTI_TURLERI.map(t => `<option value="${t}" ${b.tur === t ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+        <input type="text" class="mc-bag-not" data-i="${i}" value="${escapeHtml(b.not || '')}" placeholder="ne yapılacak: MP7'deki ayna imgesini mendille yansıt" style="flex:1;" title="Referans değil EYLEM yaz - 'T1·G1 karşılığı' yazarsan AI ne yapacağını bilmez">
+        <button class="btn-icon-sm mc-bag-sil" data-i="${i}" title="Kaldır">✕</button>
+      </div>`).join('');
+    kutu.querySelectorAll('.mc-bag-kod').forEach(x => x.addEventListener('input', () => { baglar[+x.dataset.i].kod = x.value; }));
+    kutu.querySelectorAll('.mc-bag-tur').forEach(x => x.addEventListener('change', () => { baglar[+x.dataset.i].tur = x.value; }));
+    kutu.querySelectorAll('.mc-bag-not').forEach(x => x.addEventListener('input', () => { baglar[+x.dataset.i].not = x.value; }));
+    kutu.querySelectorAll('.mc-bag-sil').forEach(x => x.addEventListener('click', () => { baglar.splice(+x.dataset.i, 1); cizBaglar(); }));
+  }
+  cizBaglar();
+  el('mcBagEkle').addEventListener('click', () => { baglar.push({ kod: '', tur: '', not: '' }); cizBaglar(); });
+
+  // Kişi/nesne alanları çoklu - kendi öneri listesi. Mekan ve duygu
+  // sahibi tek değerli olduğu için tarayıcının datalist'i orada yeterli.
+  wireMultiAutocomplete('mcKisiler', varliklar.kisiler);
+  wireMultiAutocomplete('mcNesneler', varliklar.nesneler);
+  wireSingleMatch('mcMekan', varliklar.mekanlar);
+  wireSingleMatch('mcDuyguKim', varliklar.kisiler);
+
+  // ODAK yalnızca BU hücreye yazılmış nesneler arasından seçilmeli -
+  // sahnede olmayan bir nesneye odaklanmak anlamsız. Liste, NESNELER
+  // alanı değiştikçe tazelenir.
+  function odakListesiniTazele() {
+    const dl = document.getElementById('mcOdakList');
+    if (!dl) return;
+    dl.innerHTML = el('mcNesneler').value.split(',').map(x => x.trim()).filter(Boolean)
+      .map(ad => `<option value="${escapeHtml(ad)}"></option>`).join('');
+  }
+  el('mcNesneler').addEventListener('input', odakListesiniTazele);
+  el('mcNesneler').addEventListener('change', odakListesiniTazele);
+  odakListesiniTazele();
+
+  // BEAT SAYACI: şema GİRİŞ/GELİŞME/SONUÇ'u birer AN olarak tanımlar.
+  // Buraya olay dizisi yazıldığında yazan model sahneyi kurmaz, verileni
+  // doldurur - sınır aşılınca alan uyarı rengine döner (backend'deki
+  // BEAT_SINIRI ile aynı: 160, OLAY için 120).
+  [['mcOlay', 120], ['mcGiris', 160], ['mcGelisme', 160], ['mcSonuc', 160]].forEach(([id, sinir]) => {
+    const alanEl = el(id);
+    if (!alanEl || !alanEl.parentElement) return;
+    const sayac = document.createElement('div');
+    sayac.style.cssText = 'font-size:10.5px;text-align:right;margin-top:-4px;';
+    const guncelle = () => {
+      const n = alanEl.value.length;
+      sayac.textContent = n > sinir ? `${n}/${sinir} — beat değil olay dizisi` : `${n}/${sinir}`;
+      sayac.style.color = n > sinir ? 'var(--gold)' : 'var(--text-muted)';
+    };
+    alanEl.parentElement.appendChild(sayac);
+    alanEl.addEventListener('input', guncelle);
+    guncelle();
+  });
+
+  function formuTopla() {
+    return {
+      olay: el('mcOlay').value,
+      zaman: { tarih: el('mcTarih').value, saat: el('mcSaat').value, tip: el('mcZamanTip').value, sayac: el('mcSayac').value },
+      mekan: el('mcMekan').value,
+      mekan_id: (_varlikEslestir(el('mcMekan').value, varliklar.mekanlar) || {}).id || null,
+      duygu: { kim: el('mcDuyguKim').value, baslangic: el('mcDuyguA').value, bitis: el('mcDuyguB').value },
+      kisiler: _adlariAyristir(el('mcKisiler').value, varliklar.kisiler),
+      nesneler: _adlariAyristir(el('mcNesneler').value, varliklar.nesneler),
+      odak: el('mcOdak').value,
+      uzunluk: el('mcUzunluk').value,
+      giris: el('mcGiris').value,
+      gelisme: el('mcGelisme').value,
+      sonuc: el('mcSonuc').value,
+      baglantilar: baglar.filter(b => (b.kod || '').trim()),
+    };
+  }
+
+  el('mcOnizle').addEventListener('click', () => {
+    const v = formuTopla();
+    const satir = [];
+    if (v.olay) satir.push(`OLAY: ${v.olay}`);
+    const z = [v.zaman.tarih, v.zaman.saat].filter(Boolean).join(' ');
+    if (z || v.zaman.tip) {
+      const tipMetin = v.zaman.tip ? ` (${v.zaman.tip}${v.zaman.sayac ? `: ${v.zaman.sayac}` : ''})` : '';
+      satir.push(`ZAMAN: ${z || '—'}${tipMetin}`);
+    }
+    if (v.mekan) satir.push(`MEKAN: ${v.mekan}`);
+    if (v.duygu.baslangic || v.duygu.bitis) satir.push(`DUYGU: ${v.duygu.kim ? `${v.duygu.kim}: ` : ''}${[v.duygu.baslangic, v.duygu.bitis].filter(Boolean).join(' → ')}`);
+    if (v.kisiler.length) satir.push(`KİŞİLER: ${_adListesi(v.kisiler)}`);
+    if (v.nesneler.length) satir.push(`NESNELER: ${_adListesi(v.nesneler)}`);
+    if (v.odak) satir.push(`ODAK: ${v.odak} (dikkat bu nesnede toplanır)`);
+    ['giris', 'gelisme', 'sonuc'].forEach((k, i) => {
+      if (v[k]) satir.push(`${['GİRİŞ', 'GELİŞME', 'SONUÇ'][i]}: ${v[k]}`);
+    });
+    const uzTarif = { ozet: 'ÖZET — 1-2 paragraf', normal: 'NORMAL — 4-6 paragraf', uzun: 'UZUN METİN — 8+ paragraf' }[v.uzunluk];
+    if (uzTarif) satir.push(`HEDEF UZUNLUK: ${uzTarif}…`);
+    if (v.baglantilar.length) satir.push('BAĞLANTI: ' + v.baglantilar.map(b => `${b.kod}${b.tur ? ` (${b.tur})` : ''}${b.not ? ` → ${b.not}` : ''}`).join(' · '));
+    document.getElementById('mcUyari').innerHTML =
+      `<pre style="white-space:pre-wrap;font-size:11.5px;background:var(--paper-dim);border:1px solid var(--border);border-radius:4px;padding:8px;margin-top:8px;">${escapeHtml(satir.join('\n')) || '(boş)'}</pre>`;
+  });
+
   el('mCellCancel').addEventListener('click', () => { editor.innerHTML = ''; });
   el('mCellSave').addEventListener('click', async () => {
     const chapterVal = el('mCellChapter').value;
     try {
-      await api.put(`/matrix/${m.id}/cells`, {
+      const kayit = await api.put(`/matrix/${m.id}/cells`, {
         column_id: colId, row_id: rowId,
-        content: el('mCellContent').value,
+        data: formuTopla(),
         chapter_id: chapterVal ? parseInt(chapterVal, 10) : null,
       });
+      // Uyarılar kaydı ENGELLEMEZ - kaydedilir, sonra gösterilir.
+      if (kayit.warnings && kayit.warnings.length) {
+        document.getElementById('mcUyari').innerHTML =
+          `<div style="margin-top:8px;font-size:11.5px;color:var(--gold);border:1px solid var(--border);border-radius:4px;padding:6px 8px;">
+             ⚠ Kaydedildi, eksikler: ${kayit.warnings.map(escapeHtml).join(' · ')}</div>`;
+        await loadMatrixGrid();
+        return;
+      }
       editor.innerHTML = '';
       await loadMatrixGrid();
     } catch (err) { el('mCellError').textContent = err.message; }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// TOPLU İNDİRME: bütün plan matrisleri tek dosyada.
+//   json -> yapılandırılmış tam döküm (hücre verisi, miras alanları, bölüm
+//           bağları, uyarılar). Yedek ve taşıma için.
+//   md   -> okunur döküm. Yazdırmak ya da başka bir modele vermek için.
+// İndirme api yardımcısıyla değil DOĞRUDAN fetch ile yapılır: yanıt JSON
+// değil dosya gövdesi, api.get onu ayrıştırmaya çalışıp bozardı.
+// ---------------------------------------------------------------------------
+async function openMatrixExport(m) {
+  const editor = document.getElementById('matrixCellEditor');
+  editor.innerHTML = `
+    <div class="panel">
+      <b>⬇ Plan Matrislerini İndir</b>
+      <div class="field" style="margin-top:8px;">
+        <label>Kapsam</label>
+        <select id="mExpScope">
+          <option value="">Bütün matrisler</option>
+          <option value="${m.id}">Sadece: ${escapeHtml(m.name)}</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Biçim</label>
+        <select id="mExpFormat">
+          <option value="json">JSON — tam veri (yedek, taşıma)</option>
+          <option value="md">Markdown — okunur döküm</option>
+        </select>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary btn-sm" id="mExpGo">İndir</button>
+        <button class="btn btn-sm" id="mExpClose">Kapat</button>
+      </div>
+      <div id="mExpState" style="font-size:12px;color:var(--text-muted);"></div>
+    </div>`;
+  editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  el('mExpClose').addEventListener('click', () => { editor.innerHTML = ''; });
+  el('mExpGo').addEventListener('click', async () => {
+    const durum = el('mExpState');
+    const bicim = el('mExpFormat').value;
+    const scope = el('mExpScope').value;
+    durum.textContent = 'Hazırlanıyor…';
+    try {
+      let yol = `/matrix/export?format=${bicim}`;
+      if (scope) yol += `&matrix_id=${scope}`;
+      const res = await fetch(yol, {
+        headers: {
+          'Authorization': `Bearer ${getToken()}`,
+          'X-Novel-Id': String(getNovelId() || ''),
+        },
+      });
+      if (!res.ok) throw new Error(`İndirilemedi (${res.status})`);
+      const blob = await res.blob();
+      const damga = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `plan-matrisleri-${damga}.${bicim}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      durum.textContent = '✓ indirildi';
+    } catch (err) { durum.textContent = '✕ ' + err.message; }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// DENETİM PROMPTU: planı dışarıdaki bir modele denetletmek için hazır metin.
+// Sayılabilir kusurlar (bağsız plan, kayıp MP referansı, çift bağ...) metnin
+// başına deterministik olarak yazılır - onları modele sormak para yakar ve
+// yanıltır. AI çağrısı YAPILMAZ, sadece kopyalanacak metin üretilir.
+// ---------------------------------------------------------------------------
+async function openAuditPrompt(m) {
+  const editor = document.getElementById('matrixCellEditor');
+  editor.innerHTML = `
+    <div class="panel">
+      <b>🧪 Denetim Promptu</b>
+      <div class="field" style="margin-top:8px;">
+        <label>Kapsam <span style="font-weight:400;color:var(--text-muted);">(8×7'lik bir plan tek isteğe sığmaz - tur tur denetlemek daha isabetli)</span></label>
+        <select id="mAuditScope">
+          <option value="">Tüm matris</option>
+          ${m.columns.map(c => `<option value="${c.id}">Sadece: ${escapeHtml(c.label)}</option>`).join('')}
+        </select>
+      </div>
+      <button class="btn btn-primary btn-sm" id="mAuditGen">Metni Üret</button>
+      <div id="mAuditOut"></div>
+    </div>`;
+  editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  el('mAuditGen').addEventListener('click', async () => {
+    const kutu = document.getElementById('mAuditOut');
+    const scope = el('mAuditScope').value;
+    kutu.innerHTML = '<div class="empty-state">Hazırlanıyor…</div>';
+    try {
+      // Sorgu dizesi AYRI kurulur: yolu iç içe şablonla yazınca hem
+      // okunmuyor hem de uç denetleyicisi ({} normalize eden test)
+      // ayrıştıramıyor - gerçek eksik uçlar o gürültünün altında kaybolur.
+      const sorgu = scope ? `?column_id=${scope}` : '';
+      const r = await api.get(`/matrix/${m.id}/audit-prompt` + sorgu);
+      const o = r.summary;
+      kutu.innerHTML = `
+        <div style="font-size:12px;color:var(--text-muted);margin:8px 0;">
+          ${o.kolon_sayisi} tur × ${o.satir_sayisi} aşama · ${o.dolu_hucre} dolu hücre ·
+          <b style="color:${o.yapisal_bulgu ? 'var(--gold)' : 'inherit'};">${o.yapisal_bulgu} yapısal bulgu</b> ·
+          ${o.uyarili_hucre} eksikli hücre
+        </div>
+        <textarea id="mAuditText" style="min-height:260px;font-size:11.5px;" readonly></textarea>
+        <div class="form-actions">
+          <button class="btn btn-primary btn-sm" id="mAuditCopy">Kopyala</button>
+          <button class="btn btn-sm" id="mAuditClose">Kapat</button>
+        </div>`;
+      el('mAuditText').value = r.prompt;
+      el('mAuditClose').addEventListener('click', () => { editor.innerHTML = ''; });
+      el('mAuditCopy').addEventListener('click', async () => {
+        const btn = el('mAuditCopy');
+        try {
+          await navigator.clipboard.writeText(r.prompt);
+          btn.textContent = 'Kopyalandı ✓';
+        } catch (e) {
+          // Panoya erişim yoksa (bazı tarayıcı/izin durumları) elle seçtir.
+          el('mAuditText').select();
+          btn.textContent = 'Seçildi - kopyala';
+        }
+        setTimeout(() => { btn.textContent = 'Kopyala'; }, 2000);
+      });
+    } catch (err) { kutu.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`; }
   });
 }
 
@@ -591,6 +1093,14 @@ async function openMatrixColumnEditor(m, colId) {
           <option value="">(bağlı değil)</option>
           ${characters.map(c => `<option value="${c.id}" ${col.character_id === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
         </select></div>
+      <div style="font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;margin-top:10px;">TUR MİRASI <span style="font-weight:400;letter-spacing:0;">(bir kez yazılır - bu turun HER hücresinde AI'ya gider)</span></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${TUR_ALANLARI.map(([anahtar, etiket, ipucu]) => `
+          <div class="field" style="flex:1;min-width:140px;">
+            <label title="${escapeHtml(ipucu)}">${escapeHtml(etiket)}</label>
+            <input type="text" id="mTur_${anahtar}" value="${escapeHtml((col.tur_data || {})[anahtar] || '')}" placeholder="${escapeHtml(ipucu)}">
+          </div>`).join('')}
+      </div>
       <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;">
       <strong style="font-size:11.5px;letter-spacing:0.3px;">🔗 FİHRİSTLE EŞLEŞTİR</strong>
       <div style="font-size:11.5px;color:var(--text-muted);margin:4px 0 6px;">
@@ -652,8 +1162,11 @@ async function openMatrixColumnEditor(m, colId) {
     if (!label) { el('mColError').textContent = 'Ad boş olamaz.'; return; }
     const charVal = el('mColChar').value;
     try {
+      const turData = {};
+      TUR_ALANLARI.forEach(([anahtar]) => { turData[anahtar] = el(`mTur_${anahtar}`).value; });
       await api.put(`/matrix/${m.id}/columns/${colId}`, {
         label, character_id: charVal ? parseInt(charVal, 10) : null,
+        tur_data: turData,
       });
       editor.innerHTML = '';
       await loadMatrixGrid();
@@ -1085,6 +1598,13 @@ async function openMatrixRowEditor(m, rowId) {
           <option value="main" ${row.kind !== 'sub' ? 'selected' : ''}>Ana başlık</option>
           <option value="sub" ${row.kind === 'sub' ? 'selected' : ''}>Ara başlık</option>
         </select></div>
+      <div style="font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;margin-top:6px;">PARÇA MİRASI <span style="font-weight:400;letter-spacing:0;">(hücrelere yazılmaz, buradan AI'ya gider)</span></div>
+      <div style="display:flex;gap:6px;">
+        <div class="field" style="flex:1;"><label>Parça no</label>
+          <input type="text" id="mRowNo" value="${escapeHtml((row.parca_data || {}).no || '')}" placeholder="3 veya 5a"></div>
+        <div class="field" style="flex:1;"><label>Süre</label>
+          <input type="text" id="mRowSure" value="${escapeHtml((row.parca_data || {}).sure || '')}" placeholder="20 dk"></div>
+      </div>
       <div class="field">
         <label>📌 Talimat Kasası <span style="font-weight:400;color:var(--text-muted);font-size:11.5px;">(bu aşamanın KALICI yazım kısıtları - bağlı her bölümde AI'ya gider)</span></label>
         <textarea id="mRowInstructions" style="min-height:110px;" placeholder="Örn:&#10;- Duyguyu ADLANDIRMA: beden, ses, nesne ve sessizlikle göster&#10;- Sanık bu aşamada en fazla tek cümle konuşur&#10;- Şişenin rengini betimlemeye yedir, rapor gibi verme">${escapeHtml(row.instructions || '')}</textarea>
@@ -1105,6 +1625,7 @@ async function openMatrixRowEditor(m, rowId) {
         label,
         kind: el('mRowKind').value,
         instructions: el('mRowInstructions').value,
+        parca_data: { no: el('mRowNo').value, sure: el('mRowSure').value },
       });
       editor.innerHTML = '';
       await loadMatrixGrid();

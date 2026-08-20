@@ -382,6 +382,23 @@ def _upgrade_matrix_tables(engine):
             if "code" not in cols:
                 logger.info("Göç: matrix_cells.code ekleniyor")
                 conn.execute(text("ALTER TABLE matrix_cells ADD COLUMN code VARCHAR(20)"))
+            # YAPI KİLİDİ v1.0: sahnenin yapılandırılmış hâli. Eski
+            # satırlarda NULL kalır; EncryptedJSON bunu boş dict olarak
+            # okur, yani serbest metinli eski hücreler content üzerinden
+            # aynen çalışmaya devam eder.
+            if "data" not in cols:
+                logger.info("Göç: matrix_cells.data (yapı kilidi) ekleniyor")
+                conn.execute(text("ALTER TABLE matrix_cells ADD COLUMN data TEXT"))
+        if "matrix_columns" in existing:
+            cols = {c["name"] for c in inspector.get_columns("matrix_columns")}
+            if "tur_data" not in cols:
+                logger.info("Göç: matrix_columns.tur_data (TUR mirası) ekleniyor")
+                conn.execute(text("ALTER TABLE matrix_columns ADD COLUMN tur_data TEXT"))
+        if "matrix_rows" in existing:
+            cols = {c["name"] for c in inspector.get_columns("matrix_rows")}
+            if "parca_data" not in cols:
+                logger.info("Göç: matrix_rows.parca_data (PARÇA mirası) ekleniyor")
+                conn.execute(text("ALTER TABLE matrix_rows ADD COLUMN parca_data TEXT"))
     # Kod geri doldurma (ORM ile - roman bazında sayaç)
     from sqlalchemy.orm import sessionmaker
     from . import models

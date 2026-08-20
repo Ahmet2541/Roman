@@ -7,6 +7,7 @@ from sqlalchemy import func
 
 from ..database import get_db
 from ..auth import get_current_user
+from .. import matrix_links
 from .. import models, schemas
 from ..mentions import detect_and_save_mentions
 from ..entities import ENTITY_MODELS
@@ -586,6 +587,11 @@ def delete_chapter(chapter_id: int, db: Session = Depends(get_db), _user=Depends
     chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
     if not chapter:
         raise HTTPException(404, "Bölüm bulunamadı")
+    # KOPUK UÇ TEMİZLİĞİ: bu bölüme bağlı plan hücrelerinin bağını çöz.
+    # Plan durur, sadece ölü bölüme işaret eden bağ kalkar - yoksa hücre
+    # "bağlı" görünüp planı hiçbir yere gitmez ve denetim de bunu
+    # "bağsız plan" diye yakalayamaz.
+    matrix_links.chapter_silindi(db, chapter_id)
     db.delete(chapter)
     db.commit()
     return None

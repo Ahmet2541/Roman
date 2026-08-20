@@ -508,6 +508,11 @@ class MatrixColumn(Base):
     position = Column(Integer, nullable=False, default=0)
     label = Column(EncryptedString, nullable=False)
     character_id = Column(Integer, ForeignKey("characters.id"), nullable=True)
+    # TUR MİRASI (bkz. plan_schema.TUR_ALANLARI): konu, suç, misafir, güven
+    # kelimesi, matematik çifti, damga, koltuğun altı, övgü. Bu turun TÜM
+    # hücrelerinde geçerli olduğu için hücrede değil BURADA durur - bir kez
+    # yazılır, bağlam katmanında her sahneye canlı olarak eklenir.
+    tur_data = Column(EncryptedJSON, default=dict)
 
     matrix = relationship("PlanMatrix", back_populates="columns")
 
@@ -532,6 +537,10 @@ class MatrixRow(Base):
     # satırın hücresine bağlıysa, kısıtlar plan katmanıyla birlikte AI'ya
     # gider - iyi talimatı her seferinde yeniden hatırlamak gerekmez.
     instructions = Column(EncryptedString, default="")
+    # PARÇA MİRASI (bkz. plan_schema.PARCA_ALANLARI): no ve süre. Başlık
+    # zaten label, stil kuralları zaten instructions - şemadaki dört
+    # alanın ikisi böylece mevcut sütunlarda karşılanıyor.
+    parca_data = Column(EncryptedJSON, default=dict)
 
     matrix = relationship("PlanMatrix", back_populates="rows")
 
@@ -554,6 +563,11 @@ class MatrixCell(Base):
     # kıyas için çekebilmesi (bkz. qwen_client.build_plan_layer). Kodun
     # kendisi anlam taşımaz (şifresiz düz ID), içerik ayrıca şifreli.
     code = Column(String(20), nullable=True)
+    # YAPI KİLİDİ: sahnenin yapılandırılmış hâli (ÜST + yay + bağlantı,
+    # bkz. plan_schema.bos_hucre). content bunun düz metne dökülmüş
+    # kopyasıdır - eski serbest metin yolu ve onu okuyan her mekanizma
+    # (bağlam katmanı, MP referansı, Plandan Taslak) aynen çalışsın diye.
+    data = Column(EncryptedJSON, default=dict)
 
     matrix = relationship("PlanMatrix", back_populates="cells")
 

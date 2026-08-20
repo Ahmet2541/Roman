@@ -17,7 +17,8 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from . import models, schemas
+from . import models
+from . import plan_schema, schemas
 from .config import settings
 from .prompts import *  # noqa: F401,F403 - katmanlarda geçen yönergeler
 from .sections import (
@@ -512,12 +513,18 @@ def build_plan_layer(db: Session, novel_id: int, chapter_number: int | None, ins
         header = " × ".join(x.label for x in (col, row) if x)
         code_part = f"{cell.code}: " if cell.code else ""
         block = f"[{code_part}{header}]\n{content}" if header or code_part else content
-        # TALİMAT KASASI: satıra (aşamaya) kayıtlı kalıcı yazım kısıtları
-        # planın hemen ardından gider - "iyi talimat"ı her seferinde
-        # yeniden yazmak gerekmesin diye.
-        row_rules = (getattr(row, "instructions", "") or "").strip() if row else ""
-        if row_rules:
-            block += f"\nBU AŞAMANIN YAZIM KISITLARI (uy):\n{row_rules}"
+        # MİRAS (yapı kilidi): turun damgası/güven kelimesi ve parçanın
+        # no/süresi hücrede DEĞİL kolon/satır kaydında durur - buraya CANLI
+        # okunur. Böylece damga kelimesini değiştirdiğinde 56 hücrenin
+        # metnini yeniden yazman gerekmez. Talimat Kasası (satırın kalıcı
+        # yazım kısıtları) da aynı blokta gider.
+        miras = plan_schema.render_miras(
+            getattr(col, "tur_data", None),
+            getattr(row, "parca_data", None),
+            getattr(row, "instructions", "") or "",
+        )
+        if miras:
+            block += f"\n{miras}"
         return block
 
     parts = []

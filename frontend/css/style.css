@@ -554,3 +554,19 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
 /* Tıklanabilir değişiklik öbeği: altın, tıklanınca alternatif ister */
 .diff-clickable { cursor: pointer; border-bottom: 1px dotted var(--gold); }
 .diff-clickable:hover { background: rgba(176,141,63,0.12); border-radius: 3px; }
+
+
+/* --- VARLIK EŞLEŞME ROZETLERİ (yapı kilidi hücre formu) -------------------
+   Yazılan ad kayıtlı bir Kişi/Mekan/Nesne ile birebir tutuyorsa DOLU yaldız
+   (veri bağı kuruldu, aynı varlık = aynı ID). Tutmuyorsa soluk ve kesikli
+   çerçeve - yaldız zaten uyarı rengi olduğu için ayrımı renk değil DOLGU
+   taşır, yoksa aynı renk hem "tamam" hem "dikkat" demeye başlar. */
+.eslesme-satiri { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.eslesme-rozet {
+  font-size: 11px; padding: 1px 7px; border-radius: 10px;
+  border: 1px solid var(--gold); background: var(--gold); color: var(--paper);
+}
+.eslesme-rozet.yok {
+  background: transparent; color: var(--text-muted);
+  border: 1px dashed var(--border); 
+}

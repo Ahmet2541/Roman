@@ -324,4 +324,64 @@ test('sohbet çerçevesi iki modu ayırır', () => {
   if (!kaynak) return;   // kaynak erişilemiyorsa atla
 });
 
+// --- 16. ÇOKLU ALAN AUTOCOMPLETE: ilk isimden sonra öneri ölmemeli ---
+// Tarayıcının <datalist>'i alanın TAMAMINI eşleştirir: "Vicdan, Pal"
+// yazıldığında hiçbir öneri çıkmaz. Bu yüzden kişi/nesne alanlarında
+// son virgülden sonraki parçaya bakan kendi listemiz var.
+test('çoklu alanda son parçaya göre öneri çıkar', () => {
+  const kayitlar = [{ id: 1, name: 'Vicdan' }, { id: 2, name: 'Palyaço' },
+                    { id: 3, name: 'Başkomiser' }];
+  const girdi = document.createElement('input');
+  girdi.id = 'acTest';
+  const sarmal = document.createElement('div');
+  sarmal.appendChild(girdi);
+  document.body.appendChild(sarmal);
+
+  wireMultiAutocomplete('acTest', kayitlar);
+
+  // İLK isim: normal arama
+  girdi.value = 'Vic';
+  girdi.dispatchEvent(new Event('input'));
+  const oneriKutusu = () => sarmal.children.find(c => /ac-oner/.test(c.innerHTML)) || { innerHTML: '' };
+  let kutu = oneriKutusu();
+  if (!/Vicdan/.test(kutu.innerHTML)) throw new Error('ilk isimde öneri çıkmadı');
+
+  // İKİNCİ isim: asıl sınav - datalist burada ölüyordu
+  girdi.value = 'Vicdan, Pal';
+  girdi.dispatchEvent(new Event('input'));
+  kutu = oneriKutusu();
+  if (!/Palyaço/.test(kutu.innerHTML)) throw new Error('ikinci isimde öneri çıkmadı');
+  if (/Vicdan/.test(kutu.innerHTML)) throw new Error('zaten yazılmış isim tekrar önerildi');
+
+  // Türkçe büyük/küçük harf: "BAŞ" -> "Başkomiser"
+  girdi.value = 'Vicdan, BAŞ';
+  girdi.dispatchEvent(new Event('input'));
+  kutu = oneriKutusu();
+  if (!/Başkomiser/.test(kutu.innerHTML)) throw new Error('Türkçe harf eşleşmesi başarısız');
+});
+
+// --- 17. EŞLEŞME GÖSTERGESİ: hangi ad kayıtlı, hangisi değil ---
+// "vicdan, palyaço, robot" yazıldığında ilk ikisi kayıtla tutar (dolu
+// yaldız), "robot" tutmaz (kesikli, soru işaretli). Amaç yanlış yazımı
+// kaydetmeden önce görmek - kayıtta yoksa varlık ID'siyle bağlanmaz.
+test('eşleşen ve eşleşmeyen adlar ayrı rozet alır', () => {
+  const kayitlar = [{ id: 1, name: 'Vicdan' }, { id: 2, name: 'Palyaço' }];
+  const girdi = document.createElement('input');
+  girdi.id = 'esTest';
+  const sarmal = document.createElement('div');
+  sarmal.appendChild(girdi);
+  document.body.appendChild(sarmal);
+
+  wireMultiAutocomplete('esTest', kayitlar);
+  girdi.value = 'vicdan, palyaço, robot';
+  girdi.dispatchEvent(new Event('change'));
+
+  const durum = sarmal.children.find(c => /eslesme-rozet/.test(c.innerHTML)) || { innerHTML: '' };
+  const dolu = (durum.innerHTML.match(/class="eslesme-rozet"/g) || []).length;
+  const bos = (durum.innerHTML.match(/class="eslesme-rozet yok"/g) || []).length;
+  if (dolu !== 2) throw new Error(`eşleşen 2 olmalıydı, ${dolu} çıktı`);
+  if (bos !== 1) throw new Error(`eşleşmeyen 1 olmalıydı, ${bos} çıktı`);
+  if (!/robot ?\?/.test(durum.innerHTML)) throw new Error('eşleşmeyen soru işareti almadı');
+});
+
 Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));

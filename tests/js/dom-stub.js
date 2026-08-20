@@ -18,6 +18,15 @@ class FakeEl {
   set innerHTML(v) { this._html = String(v); document._index(this); }
   addEventListener(ev, fn) { (this.listeners[ev] = this.listeners[ev] || []).push(fn); }
   removeEventListener() {}
+  // Gerçek tarayıcıda input/change olayları autocomplete ve canlı
+  // sayaçları tetikliyor - taklit bunları çalıştırmazsa o kod yolları
+  // hiç sınanmamış olur.
+  dispatchEvent(ev) {
+    const tur = (ev && ev.type) || String(ev);
+    (this.listeners[tur] || []).forEach(f => f({ target: this, type: tur,
+      stopPropagation() {}, preventDefault() {} }));
+    return true;
+  }
   click() { (this.listeners.click || []).forEach(f => f({ target: this, stopPropagation() {}, preventDefault() {} })); }
   querySelector(sel) {
     // Sınıf seçicisi: yazılan HTML'de o sınıf geçiyorsa kalıcı bir sahte
@@ -34,6 +43,10 @@ class FakeEl {
   insertAdjacentElement(pos, el) { this.children.push(el); return el; }
   appendChild(el) {
     this.children.push(el);
+    // parentElement: uygulama bir alanın yanına sayaç/öneri kutusu
+    // eklerken bunu kullanıyor. Taklitte yoksa o kod yolları sessizce
+    // atlanır ve hiç sınanmamış olur.
+    if (el) el.parentElement = this;
     // Oluşturulup gövdeye eklenen elemanlar getElementById ile bulunabilmeli
     // (uygulama kaplama/overlay'leri böyle kuruyor)
     if (el && el.id) document._els.set(el.id, el);
@@ -48,7 +61,12 @@ class FakeEl {
   get innerText() { return this.textContent; }
   set innerText(v) { this.textContent = v; }
   get nextElementSibling() { return null; }
-  get parentElement() { return new FakeEl(); }
+  // GERÇEK ebeveyni döndürür. Eskiden her çağrıda YENİ boş bir eleman
+  // dönüyordu: uygulama bir alanın yanına sayaç/öneri kutusu eklediğinde
+  // kutu hiçbir yere bağlanmıyor, o kod yolu sınanmış görünüp aslında
+  // hiç doğrulanmamış oluyordu.
+  get parentElement() { return this._parent || (this._parent = new FakeEl()); }
+  set parentElement(v) { this._parent = v; }
 }
 
 const document = {
@@ -110,5 +128,8 @@ for (const id of ['novelSelectOverlay', 'novelListArea', 'app', 'mainArea',
                   'sidebar', 'novelNameLabel', 'universeLabel']) {
   document.ensure(id);
 }
+
+// new Event('input') - uygulama kodu olay nesnesini böyle üretiyor.
+global.Event = class { constructor(tur) { this.type = tur; } };
 
 module.exports = { document, window, FakeEl, apiCalls };

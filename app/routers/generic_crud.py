@@ -4,7 +4,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
-from .. import models
+from .. import matrix_links, models
 from ..database import get_db
 from ..auth import get_current_user
 from ..novel_context import get_universe_id
@@ -127,6 +127,17 @@ def make_crud_router(
         item = db.query(model).filter(model.id == item_id, model.universe_id == universe_id).first()
         if not item:
             raise HTTPException(404, f"{tag} bulunamadı")
+        # KOPUK UÇ TEMİZLİĞİ: Plan Matrisi hücreleri varlıklara ID ile
+        # bağlanır ("aynı varlık = aynı ID"). Varlık silinince o ID ölü
+        # kalıyor, üstelik SESSİZCE - hücre bağlıymış gibi görünüyor.
+        # Ad korunur, ID düşürülür.
+        if entity_type == "character":
+            matrix_links.character_silindi(db, item_id)
+            matrix_links.varlik_silindi(db, universe_id, item_id, "kisiler")
+        elif entity_type == "place":
+            matrix_links.varlik_silindi(db, universe_id, item_id, "mekan")
+        elif entity_type == "object":
+            matrix_links.varlik_silindi(db, universe_id, item_id, "nesneler")
         db.delete(item)
         db.commit()
         return None
