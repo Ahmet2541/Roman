@@ -61,15 +61,33 @@ def preview_context(
     gösterir - Qwen'e hiç istek atmadığı için ücretsiz ve rate-limitsizdir.
     Amaç: 'AI'ya gerçekte ne gidiyor' sorusuna güvenle cevap bulabilmek
     (Novelcrafter'daki 'prompt preview' fikrinin karşılığı)."""
-    context = build_context(
-        db, novel_id, universe_id, payload.selected_entities,
-        chapter_number=payload.chapter_number, instruction_text=payload.instruction,
-        include_hidden=payload.include_hidden,
-        include_chapter_text=payload.include_chapter_text,
-        text_scope=payload.text_scope,
-        include_own_summary=payload.include_own_summary,
-    )
-    chars, tokens, breakdown = estimate_context_size(context)
+    # Bağlam oluşturma ONLARCA katmandan geçiyor (fihrist, matris haritası,
+    # varlık profilleri, üslup, ileri bakış...). Herhangi birinde beklenmedik
+    # bir veri şekli varsa yakalanmamış istisna 500'e dönüşüyor ve kullanıcı
+    # "İstek başarısız (500)" dışında hiçbir şey göremiyordu - hangi katmanın
+    # patladığı ancak sunucu günlüğünden anlaşılıyordu. Artık sebep hem
+    # günlüğe hem kullanıcıya gidiyor.
+    try:
+        context = build_context(
+            db, novel_id, universe_id, payload.selected_entities,
+            chapter_number=payload.chapter_number, instruction_text=payload.instruction,
+            include_hidden=payload.include_hidden,
+            include_chapter_text=payload.include_chapter_text,
+            text_scope=payload.text_scope,
+            include_own_summary=payload.include_own_summary,
+        )
+    except Exception as exc:
+        logger.exception("Bağlam önizlemesi oluşturulamadı")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Bağlam oluşturulamadı: {type(exc).__name__}: {exc}",
+        )
+
+    try:
+        chars, tokens, breakdown = estimate_context_size(context)
+    except Exception as exc:
+        logger.exception("Bağlam ölçümü başarısız")
+        chars, tokens, breakdown = len(context), 0, []
     # Gönderilenin TAMAMI aynı fonksiyonlardan kurulur (ask_qwen ile ortak),
     # yoksa önizleme gerçekte gidenden sapar.
     from ..qwen_client import SYSTEM_PROMPT, build_user_message

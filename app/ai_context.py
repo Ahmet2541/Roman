@@ -729,7 +729,14 @@ def build_context(
     # PLANDAN GELEN VARLIKLAR: hücrede yazılı kişi/mekan/nesne profilleri
     # de gitsin. Elle seçilenlerle BİRLEŞTİRİLİR (üzerine yazmaz) - yazar
     # sahne dışından bir karakteri de bilerek ekleyebilir.
-    plan_refs = plan_hucre_varliklari(db, novel_id, chapter_number)
+    try:
+        plan_refs = plan_hucre_varliklari(db, novel_id, chapter_number)
+    except Exception:
+        # Bu katman bir İYİLEŞTİRME (profilleri otomatik ekler), çekirdek
+        # değil. Patlarsa bütün bağlamı düşürmemeli - elle seçilenlerle
+        # devam edilir.
+        logger.exception("Plan hücresi varlıkları okunamadı, atlanıyor")
+        plan_refs = []
     birlesik = list(selected_entities or [])
     mevcut = {(r.entity_type, r.entity_id) for r in birlesik}
     for r in plan_refs:

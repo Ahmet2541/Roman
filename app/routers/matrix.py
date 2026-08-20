@@ -18,6 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+import logging
+
 from ..database import get_db
 from ..auth import get_current_user
 from .. import models, schemas
@@ -28,6 +30,8 @@ from .. import qwen_client
 from ..outline import build_hierarchy, children_of
 from .. import plan_schema
 from .. import plan_audit
+
+logger = logging.getLogger("roman_api.matrix")
 
 router = APIRouter(prefix="/matrix", tags=["Plan Matrisi"])
 
@@ -504,7 +508,17 @@ def upsert_cell(
     db.commit()
     db.refresh(cell)
     column = next((c for c in m.columns if c.id == cell.column_id), None)
-    return _cell_out(db, cell, column, paralel=len(m.columns) > 1)
+    try:
+        return _cell_out(db, cell, column, paralel=len(m.columns) > 1)
+    except Exception as exc:
+        # Kayıt BAŞARILI oldu (commit geçti); patlayan şey yanıtı kurmak.
+        # Sebebi söylemezsek kullanıcı "İstek başarısız (500)" görüp
+        # kaydın gidip gitmediğini bilemiyor.
+        logger.exception("Hücre yanıtı oluşturulamadı (kayıt yapıldı)")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Hücre KAYDEDİLDİ ama yanıt oluşturulamadı: {type(exc).__name__}: {exc}",
+        )
 
 
 # ---- Fihrist üretimi --------------------------------------------------------

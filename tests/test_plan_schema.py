@@ -761,3 +761,36 @@ def test_preview_matches_what_is_actually_sent(client, headers):
     }, headers=headers).json()
     beklenen = build_user_message(r["context"], "Yaz.", None)
     assert beklenen in r["full_prompt"]
+
+
+def test_context_preview_reports_the_real_cause_on_failure(client, headers, monkeypatch):
+    """Bağlam oluşturma patlarsa kullanıcı 'İstek başarısız (500)' değil
+    SEBEBİ görmeli - yoksa hangi katmanın bozulduğu ancak sunucu
+    günlüğünden anlaşılıyor."""
+    from app.routers import ai as ai_router
+
+    def patla(*a, **k):
+        raise ValueError("test: fihrist katmanı bozuk")
+
+    monkeypatch.setattr(ai_router, "build_context", patla)
+    client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers)
+    r = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 1}, headers=headers)
+    assert r.status_code == 500
+    detay = r.json()["detail"]
+    assert "ValueError" in detay and "fihrist katmanı bozuk" in detay
+
+
+def test_plan_entity_layer_failure_does_not_kill_context(client, headers, monkeypatch):
+    """Plan varlıkları bir İYİLEŞTİRME - patlarsa bağlamın tamamını
+    düşürmemeli, elle seçilenlerle devam etmeli."""
+    from app import ai_context
+
+    def patla(*a, **k):
+        raise RuntimeError("test: plan hücresi okunamadı")
+
+    monkeypatch.setattr(ai_context, "plan_hucre_varliklari", patla)
+    client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers)
+    r = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 1}, headers=headers)
+    assert r.status_code == 200, "iyileştirme katmanı bütün bağlamı düşürdü"
