@@ -122,6 +122,46 @@ def build_fixed_layer(db: Session, universe_id: int, instruction_text: str = "")
 # teşvik eder.
 # ---------------------------------------------------------------------------
 
+# Yazılan bölümün kaç komşusu TAM özetiyle gider. 2 = önceki iki ve
+# sonraki iki bölüm. Daha uzaktakiler tek satıra iner.
+INDEX_FULL_RADIUS = 2
+
+# Bir özetin tek satırlık hâlinde en fazla kaç karakter kalsın.
+INDEX_SHORT_CHARS = 220
+
+
+def _ozet_bos_mu(ozet: str) -> bool:
+    """Şablonu doldurulmuş ama içi boş özetler: her satırı 'belirtilmemiş'
+    olan bölümler yer kaplar, bilgi vermez."""
+    if not ozet:
+        return True
+    dolu = [p.strip() for p in re.split(r"[\n;]", ozet) if p.strip()]
+    if not dolu:
+        return True
+    anlamli = [
+        p for p in dolu
+        if "belirtilmemiş" not in p.casefold()
+        and p.casefold() not in ("açılış bölümü", "devamlilik: açılış bölümü")
+    ]
+    # Sadece etiketten ibaret ("OLAY:", "MEKAN:") satırlar da boş sayılır.
+    anlamli = [p for p in anlamli if len(p.split(":", 1)[-1].strip()) > 2]
+    return not anlamli
+
+
+def _ozet_tek_satir(ozet: str) -> str:
+    """Uzak bölümler için: OLAY satırı varsa onu, yoksa özetin başını al."""
+    for parca in ozet.split("\n"):
+        p = parca.strip()
+        if p.upper().startswith("OLAY:"):
+            metin = p.split(":", 1)[1].strip()
+            break
+    else:
+        metin = " ".join(ozet.split())
+    if len(metin) > INDEX_SHORT_CHARS:
+        metin = metin[:INDEX_SHORT_CHARS].rsplit(" ", 1)[0] + "…"
+    return metin
+
+
 def build_index_layer(db: Session, universe_id: int, current_novel_id: int, exclude_chapter_number: int | None = None) -> str:
     """Devasa bir SERİ için fihrist artık tek kitapla sınırlı değil - aynı
     evrendeki TÜM kitapların özetleri (kronolojik book_number sırasıyla)
@@ -155,14 +195,43 @@ def build_index_layer(db: Session, universe_id: int, current_novel_id: int, excl
     novel_names = {n.id: n.name for n in novels_in_universe}
     chapters.sort(key=lambda c: (novel_order.get(c.novel_id, 0), c.number))
 
+    # --- BUDAMA: fihrist romanla birlikte sınırsız büyüyordu ---
+    # 20 bölümde bu katman bağlamın %79'unu yiyordu; yazılacak sahnenin
+    # planı %3'te kalıyordu. Model, iki adamın bir binaya yürüyüşünü
+    # yazarken romanın tamamını okumak zorunda kalıyor - hem pahalı hem
+    # odak dağıtıcı. İki kural:
+    #   YAKINLIK  : sadece komşu bölümlerin TAM özeti gider (öncesi ve
+    #               sonrası), uzaktakiler tek satırlık başlığa iner.
+    #               Yazarken devraldığın şey komşu bölümdür.
+    #   BOŞLARI AT: özeti "belirtilmemiş"ten ibaret olan bölümler hiç
+    #               yazılmaz - yer kaplar, bilgi vermez.
     lines = ["ROMAN FİHRİSTİ (yazılmış bölümlerin özetleri, sırayla):"]
     last_novel_id = None
+    kisaltilan = 0
     for c in chapters:
         if multi_book and c.novel_id != last_novel_id:
             lines.append(f"\n-- {novel_names.get(c.novel_id, '?')} --")
             last_novel_id = c.novel_id
         title_part = f" - {c.title}" if c.title else ""
-        lines.append(f"Bölüm {c.number}{title_part}: {c.summary}")
+        ozet = (c.summary or "").strip()
+
+        if _ozet_bos_mu(ozet):
+            continue
+
+        yakin = (
+            exclude_chapter_number is None
+            or c.novel_id != current_novel_id
+            or abs((c.number or 0) - exclude_chapter_number) <= INDEX_FULL_RADIUS
+        )
+        if yakin:
+            lines.append(f"Bölüm {c.number}{title_part}: {ozet}")
+        else:
+            lines.append(f"Bölüm {c.number}{title_part}: {_ozet_tek_satir(ozet)}")
+            kisaltilan += 1
+
+    if kisaltilan:
+        lines.append(f"\n({kisaltilan} uzak bölüm tek satıra indirildi - tam özetleri "
+                     f"gerekirse sor. Yakın bölümler tam verildi.)")
     return "\n".join(lines)
 
 

@@ -794,3 +794,60 @@ def test_plan_entity_layer_failure_does_not_kill_context(client, headers, monkey
     r = client.post("/ai/context-preview", json={
         "selected_entities": [], "chapter_number": 1}, headers=headers)
     assert r.status_code == 200, "iyileştirme katmanı bütün bağlamı düşürdü"
+
+
+# --- Fihrist budama ---------------------------------------------------------
+
+BOS_OZET = ("ZAMAN: belirtilmemiş\nOLAY: belirtilmemiş\nMEKAN: belirtilmemiş\n"
+            "DEVAMLILIK: Açılış bölümü\nKAPANIŞ TONU: belirtilmemiş")
+
+
+def _bolum(client, headers, no, baslik, ozet):
+    ch = client.post("/chapters/", json={"number": no, "title": baslik}, headers=headers).json()
+    client.put(f"/chapters/{ch['id']}", json={"title": baslik, "summary": ozet}, headers=headers)
+    return ch
+
+
+def test_index_drops_empty_summaries(client, headers):
+    """Her satırı 'belirtilmemiş' olan özet yer kaplar, bilgi vermez."""
+    _bolum(client, headers, 1, "Boş Bölüm", BOS_OZET)
+    _bolum(client, headers, 2, "Dolu Bölüm", "OLAY: Adam kapıyı açar ve içeri girer.")
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 3}, headers=headers).json()["context"]
+    # Sadece ÖZET katmanına bak - fihrist HARİTASI'nda başlık görünmeli,
+    # orası romanın yapısını gösteriyor, özet değil.
+    ozetler = ctx.split("FİHRİST HARİTASI")[0]
+    assert "Boş Bölüm" not in ozetler, "içi boş özet fihriste girdi"
+    assert "Adam kapıyı açar" in ozetler
+
+
+def test_index_shortens_distant_chapters(client, headers):
+    """Uzak bölümler tek satıra iner, komşular tam kalır."""
+    uzun = ("OLAY: Uzaktaki olay tek satıra inmeli.\n"
+            "MEKAN: Ayrıntılı mekan tarifi burada uzayıp gider ve çok yer kaplar.\n"
+            "ATMOSFER: Bu satır da uzun ve gereksiz yer tutuyor.")
+    for no in range(1, 11):
+        _bolum(client, headers, no, f"B{no}", uzun.replace("Uzaktaki olay", f"Olay {no}"))
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 9}, headers=headers).json()["context"]
+    # Komşu (7-11 arası) tam: ATMOSFER satırı görünür
+    assert "Olay 8" in ctx and "Bu satır da uzun" in ctx
+    # Uzak (1-6) kısaltılmış: OLAY var, ATMOSFER yok
+    fihrist = ctx.split("FİHRİST HARİTASI")[0]
+    b1 = [x for x in fihrist.split("\n") if x.startswith("Bölüm 1 ")][0]
+    assert "Olay 1" in b1 and "ATMOSFER" not in b1
+    assert "uzak bölüm tek satıra indirildi" in ctx
+
+
+def test_index_trimming_actually_shrinks_context(client, headers):
+    """Budama gerçekten yer kazandırmalı - amaç buydu."""
+    uzun = "OLAY: " + ("ayrıntı " * 60) + "\nMEKAN: " + ("tarif " * 60)
+    for no in range(1, 16):
+        _bolum(client, headers, no, f"B{no}", uzun)
+    r = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 15}, headers=headers).json()
+    fihrist = [b for b in r["breakdown"] if "FİHRİST" in b["name"].upper()]
+    assert fihrist, "fihrist katmanı yok"
+    # 15 bölüm x ~800 karakter budanmadan ~12.000 olurdu
+    assert fihrist[0]["char_count"] < 6000, f"budama işe yaramadı: {fihrist[0]['char_count']}"
