@@ -303,7 +303,9 @@ def test_audit_prompt_clean_matrix_reports_no_faults(client, headers):
     client.put(f"/matrix/{m['id']}/cells", json={
         "column_id": col_id, "row_id": m["rows"][0]["id"], "chapter_id": ch["id"],
         "data": {"olay": "Sorgu başlar.", "mekan": "Salon",
-                 "zaman": {"tip": "NOKTA"}, "duygu": {"kim": "Vicdan", "baslangic": "merak"},
+                 "zaman": {"tip": "NOKTA"},
+                 "ortam": {"baslangic": "beklenti"},
+                 "duygu": {"kim": "Vicdan", "baslangic": "merak"},
                  "giris": "Kapı açılır.", "gelisme": "Soru sorulur.",
                  "sonuc": "ÇÖZÜN masada kalır."},
     }, headers=headers)
@@ -533,3 +535,47 @@ def test_atlama_warning_asks_the_right_question(client, headers):
     }, headers=headers)
     uyari = [w for w in r.json()["warnings"] if "ATLAMA" in w]
     assert uyari and "atlandığı" in uyari[0]
+
+
+def test_ortam_and_person_emotion_are_separate_arcs(client, headers):
+    """Odanın hâli ile kişinin hâli ayrı: asıl değer aradaki farkta.
+    Odada gerilim varken Başkan'da korku olması, adamın kalabalığın
+    hissettiğinden fazlasını hissettiğini söyler."""
+    m = _matris(client, headers)
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "x", "mekan": "VIP Salonu",
+                 "ortam": {"baslangic": "endişe", "bitis": "korku"},
+                 "duygu": {"kim": "Başkan", "baslangic": "soğukkanlılık", "bitis": "panik"}},
+    }, headers=headers)
+    metin = r.json()["content"]
+    assert "ORTAM: endişe → korku" in metin
+    assert "DUYGU: Başkan: soğukkanlılık → panik" in metin
+    # ORTAM satırı MEKAN'dan hemen sonra gelmeli - ikisi sahnenin yeri ve havası
+    satirlar = metin.split("\n")
+    assert satirlar[satirlar.index("MEKAN: VIP Salonu") + 1].startswith("ORTAM:")
+
+
+def test_identical_ortam_and_person_emotion_is_flagged(client, headers):
+    """İki alanın varlık sebebi FARK - aynıysa sahne bunu kullanmıyor."""
+    m = _matris(client, headers)
+    ortak = {"column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"]}
+    ayni = client.put(f"/matrix/{m['id']}/cells", json={
+        **ortak, "data": {"olay": "x", "ortam": {"baslangic": "gerilim"},
+                          "duygu": {"kim": "Başkan", "baslangic": "gerilim"}},
+    }, headers=headers)
+    assert any("birebir aynı" in w for w in ayni.json()["warnings"])
+    farkli = client.put(f"/matrix/{m['id']}/cells", json={
+        **ortak, "data": {"olay": "x", "ortam": {"baslangic": "gerilim"},
+                          "duygu": {"kim": "Başkan", "baslangic": "korku"}},
+    }, headers=headers)
+    assert not any("birebir aynı" in w for w in farkli.json()["warnings"])
+
+
+def test_empty_ortam_is_warned(client, headers):
+    m = _matris(client, headers)
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "x"},
+    }, headers=headers)
+    assert any("ORTAM duygusu boş" in w for w in r.json()["warnings"])

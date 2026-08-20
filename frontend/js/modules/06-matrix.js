@@ -432,6 +432,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
   const d = (cell && cell.data) ? cell.data : {};
   const zaman = d.zaman || {};
   const duygu = d.duygu || {};
+  const ortam = d.ortam || {};
   const tur = (col && col.tur_data) || {};
 
   editor.innerHTML = '<div class="empty-state">Yükleniyor…</div>';
@@ -485,8 +486,14 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       <div class="field"><label>MEKAN</label>
         <input type="text" id="mcMekan" list="mcMekanList" value="${escapeHtml(d.mekan || '')}" placeholder="VIP Salonu">
         <datalist id="mcMekanList">${_datalistSecenekleri(varliklar.mekanlar)}</datalist></div>
+      <div style="display:flex;gap:6px;">
+        <div class="field" style="flex:1;"><label>ORTAM <span style="font-weight:400;color:var(--text-muted);">(odanın hâli)</span></label>
+          <input type="text" id="mcOrtamA" value="${escapeHtml(ortam.baslangic || '')}" placeholder="endişe"></div>
+        <div class="field" style="flex:1;"><label>→ (dönüyorsa)</label>
+          <input type="text" id="mcOrtamB" value="${escapeHtml(ortam.bitis || '')}" placeholder="korku"></div>
+      </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        <div class="field" style="flex:1;min-width:110px;"><label>DUYGU — kimin</label>
+        <div class="field" style="flex:1;min-width:110px;"><label>KİŞİ DUYGUSU — kimin</label>
           <input type="text" id="mcDuyguKim" list="mcKisiList" value="${escapeHtml(duygu.kim || '')}" placeholder="Palyaço"></div>
         <div class="field" style="flex:1;min-width:90px;"><label>Başlangıç</label>
           <input type="text" id="mcDuyguA" value="${escapeHtml(duygu.baslangic || '')}" placeholder="güven"></div>
@@ -632,6 +639,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       zaman: { tarih: el('mcTarih').value, saat: el('mcSaat').value, tip: el('mcZamanTip').value, sayac: el('mcSayac').value },
       mekan: el('mcMekan').value,
       mekan_id: (_varlikEslestir(el('mcMekan').value, varliklar.mekanlar) || {}).id || null,
+      ortam: { baslangic: el('mcOrtamA').value, bitis: el('mcOrtamB').value },
       duygu: { kim: el('mcDuyguKim').value, baslangic: el('mcDuyguA').value, bitis: el('mcDuyguB').value },
       kisiler: _adlariAyristir(el('mcKisiler').value, varliklar.kisiler),
       nesneler: _adlariAyristir(el('mcNesneler').value, varliklar.nesneler),
@@ -655,6 +663,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       satir.push(`ZAMAN: ${z || '—'}${tipMetin}`);
     }
     if (v.mekan) satir.push(`MEKAN: ${v.mekan}`);
+    if (v.ortam.baslangic || v.ortam.bitis) satir.push(`ORTAM: ${[v.ortam.baslangic, v.ortam.bitis].filter(Boolean).join(' → ')}`);
     if (v.duygu.baslangic || v.duygu.bitis) satir.push(`DUYGU: ${v.duygu.kim ? `${v.duygu.kim}: ` : ''}${[v.duygu.baslangic, v.duygu.bitis].filter(Boolean).join(' → ')}`);
     if (v.kisiler.length) satir.push(`KİŞİLER: ${_adListesi(v.kisiler)}`);
     if (v.nesneler.length) satir.push(`NESNELER: ${_adListesi(v.nesneler)}`);

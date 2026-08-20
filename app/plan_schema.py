@@ -120,6 +120,13 @@ def bos_hucre() -> dict:
         "zaman": {"tarih": "", "saat": "", "tip": "", "sayac": ""},
         "mekan_id": None,
         "mekan": "",
+        # ORTAM DUYGUSU: mekânın o sahnedeki hâli, kişininkinden AYRI.
+        # Asıl değer ikisinin FARKINDA: odada gerilim varken Başkan'da
+        # korku olması, adamın kalabalığın hissettiğinden fazlasını
+        # hissettiğini ve sakladığını söyler - sahnenin motoru orada.
+        # Kişininki gibi yay tutar (endişe → korku), çünkü oda da sahne
+        # içinde döner.
+        "ortam": {"baslangic": "", "bitis": ""},
         "duygu": {"kim": "", "baslangic": "", "bitis": ""},
         "kisiler": [],   # [{"id": int|None, "ad": str}]
         "nesneler": [],  # [{"id": int|None, "ad": str}]
@@ -164,6 +171,13 @@ def normalize_cell(data: Any) -> dict:
             # SAYAÇ/ATLAMA tek başına boşlukta duruyordu: neyin sayacı,
             # neyin atlaması olduğu yazılmadan sahne zamanı belirsiz kalıyor.
             "sayac": str(zaman.get("sayac") or "").strip(),
+        }
+
+    ortam = data.get("ortam")
+    if isinstance(ortam, dict):
+        out["ortam"] = {
+            "baslangic": str(ortam.get("baslangic") or "").strip(),
+            "bitis": str(ortam.get("bitis") or "").strip(),
         }
 
     duygu = data.get("duygu")
@@ -265,6 +279,13 @@ def render_cell(data: Any) -> str:
     if d["mekan"]:
         satirlar.append(f"MEKAN: {d['mekan']}")
 
+    ort = d["ortam"]
+    if ort["baslangic"] or ort["bitis"]:
+        yay = (f"{ort['baslangic']} → {ort['bitis']}"
+               if ort["baslangic"] and ort["bitis"]
+               else (ort["baslangic"] or ort["bitis"]))
+        satirlar.append(f"ORTAM: {yay}")
+
     duy = d["duygu"]
     if duy["baslangic"] or duy["bitis"]:
         yay = (f"{duy['baslangic']} → {duy['bitis']}"
@@ -352,6 +373,8 @@ def cell_warnings(data: Any, tur_data: Any = None) -> list[str]:
             f"{ZAMAN_TIPI_GORUNEN[d['zaman']['tip']]} seçilmiş ama "
             + ("neyin sayacı" if d["zaman"]["tip"] == "SAYAC" else "neyden atlandığı")
             + " yazılmamış")
+    if not (d["ortam"]["baslangic"] or d["ortam"]["bitis"]):
+        uyarilar.append("ORTAM duygusu boş - mekânın o andaki hâli yazılmamış")
     if not (d["duygu"]["baslangic"] or d["duygu"]["bitis"]):
         uyarilar.append("DUYGU boş")
     elif not d["duygu"]["kim"]:
@@ -374,6 +397,16 @@ def cell_warnings(data: Any, tur_data: Any = None) -> list[str]:
         if len(d[key]) > BEAT_SINIRI:
             uyarilar.append(f"{etiket} bir beat değil olay dizisi olmuş "
                             f"({len(d[key])} karakter) - yazana kuracak yer bırakmıyor")
+
+    # ORTAM ile KİŞİ aynıysa ayrımdan yararlanılmıyor. İki alanın varlık
+    # sebebi aradaki FARK: oda ile kişi aynı şeyi hissediyorsa sahne bu
+    # gerilimi kullanmıyor demektir. Yasak değil, hatırlatma.
+    def _yay(x):
+        return f"{x['baslangic']}→{x['bitis']}".casefold()
+    if (any(d["ortam"].values()) and any(d["duygu"].values())
+            and _yay(d["ortam"]) == _yay(d["duygu"])):
+        uyarilar.append("ORTAM ve kişi duygusu birebir aynı - aradaki fark "
+                        "sahnenin motoruydu, şu an kullanılmıyor")
 
     # Damga kilidi: turun damga kelimesi SONUÇ beat'inde asılı kalmalı.
     # KELİME SINIRI şart: alt dize araması damgayı başka bir kelimenin
