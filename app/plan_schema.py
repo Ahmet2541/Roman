@@ -294,6 +294,21 @@ def hucre_bos_mu(data: dict) -> bool:
 
 # --- Metne dökme -----------------------------------------------------------
 
+# Plandan SAPMAYI engelleyen kilit. Fihrist katmanı romanın geçmişini
+# taşıyor ve model onu "malzeme" sanıp sahneye çekiyordu: planda olmayan
+# kişiler (başka bölümlerin karakterleri), olaylar ve nesneler metne
+# sızıyordu. Bu blok her planın sonuna eklenir.
+SAPMA_KILIDI = """SINIRLAR (bu sahne için MUTLAK):
+- Yalnızca yukarıda KİŞİLER'de yazılı kişiler sahnede bulunabilir. Başka
+  hiçbir karakteri sahneye sokma, adını andırma, hatırlatma.
+- Yalnızca yukarıda yazılı beat'ler gerçekleşir. Yeni olay, yeni geri
+  dönüş, yeni sır, yeni nesne EKLEME.
+- Bağlamdaki fihrist ve diğer bölüm özetleri GEÇMİŞİ ANLAMAN İÇİNDİR;
+  oradaki olayları, kişileri ve imgeleri bu sahneye TAŞIMA.
+- Hedef uzunluğa ulaşmak için olay uydurma. Yetmiyorsa beat'leri
+  derinleştir: beden, ses, nesne, sessizlik, ritim."""
+
+
 def render_cell(data: Any) -> str:
     """Yapılandırılmış hücreyi AI'nın ve yazarın okuyacağı düz metne çevirir.
     MatrixCell.content'e bu yazılır - böylece bağlam katmanı, MP referansı,
@@ -343,7 +358,12 @@ def render_cell(data: Any) -> str:
     if d["nesneler"]:
         satirlar.append("NESNELER: " + ", ".join(n["ad"] for n in d["nesneler"]))
     if d["odak"]:
-        satirlar.append(f"ODAK: {d['odak']} (dikkat bu nesnede toplanır)")
+        # ODAK bir İPUCU değil KISIT: "dikkat bunda toplanır" demek modele
+        # "burayı vurgula" der, "başkasını yazma" demez. Sahneye plan dışı
+        # nesne ve ayrıntı sızmasının kaynaklarından biri buydu.
+        satirlar.append(
+            f"ODAK: {d['odak']} — betimleme SADECE bunun üzerinde kalacak; "
+            f"başka nesneye, mekana ya da ayrıntıya geçme.")
 
     # Beat'ler numaralanır ki AI her birini AYRI bir hareket olarak görsün;
     # tek beat varsa numara konmaz (gereksiz gürültü).
@@ -371,6 +391,7 @@ def render_cell(data: Any) -> str:
             parcalar.append(f"{b['kod']}{tur}{aciklama}")
         satirlar.append("BAĞLANTI: " + " · ".join(parcalar))
 
+    satirlar.append(SAPMA_KILIDI)
     return "\n".join(satirlar)
 
 

@@ -205,7 +205,15 @@ def build_index_layer(db: Session, universe_id: int, current_novel_id: int, excl
     #               Yazarken devraldığın şey komşu bölümdür.
     #   BOŞLARI AT: özeti "belirtilmemiş"ten ibaret olan bölümler hiç
     #               yazılmaz - yer kaplar, bilgi vermez.
-    lines = ["ROMAN FİHRİSTİ (yazılmış bölümlerin özetleri, sırayla):"]
+    # Katmanın NE İÇİN orada olduğu başlıkta yazmalı: model bu özetleri
+    # "yazılacak malzeme" sanıp içindeki kişileri ve olayları sahneye
+    # taşıyordu (başka bölümün karakteri, başka bölümün sırrı).
+    lines = [
+        "ROMAN FİHRİSTİ (yazılmış bölümlerin özetleri, sırayla):",
+        "BU KATMAN GEÇMİŞİ ANLAMAN İÇİNDİR - yazacağın sahnenin malzemesi",
+        "DEĞİLDİR. Buradaki kişileri, olayları, nesneleri ve imgeleri sahneye",
+        "TAŞIMA; yalnızca tutarlılık ve devamlılık için kullan.",
+    ]
     last_novel_id = None
     kisaltilan = 0
     for c in chapters:

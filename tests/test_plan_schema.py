@@ -906,3 +906,44 @@ def test_sub_row_plans_reach_their_parent_chapter(client, headers):
         "selected_entities": [], "chapter_number": bagli["chapter_number"]}, headers=headers).json()["context"]
     assert "Ana sahne." in ctx
     assert "Alt sahne buraya." in ctx, "bağsız alt sahne üst bölümün bağlamına girmedi"
+
+
+# --- Plan dışına sapma kilidi ----------------------------------------------
+
+def test_odak_is_a_constraint_not_a_hint(client, headers):
+    """ODAK 'burayı vurgula' değil 'başkasını yazma' demeli - plan dışı
+    nesne ve ayrıntı sızmasının kaynaklarından biri buydu."""
+    m = _matris(client, headers)
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "x", "odak": "Lümen binası dış cephesi"},
+    }, headers=headers)
+    metin = r.json()["content"]
+    assert "SADECE bunun üzerinde kalacak" in metin
+    assert "başka nesneye, mekana ya da ayrıntıya geçme" in metin
+
+
+def test_plan_carries_deviation_lock(client, headers):
+    """Her plan, sahneye plan dışı kişi/olay sokulmasını yasaklayan
+    sınırlarla birlikte gitmeli."""
+    m = _matris(client, headers)
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "x", "kisiler": [{"ad": "Genç Mühendis"}]},
+    }, headers=headers)
+    metin = r.json()["content"]
+    assert "SINIRLAR (bu sahne için MUTLAK)" in metin
+    assert "Başka" in metin and "karakteri sahneye sokma" in metin
+    assert "sahneye TAŞIMA" in metin
+    assert "Hedef uzunluğa ulaşmak için olay uydurma" in metin
+
+
+def test_index_layer_declares_it_is_background_only(client, headers):
+    """Fihrist 'malzeme' değil 'geçmiş' olduğunu kendisi söylemeli."""
+    ch = client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers).json()
+    client.put(f"/chapters/{ch['id']}", json={
+        "title": "B1", "summary": "OLAY: Vicdan karanlıkta saymaya başladı."}, headers=headers)
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 2}, headers=headers).json()["context"]
+    assert "GEÇMİŞİ ANLAMAN İÇİNDİR" in ctx
+    assert "sahneye" in ctx and "TAŞIMA" in ctx
