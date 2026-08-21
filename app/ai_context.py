@@ -18,7 +18,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from . import models
-from . import plan_schema, schemas
+from . import plan_schema, schemas, story_time
 from .config import settings
 from .prompts import *  # noqa: F401,F403 - katmanlarda geçen yönergeler
 from .sections import (
@@ -162,7 +162,8 @@ def _ozet_tek_satir(ozet: str) -> str:
     return metin
 
 
-def build_index_layer(db: Session, universe_id: int, current_novel_id: int, exclude_chapter_number: int | None = None) -> str:
+def build_index_layer(db: Session, universe_id: int, current_novel_id: int,
+                      exclude_chapter_number: int | None = None) -> str:
     """Devasa bir SERİ için fihrist artık tek kitapla sınırlı değil - aynı
     evrendeki TÜM kitapların özetleri (kronolojik book_number sırasıyla)
     dahil edilir, çünkü 3. kitabı yazarken 1-2. kitaplarda ne olduğunu
@@ -208,6 +209,29 @@ def build_index_layer(db: Session, universe_id: int, current_novel_id: int, excl
     # Katmanın NE İÇİN orada olduğu başlıkta yazmalı: model bu özetleri
     # "yazılacak malzeme" sanıp içindeki kişileri ve olayları sahneye
     # taşıyordu (başka bölümün karakteri, başka bölümün sırrı).
+    # --- KRONOLOJİK SÜZME ---
+    # Bölüm NUMARASI hikâye sırası değil. Plan hücrelerindeki ZAMAN
+    # alanından her bölümün gerçek anı okunur; yazılan sahneden SONRA
+    # geçen bölümlerin özeti fihristten ÇIKARILIR. Zamanı çözülemeyen
+    # bölümler süzmenin dışında kalır - uydurma tarihle yanlış sıralamak,
+    # sıralamamaktan kötüdür.
+    zamanlar = {}
+    su_anki_zaman = None
+    try:
+        zamanlar = story_time.bolum_zamanlari(db, current_novel_id)
+        if exclude_chapter_number is not None:
+            # Yazılan bölüm fihristten DIŞLANDIĞI için listede yok -
+            # doğrudan sorgulanır.
+            su_an = (db.query(models.Chapter)
+                     .filter(models.Chapter.novel_id == current_novel_id,
+                             models.Chapter.number == exclude_chapter_number).first())
+            if su_an is not None:
+                su_anki_zaman = zamanlar.get(su_an.id)
+    except Exception:
+        logger.exception("Kronolojik süzme yapılamadı, numara sırası kullanılıyor")
+        zamanlar, su_anki_zaman = {}, None
+
+    gelecekte_kalan = 0
     lines = [
         "ROMAN FİHRİSTİ (yazılmış bölümlerin özetleri, sırayla):",
         "BU KATMAN GEÇMİŞİ ANLAMAN İÇİNDİR - yazacağın sahnenin malzemesi",
@@ -226,6 +250,14 @@ def build_index_layer(db: Session, universe_id: int, current_novel_id: int, excl
         if _ozet_bos_mu(ozet):
             continue
 
+        # Bu bölüm, yazılan sahneden SONRA mı geçiyor? Öyleyse onu
+        # "geçmiş" diye vermek doğrudan gelecek sızdırmaktır.
+        if su_anki_zaman is not None:
+            bolum_zamani = zamanlar.get(c.id)
+            if bolum_zamani is not None and bolum_zamani > su_anki_zaman:
+                gelecekte_kalan += 1
+                continue
+
         yakin = (
             exclude_chapter_number is None
             or c.novel_id != current_novel_id
@@ -240,6 +272,10 @@ def build_index_layer(db: Session, universe_id: int, current_novel_id: int, excl
     if kisaltilan:
         lines.append(f"\n({kisaltilan} uzak bölüm tek satıra indirildi - tam özetleri "
                      f"gerekirse sor. Yakın bölümler tam verildi.)")
+    if gelecekte_kalan:
+        lines.append(
+            f"\n({gelecekte_kalan} bölüm bu sahneden SONRA geçtiği için "
+            f"çıkarıldı - onlar bu anda henüz OLMAMIŞTIR.)")
     return "\n".join(lines)
 
 
@@ -564,8 +600,12 @@ def build_forward_layer(db: Session, novel_id: int, chapter_number: int | None) 
         return ""
     return (
         "=== İLERİ BAKIŞ (sonraki bölüm) ===\n"
-        "Bu bölüm oraya BAĞLANMALI: kapanış bir eşik/soru bıraksın, sonrakinin\n"
-        "hedefini doğursun. Sonrakinde anlatılacak bilgiyi burada ÖNDEN VERME.\n"
+        "DİKKAT - BU KATMAN GELECEKTİR. Sana yalnızca KAPANIŞI DOĞRU\n"
+        "AYARLAYASIN diye veriliyor: kapanış bir eşik/soru bıraksın,\n"
+        "sonrakinin hedefini doğursun. Buradaki hiçbir olayı, kişiyi ya da\n"
+        "sonucu metne YAZMA, ima etme, sezdirme. \"Henüz bilmiyordu ki\",\n"
+        "\"o gece ... olacaktı\" gibi kalıplar da yasaktır - onlar geleceği\n"
+        "söylemenin kılık değiştirmiş hâlidir.\n"
         + "\n\n".join(parcalar)
     )
 
@@ -738,6 +778,7 @@ def build_context(
     chapter_number: int | None = None, instruction_text: str = "",
     include_hidden: bool = False, include_chapter_text: bool = False,
     text_scope: str = "chapter", include_own_summary: bool = False,
+    include_index: bool = True,
 ) -> str:
     """chapter_number verilirse (o an üzerinde çalışılan bölüm), fihrist
     katmanında o bölüm dışlanır - bir bölümün kendi özetini kendi context'i
@@ -749,7 +790,10 @@ def build_context(
     PAYLAŞILAN verinin hangi evrenden çekileceği - bu artık seride tüm
     kitapları kapsıyor."""
     fixed = build_fixed_layer(db, universe_id, instruction_text=instruction_text)
-    index = build_index_layer(db, universe_id, novel_id, exclude_chapter_number=chapter_number)
+    # Fihrist kapatılabilir: kronolojik olarak geriye giden bir sahne
+    # yazarken "önceki" bölümlerin özetleri aslında GELECEKTİR.
+    index = (build_index_layer(db, universe_id, novel_id, exclude_chapter_number=chapter_number)
+             if include_index else "")
     # Fihrist HARİTASI: kullanıcının gördüğü numaralar ("Kısım 1.1") -
     # atıfları çözebilmek için. Özetlerden bağımsız, ucuz bir liste.
     outline = build_outline_layer(db, universe_id, novel_id)
@@ -820,7 +864,17 @@ def build_context(
         if (r.entity_type, r.entity_id) not in mevcut:
             birlesik.append(r)
     dynamic = build_dynamic_layer(db, universe_id, birlesik, instruction_text=instruction_text, include_hidden=include_hidden)
-    return "\n\n".join(part for part in [fixed, index, outline, matrix_map, referenced, style, style_warnings, plan, parallel, voice, forward, knowledge, own_summary, chapter_text, dynamic] if part)
+    # KATMAN SIRASI - plan EN SONA alındı.
+    # Plan, modelin en çok uyması gereken katman ama on beşin sekizincisi
+    # olarak yığının ortasında kalıyordu; fihrist ise ikinci sıradaydı.
+    # Otorite sırası tersti. Son okunan metin en güçlü etkiyi bıraktığı
+    # için plan artık sona, varlık profillerinin hemen ardına konuyor.
+    return "\n\n".join(part for part in [
+        fixed, index, outline, matrix_map, referenced,
+        style, style_warnings, parallel, voice, forward, knowledge,
+        own_summary, chapter_text, dynamic,
+        plan,
+    ] if part)
 
 
 # ---------------------------------------------------------------------------

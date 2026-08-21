@@ -107,6 +107,9 @@ async function renderAiPanel(chapter) {
         <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;margin-bottom:6px;cursor:pointer;" title="Seçili varlıkların 🔒 Gizli Katmanı 'BİL ama ASLA açıkça yazma' direktifiyle gider.">
           <input type="checkbox" id="includeHiddenChk"> 🔒 Gizli katmanı alt-metin olarak ver
         </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;margin-bottom:6px;cursor:pointer;" title="Bölüm NUMARASI hikâye sırası değildir. Kronolojik olarak GERİYE giden bir sahne yazarken, 'önceki' bölümlerin özetleri aslında GELECEKTİR - model onları geçmiş sanıp sahneye taşır ('henüz bilmiyordu ki...'). Böyle bölümlerde fihristi kapat.">
+          <input type="checkbox" id="skipIndexChk"> 🕰️ Fihristi gönderme (kronolojik geri sahne)
+        </label>
         <input type="text" id="entityPickerSearch" placeholder="Kişi/mekan/olay ara…" style="width:100%;margin-bottom:6px;">
         <div class="entity-picker" id="entityPickerBox">${pickerHtml || '<div class="empty-state">Henüz kayıt yok</div>'}</div>
       </div>
@@ -465,6 +468,7 @@ async function sendChatMessage(chapter) {
       messages: aiChatMessages,
       current_result: currentResult,
       include_hidden: !!document.getElementById('includeHiddenChk')?.checked,
+      include_index: !document.getElementById('skipIndexChk')?.checked,
       text_scope: document.getElementById('textScopeSelect')?.value || 'chapter',
     };
     // Oda çerçevesi: AI'ya bu odanın amacını söyler (ilk mesaja iliştirilir)
@@ -515,6 +519,7 @@ async function runContextPreview(chapter) {
       selected_entities: selected,
       instruction: instructionEl ? instructionEl.value.trim() : '',
       include_hidden: !!document.getElementById('includeHiddenChk')?.checked,
+      include_index: !document.getElementById('skipIndexChk')?.checked,
       text_scope: document.getElementById('textScopeSelect')?.value || 'chapter',
       include_chapter_text: true,  // önizleme sohbetle AYNI bağlamı göstermeli
     };
@@ -557,6 +562,7 @@ async function runAiAssist(chapter) {
       selected_entities: selected,
       existing_text: null,
       include_hidden: !!document.getElementById('includeHiddenChk')?.checked,
+      include_index: !document.getElementById('skipIndexChk')?.checked,
     };
     const result = await api.post('/ai/assist', payload);
     let extraHtml = '';

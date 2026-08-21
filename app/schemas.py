@@ -413,6 +413,11 @@ class AiAssistRequest(BaseModel):
     chapter_number: int
     instruction: str  # "şu başlıkla bir bölüm yaz" / "şu paragrafı düzenle" gibi talimat
     selected_entities: List[EntityRef] = []
+    # FİHRİSTİ KAPAT: bölüm NUMARASI hikâye sırası DEĞİL. Kronolojik olarak
+    # geriye giden bir sahne yazarken "önceki" bölümlerin özetleri aslında
+    # GELECEKTİR; model onları geçmiş sanıp sahneye taşıyor ("henüz
+    # bilmiyordu ki..."). Böyle bölümlerde fihrist tamamen kapatılabilmeli.
+    include_index: bool = True
     existing_text: Optional[str] = None  # düzenleme isteğinde mevcut bölüm metni
     # Alt-metin modu: seçili varlıkların 'gizli' katmanı, sızdırmama
     # direktifiyle context'e girer (varsayılan: hiç girmez).
@@ -536,6 +541,7 @@ class ContextPreviewRequest(BaseModel):
     text_scope: str = "chapter"
     include_chapter_text: bool = False
     include_own_summary: bool = False
+    include_index: bool = True
 
 
 class ContextPreviewResponse(BaseModel):

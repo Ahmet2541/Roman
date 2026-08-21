@@ -33,6 +33,7 @@ def assist(
         chapter_number=payload.chapter_number, instruction_text=payload.instruction,
         include_hidden=payload.include_hidden,
         include_own_summary=getattr(payload, 'include_own_summary', False),
+        include_index=getattr(payload, 'include_index', True),
     )
     try:
         result = ask_qwen(context, payload.instruction, payload.existing_text)
@@ -75,6 +76,7 @@ def preview_context(
             include_chapter_text=payload.include_chapter_text,
             text_scope=payload.text_scope,
             include_own_summary=payload.include_own_summary,
+            include_index=payload.include_index,
         )
     except Exception as exc:
         logger.exception("Bağlam önizlemesi oluşturulamadı")

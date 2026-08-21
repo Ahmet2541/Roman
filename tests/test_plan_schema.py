@@ -974,3 +974,141 @@ def test_plan_forbids_future_knowledge(client, headers):
     metin = r.json()["content"]
     assert "ZAMAN ÇİZGİSİ" in metin
     assert "Henüz gerçekleşmemiş olayları anlatma" in metin
+
+
+# --- Yapı analizi sonrası: otorite sırası, gelecek yasağı, fihrist anahtarı ---
+
+def test_plan_is_the_last_layer(client, headers):
+    """Plan, modelin en çok uyması gereken katman ama on beşin sekizincisi
+    olarak yığının ortasında kalıyordu; fihrist ikinci sıradaydı. Son
+    okunan metin en güçlü etkiyi bırakır - plan sona alındı."""
+    ch = client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers).json()
+    client.put(f"/chapters/{ch['id']}", json={
+        "title": "B1", "summary": "OLAY: Fihrist satırı."}, headers=headers)
+    m = _matris(client, headers)
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "chapter_id": ch["id"], "data": {"olay": "Plan satırı."}}, headers=headers)
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 1,
+        "include_own_summary": True}, headers=headers).json()["context"]
+    assert "BÖLÜM PLANI" in ctx
+    # Plan bloğu, fihrist/harita katmanlarının SONRASINDA olmalı
+    assert ctx.index("BÖLÜM PLANI") > ctx.index("FİHRİST HARİTASI")
+
+
+def test_system_prompt_forbids_future_tell_patterns(client, headers):
+    """Model geleceği 'henüz bilmiyordu ki' kalıbıyla sızdırıyordu:
+    karakterin bilmediğini söyleyerek okura söylüyor. Yasak, kalıbı
+    ADIYLA saymalı ve en yüksek otoritede - sistem yönergesinde - olmalı."""
+    client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers)
+    r = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 1}, headers=headers).json()
+    sistem = r["system_prompt"]
+    assert "PLANA SADAKAT" in sistem and "ZAMAN ÇİZGİSİ" in sistem
+    assert "henüz bilmiyordu ki" in sistem
+    assert "bir daha asla" in sistem
+    assert "Bölüm NUMARASI hikâye sırası DEĞİLDİR" in sistem
+
+
+def test_index_can_be_switched_off(client, headers):
+    """Kronolojik geri sahnelerde fihristteki 'geçmiş' aslında GELECEK -
+    tamamen kapatılabilmeli."""
+    ch = client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers).json()
+    client.put(f"/chapters/{ch['id']}", json={
+        "title": "B1", "summary": "OLAY: Vicdan karanlıkta saymaya başladı."}, headers=headers)
+    client.post("/chapters/", json={"number": 2, "title": "B2"}, headers=headers)
+
+    acik = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 2}, headers=headers).json()["context"]
+    assert "Vicdan karanlıkta" in acik
+
+    kapali = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 2,
+        "include_index": False}, headers=headers).json()["context"]
+    assert "Vicdan karanlıkta" not in kapali, "fihrist kapatılmadı"
+    assert "ROMAN FİHRİSTİ" not in kapali
+    # Diğer katmanlar yerinde kalmalı - sadece fihrist kapanır
+    assert "FİHRİST HARİTASI" in kapali
+
+
+# --- Kronolojik süzme -------------------------------------------------------
+
+def test_chapters_set_later_in_story_are_excluded(client, headers):
+    """Bölüm NUMARASI hikâye sırası değil. 28 Haziran'da geçen sahne
+    Bölüm 3'teyse, Bölüm 1-2'de anlatılan 7 Temmuz olayları o sahnenin
+    GELECEĞİDİR - fihristten çıkmalı."""
+    gec = client.post("/chapters/", json={"number": 1, "title": "Yargı"}, headers=headers).json()
+    client.put(f"/chapters/{gec['id']}", json={
+        "title": "Yargı", "summary": "OLAY: Vicdan sekiz kişiyi masaya oturttu."}, headers=headers)
+    erken = client.post("/chapters/", json={"number": 2, "title": "Varış"}, headers=headers).json()
+
+    m = _matris(client, headers)
+    client.post(f"/matrix/{m['id']}/rows", json={"label": "S2"}, headers=headers)
+    full = client.get(f"/matrix/{m['id']}", headers=headers).json()
+    col = full["columns"][0]["id"]
+    # Bölüm 1 -> 7 Temmuz (geç), Bölüm 2 -> 28 Haziran (erken)
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": col, "row_id": full["rows"][0]["id"], "chapter_id": gec["id"],
+        "data": {"olay": "x", "zaman": {"tarih": "7 Temmuz 2030", "saat": "21:00", "tip": "NOKTA"}}},
+        headers=headers)
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": col, "row_id": full["rows"][1]["id"], "chapter_id": erken["id"],
+        "data": {"olay": "y", "zaman": {"tarih": "28 Haziran 2030", "saat": "13:30", "tip": "NOKTA"}}},
+        headers=headers)
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 2}, headers=headers).json()["context"]
+    ozetler = ctx.split("FİHRİST HARİTASI")[0]
+    assert "Vicdan sekiz kişiyi" not in ozetler, "gelecekte geçen bölüm fihriste girdi"
+    assert "bu sahneden SONRA geçtiği için" in ctx
+
+
+def test_earlier_chapters_still_reach_context(client, headers):
+    """Süzme sadece GELECEĞİ keser - geçmiş yerinde kalmalı."""
+    erken = client.post("/chapters/", json={"number": 1, "title": "Varış"}, headers=headers).json()
+    client.put(f"/chapters/{erken['id']}", json={
+        "title": "Varış", "summary": "OLAY: İkisi binaya girdi."}, headers=headers)
+    gec = client.post("/chapters/", json={"number": 2, "title": "Yargı"}, headers=headers).json()
+
+    m = _matris(client, headers)
+    client.post(f"/matrix/{m['id']}/rows", json={"label": "S2"}, headers=headers)
+    full = client.get(f"/matrix/{m['id']}", headers=headers).json()
+    col = full["columns"][0]["id"]
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": col, "row_id": full["rows"][0]["id"], "chapter_id": erken["id"],
+        "data": {"olay": "x", "zaman": {"tarih": "28 Haziran 2030", "saat": "13:30", "tip": "NOKTA"}}},
+        headers=headers)
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": col, "row_id": full["rows"][1]["id"], "chapter_id": gec["id"],
+        "data": {"olay": "y", "zaman": {"tarih": "7 Temmuz 2030", "saat": "21:00", "tip": "NOKTA"}}},
+        headers=headers)
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 2}, headers=headers).json()["context"]
+    assert "İkisi binaya girdi." in ctx, "geçmiş bölüm de süzüldü"
+
+
+def test_undated_chapters_are_not_filtered(client, headers):
+    """Zamanı çözülemeyen bölüm süzmenin DIŞINDA kalır - uydurma tarihle
+    yanlış sıralamak, sıralamamaktan kötüdür."""
+    tarihsiz = client.post("/chapters/", json={"number": 1, "title": "Tarihsiz"}, headers=headers).json()
+    client.put(f"/chapters/{tarihsiz['id']}", json={
+        "title": "Tarihsiz", "summary": "OLAY: Zamanı belirsiz bir sahne."}, headers=headers)
+    simdi = client.post("/chapters/", json={"number": 2, "title": "Şimdi"}, headers=headers).json()
+
+    m = _matris(client, headers)
+    client.post(f"/matrix/{m['id']}/rows", json={"label": "S2"}, headers=headers)
+    full = client.get(f"/matrix/{m['id']}", headers=headers).json()
+    col = full["columns"][0]["id"]
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": col, "row_id": full["rows"][0]["id"], "chapter_id": tarihsiz["id"],
+        "data": {"olay": "x", "zaman": {"tarih": "üçüncü gün", "tip": "NOKTA"}}}, headers=headers)
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": col, "row_id": full["rows"][1]["id"], "chapter_id": simdi["id"],
+        "data": {"olay": "y", "zaman": {"tarih": "28 Haziran 2030", "tip": "NOKTA"}}}, headers=headers)
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 2}, headers=headers).json()["context"]
+    assert "Zamanı belirsiz bir sahne." in ctx

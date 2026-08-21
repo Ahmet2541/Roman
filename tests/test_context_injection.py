@@ -209,7 +209,11 @@ def test_forward_layer_shows_next_chapter(client, headers):
     ileri = build_forward_layer(db, novel_id, 1)
     assert "İLERİ BAKIŞ" in ileri
     assert "Başkan çöker" in ileri
-    assert "ÖNDEN VERME" in ileri          # sızdırma uyarısı
+    # Sızdırma uyarısı: katman GELECEK olduğunu ve yazılmayacağını söylemeli.
+    # "Henüz bilmiyordu ki" gibi kalıplar da açıkça yasaklanmalı - model
+    # geleceği tam olarak o kalıpla sızdırıyordu.
+    assert "BU KATMAN GELECEKTİR" in ileri
+    assert "Henüz bilmiyordu ki" in ileri
     # Son bölümde ileri bakış YOK (boşuna maliyet ödenmez)
     assert build_forward_layer(db, novel_id, 2) == ""
 
