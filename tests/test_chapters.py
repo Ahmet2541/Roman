@@ -56,3 +56,67 @@ def test_paragraph_numbers_are_compacted_after_delete(client, headers):
     for _ in range(3):
         client.delete(f"/chapters/{ch['id']}/paragraphs/1", headers=headers)
     assert client.get(f"/chapters/{ch['id']}", headers=headers).json()["paragraphs"] == []
+
+
+# --- El yazması dışa aktarımı ----------------------------------------------
+
+def _aktif_kitap(headers):
+    """Kitap kimliğini SABİT varsaymak, testler birlikte koşunca kırılıyor -
+    fixture'ın verdiği başlıktan oku."""
+    return headers["X-Novel-Id"]
+
+
+def _roman_kur(client, headers):
+    """KISIM > bölüm > paragraf yapısı kurar."""
+    client.post("/chapters/", json={"number": 1, "title": "BİRİNCİ KISIM", "kind": "part"},
+                headers=headers)
+    b1 = client.post("/chapters/", json={"number": 2, "title": "Varış"}, headers=headers).json()
+    client.put(f"/chapters/{b1['id']}/paragraphs/1",
+               json={"number": 1, "text": "İhtiyar teknisyen araçtan indi."}, headers=headers)
+    client.put(f"/chapters/{b1['id']}/paragraphs/2",
+               json={"number": 2, "text": "Bina güneşte parlıyordu."}, headers=headers)
+    b2 = client.post("/chapters/", json={"number": 3, "title": "Bodrum"}, headers=headers).json()
+    client.put(f"/chapters/{b2['id']}/paragraphs/1",
+               json={"number": 1, "text": "Merdivenler gıcırdadı."}, headers=headers)
+    return b1, b2
+
+
+def test_manuscript_export_markdown_keeps_hierarchy(client, headers):
+    """JSON yedeği VERİ yedeğidir - okumak için okunur çıktı gerekiyordu."""
+    _roman_kur(client, headers)
+    r = client.get(f"/novels/{_aktif_kitap(headers)}/manuscript?format=md", headers=headers)
+    assert r.status_code == 200
+    metin = r.content.decode("utf-8")
+    assert "BİRİNCİ KISIM" in metin and "Varış" in metin
+    assert "İhtiyar teknisyen araçtan indi." in metin
+    assert "Merdivenler gıcırdadı." in metin
+    # Hiyerarşi başlık düzeyine yansımalı: KISIM, bölümden üstte
+    assert metin.index("BİRİNCİ KISIM") < metin.index("Varış")
+    assert "#" in metin
+
+
+def test_manuscript_export_docx_is_readable(client, headers):
+    from io import BytesIO
+    from docx import Document
+
+    _roman_kur(client, headers)
+    r = client.get(f"/novels/{_aktif_kitap(headers)}/manuscript?format=docx", headers=headers)
+    assert r.status_code == 200
+    assert "wordprocessingml" in r.headers["content-type"]
+    belge = Document(BytesIO(r.content))
+    tumu = "\n".join(p.text for p in belge.paragraphs)
+    assert "Bina güneşte parlıyordu." in tumu
+    assert any(p.style.name.startswith("Heading") for p in belge.paragraphs)
+
+
+def test_manuscript_export_txt_and_stats(client, headers):
+    _roman_kur(client, headers)
+    metin = client.get(f"/novels/{_aktif_kitap(headers)}/manuscript?format=txt", headers=headers).content.decode("utf-8")
+    assert "İhtiyar teknisyen araçtan indi." in metin
+    assert "#" not in metin, "düz metinde başlık işareti olmamalı"
+
+    ist = client.get(f"/novels/{_aktif_kitap(headers)}/manuscript-stats", headers=headers).json()
+    assert ist["paragraf"] == 3
+    assert ist["yazili_bolum"] == 2
+    assert ist["kelime"] > 5
+    assert client.get(f"/novels/{_aktif_kitap(headers)}/manuscript?format=pdf", headers=headers).status_code == 400

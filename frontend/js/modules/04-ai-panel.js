@@ -608,6 +608,22 @@ function renderImportView() {
   main().innerHTML = `
     <h1 class="view-title">Yedekle & İçe Aktar</h1>
     <div class="panel" style="border-left:3px solid var(--gold);margin-bottom:14px;">
+      <strong style="font-size:12px;letter-spacing:0.4px;">📖 ROMANI İNDİR (el yazması)</strong>
+      <p style="font-size:13px;color:var(--text-muted);margin:6px 0;">
+        Romanın <b>okunur</b> hâli: fihrist hiyerarşisi korunur, paragraflar okunacak
+        gibi dizilir. Basmak, birine göndermek, editöre vermek için.
+        (Aşağıdaki JSON yedeği bundan farklı - o veri yedeğidir, geri yükleme içindir.)
+      </p>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+        <select id="manuscriptFormat" style="flex:0 0 auto;">
+          <option value="docx">Word (.docx) — yazdır, paylaş, not al</option>
+          <option value="md">Markdown (.md) — her yerde açılır</option>
+          <option value="txt">Düz metin (.txt) — sadece roman</option>
+        </select>
+        <button class="btn btn-primary" id="exportManuscriptBtn">Romanı İndir</button>
+        <span id="manuscriptState" style="font-size:12px;color:var(--text-muted);"></span>
+      </div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;">
       <strong style="font-size:12px;letter-spacing:0.4px;">💾 YEDEK AL (JSON)</strong>
       <p style="font-size:13px;color:var(--text-muted);margin:6px 0;">
         Aktif kitabın tüm bölüm/paragrafları + evrenin paylaşılan verisi (kişiler,
@@ -672,6 +688,41 @@ function renderImportView() {
       if (!res.ok) throw new Error(data.detail || `Geri yükleme başarısız (${res.status})`);
       alert('Yedek geri yüklendi. Sayfa yenileniyor.');
       window.location.reload();
+    } catch (err) {
+      state.textContent = '✕ ' + err.message;
+    } finally { btn.disabled = false; }
+  });
+
+  // EL YAZMASI: okunur çıktı. Yedekten ayrı tutuldu çünkü ikisi farklı
+  // işler - yedek geri yüklemek için, bu okumak/basmak için.
+  el('exportManuscriptBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('exportManuscriptBtn');
+    const state = document.getElementById('manuscriptState');
+    const bicim = document.getElementById('manuscriptFormat').value;
+    const kitap = getNovelId();
+    if (!kitap) { state.textContent = '✕ Önce bir kitap seç'; return; }
+    btn.disabled = true; state.textContent = 'Hazırlanıyor…';
+    try {
+      const res = await fetch(`/novels/${kitap}/manuscript?format=${bicim}`, {
+        headers: {
+          'Authorization': `Bearer ${getToken()}`,
+          'X-Novel-Id': String(kitap),
+        },
+      });
+      if (!res.ok) throw new Error(`İndirilemedi (${res.status})`);
+      const blob = await res.blob();
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `roman-${stamp}.${bicim}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      try {
+        const ist = await api.get(`/novels/${kitap}/manuscript-stats`);
+        state.textContent = `✓ ${ist.yazili_bolum} bölüm · ${ist.paragraf} paragraf · ${ist.kelime} kelime`;
+      } catch (e) { state.textContent = '✓ indirildi'; }
     } catch (err) {
       state.textContent = '✕ ' + err.message;
     } finally { btn.disabled = false; }

@@ -10,13 +10,16 @@ tarafından da kullanılıyor olabilir. Evrenin TAMAMINI (tüm kitapları +
 tüm paylaşılan verisiyle) silmek istiyorsan bkz. DELETE /universes/{id}."""
 from typing import List, Optional
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..auth import get_current_user
-from .. import models
+from .. import manuscript, models
 
 router = APIRouter(prefix="/novels", tags=["Romanlar"])
 
@@ -52,6 +55,56 @@ def _to_out(db: Session, novel: models.Novel) -> NovelOut:
     return NovelOut(
         id=novel.id, name=novel.name, universe_id=novel.universe_id,
         universe_name=universe.name if universe else None, book_number=novel.book_number,
+    )
+
+
+@router.get("/{novel_id}/manuscript-stats")
+def manuscript_stats(
+    novel_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user),
+):
+    """İndirmeden önce kaç bölüm/paragraf/kelime olduğunu gösterir."""
+    novel = db.query(models.Novel).filter(models.Novel.id == novel_id).first()
+    if not novel:
+        raise HTTPException(404, "Kitap bulunamadı")
+    return manuscript.istatistik(db, novel_id)
+
+
+@router.get("/{novel_id}/manuscript")
+def export_manuscript(
+    novel_id: int, format: str = "docx",
+    db: Session = Depends(get_db), _user=Depends(get_current_user),
+):
+    """ROMANI OKUNUR BİÇİMDE indirir.
+
+    Mevcut JSON yedeği bir VERİ yedeğidir - geri yüklemek için, okumak
+    için değil. Bu uç el yazmasını basılabilir/paylaşılabilir hâlde verir:
+    fihrist hiyerarşisi korunur, paragraflar okunacak gibi dizilir.
+    """
+    if format not in ("docx", "md", "txt"):
+        raise HTTPException(400, "format 'docx', 'md' veya 'txt' olmalı")
+    novel = db.query(models.Novel).filter(models.Novel.id == novel_id).first()
+    if not novel:
+        raise HTTPException(404, "Kitap bulunamadı")
+
+    damga = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H%M")
+    ad = "".join(ch for ch in (novel.name or "roman") if ch.isalnum() or ch in " -_").strip()
+    ad = (ad or "roman").replace(" ", "-")
+
+    if format == "docx":
+        govde = manuscript.export_docx(db, novel)
+        tur = ("application/vnd.openxmlformats-officedocument"
+               ".wordprocessingml.document")
+    elif format == "md":
+        govde = manuscript.export_markdown(db, novel)
+        tur = "text/markdown; charset=utf-8"
+    else:
+        govde = manuscript.export_txt(db, novel)
+        tur = "text/plain; charset=utf-8"
+
+    return Response(
+        content=govde, media_type=tur,
+        headers={"Content-Disposition":
+                 f'attachment; filename="{ad}-{damga}.{format}"'},
     )
 
 
