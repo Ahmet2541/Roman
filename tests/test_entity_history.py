@@ -113,3 +113,19 @@ def test_restoring_deleted_entity_returns_404(client, headers):
 
     r = client.post(f"/entity-history/{history[0]['id']}/restore", headers=headers)
     assert r.status_code == 404
+
+
+def test_lifespan_changes_are_tracked(client, headers):
+    """Varoluş tarihini kaydırmak BÜTÜN sahnelerin geçerliliğini değiştirir -
+    geri dönülemeyen bir değişiklik olmamalı."""
+    k = client.post("/characters/", json={
+        "name": "Vicdan", "var_olus": "28 Haziran 2030"}, headers=headers).json()
+    client.put(f"/characters/{k['id']}", json={
+        "name": "Vicdan", "var_olus": "1 Temmuz 2030", "yok_olus": "9 Temmuz 2030"},
+        headers=headers)
+
+    gecmis = client.get(f"/entity-history/character/{k['id']}", headers=headers).json()
+    alanlar = {x["field_name"] for x in gecmis}
+    assert "var_olus" in alanlar, "varoluş değişikliği izlenmedi"
+    eski = [x for x in gecmis if x["field_name"] == "var_olus"][0]
+    assert eski["old_value"] == "28 Haziran 2030", "eski değer saklanmadı"

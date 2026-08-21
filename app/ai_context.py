@@ -332,6 +332,13 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
             aralik = " – ".join(x for x in (getattr(record, "var_olus", ""),
                                             getattr(record, "yok_olus", "")) if x)
             blocks.append(f"Varoluş: {aralik}")
+        # TAKMA ADLAR: şimdiye kadar yalnızca anma tespitinde kullanılıyordu,
+        # modele hiç gitmiyordu. Oysa model "Vicdan'a Ayna da deniyor"
+        # bilgisini bilmezse ne o adı kullanabilir ne de metinde geçtiğinde
+        # aynı kişi olduğunu anlar.
+        _takma = [a for a in (getattr(record, "aliases", None) or []) if str(a).strip()]
+        if _takma:
+            blocks.append("Ayrıca şöyle anılır: " + ", ".join(str(a) for a in _takma))
         if record.description:
             blocks.append(f"Özet: {record.description}")
         if getattr(record, "notes", ""):

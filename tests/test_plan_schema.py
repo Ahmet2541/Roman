@@ -1299,3 +1299,40 @@ def test_lifespan_not_added_to_factions_or_terms(client, headers):
     r = client.post("/factions/", json={"name": "Grup", "var_olus": "2030"}, headers=headers)
     assert r.status_code in (200, 201)
     assert "var_olus" not in r.json()
+
+
+def test_aliases_reach_the_context(client, headers):
+    """Takma adlar yalnızca anma tespitinde kullanılıyordu. Model
+    "Vicdan'a Ayna da deniyor" bilgisini bilmezse o adı kullanamaz ve
+    metinde geçtiğinde aynı kişi olduğunu anlamaz."""
+    k = client.post("/characters/", json={
+        "name": "İhtiyar Teknisyen", "description": "Elektronikçi.",
+        "aliases": ["usta", "ihtiyar"]}, headers=headers).json()
+    client.post("/chapters/", json={"number": 1, "title": "S"}, headers=headers)
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [{"entity_type": "character", "entity_id": k["id"]}],
+        "chapter_number": 1}, headers=headers).json()["context"]
+    assert "Ayrıca şöyle anılır: usta, ihtiyar" in ctx
+
+
+def test_meta_never_reaches_context_even_in_hidden_mode(client, headers):
+    """Meta SADECE yazar içindir - alt-metin modu açıkken bile gitmemeli."""
+    k = client.post("/characters/", json={
+        "name": "Vicdan", "description": "x",
+        "sections": {"meta": "Sembol: adalet terazisi.", "gizli": "İntikam peşinde."}},
+        headers=headers).json()
+    client.post("/chapters/", json={"number": 1, "title": "S"}, headers=headers)
+    ref = [{"entity_type": "character", "entity_id": k["id"]}]
+    for gizli in (False, True):
+        ctx = client.post("/ai/context-preview", json={
+            "selected_entities": ref, "chapter_number": 1,
+            "include_hidden": gizli}, headers=headers).json()["context"]
+        assert "adalet terazisi" not in ctx, f"meta sızdı (include_hidden={gizli})"
+    # Gizli katman ise SADECE alt-metin modunda gitmeli
+    kapali = client.post("/ai/context-preview", json={
+        "selected_entities": ref, "chapter_number": 1}, headers=headers).json()["context"]
+    acik = client.post("/ai/context-preview", json={
+        "selected_entities": ref, "chapter_number": 1,
+        "include_hidden": True}, headers=headers).json()["context"]
+    assert "İntikam peşinde." not in kapali
+    assert "İntikam peşinde." in acik

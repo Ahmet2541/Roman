@@ -14,7 +14,12 @@ from ..novel_context import get_universe_id
 # kaydedilir. title/description/notes serbest metin; sections/aliases/tags
 # dict/liste; status düz bir seçenek ama yine de yanlışlıkla "öldü" yapılıp
 # geri alınamayan bir durum olmasın diye dahil edildi.
-_SNAPSHOT_FIELDS = {"title", "description", "notes", "sections", "aliases", "tags", "status"}
+# VAROLUŞ ARALIĞI da izlenir: bir varlığın var oluş tarihini kaydırmak
+# BÜTÜN sahnelerin geçerliliğini değiştirir ("Vicdan 28 Haziran'da mı
+# 1 Temmuz'da mı doğdu" sorusu, hangi sahnede bulunabileceğini belirler).
+# Geri dönülemeyen bir değişiklik olmamalı.
+_SNAPSHOT_FIELDS = {"title", "description", "notes", "sections", "aliases",
+                    "tags", "status", "var_olus", "yok_olus"}
 
 
 def make_crud_router(

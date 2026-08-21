@@ -271,6 +271,7 @@ async function toggleProgressionPanel(entityType, entityId) {
 
 const FIELD_LABELS_TR = {
   title: 'Başlık', description: 'Açıklama', notes: 'Notlar', sections: 'Derin Profil',
+  var_olus: 'Varoluş başlangıcı', yok_olus: 'Varoluş sonu',
   aliases: 'Alternatif İsimler', tags: 'Etiketler', status: 'Durum',
 };
 
