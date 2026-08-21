@@ -218,8 +218,8 @@ def export_matrices(
     ÖNEMLİ: bu yol /{matrix_id} kalıbından ÖNCE tanımlı olmalı - sonra
     gelirse FastAPI "export" kelimesini matris kimliği sanar ve 422 döner.
     """
-    if format not in ("json", "md"):
-        raise HTTPException(400, "format 'json' veya 'md' olmalı")
+    if format not in ("json", "md", "docx"):
+        raise HTTPException(400, "format 'json', 'md' veya 'docx' olmalı")
     q = db.query(models.PlanMatrix).filter(models.PlanMatrix.novel_id == novel_id)
     if matrix_id is not None:
         q = q.filter(models.PlanMatrix.id == matrix_id)
@@ -228,7 +228,11 @@ def export_matrices(
         raise HTTPException(404, "Dışa aktarılacak matris yok")
 
     damga = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H%M")
-    if format == "md":
+    if format == "docx":
+        govde = plan_audit.export_docx(db, matrisler, novel_id)
+        tur, uzanti = ("application/vnd.openxmlformats-officedocument"
+                       ".wordprocessingml.document"), "docx"
+    elif format == "md":
         govde = plan_audit.export_markdown(db, matrisler, novel_id)
         tur, uzanti = "text/markdown; charset=utf-8", "md"
     else:

@@ -1112,3 +1112,94 @@ def test_undated_chapters_are_not_filtered(client, headers):
     ctx = client.post("/ai/context-preview", json={
         "selected_entities": [], "chapter_number": 2}, headers=headers).json()["context"]
     assert "Zamanı belirsiz bir sahne." in ctx
+
+
+def test_export_docx_is_a_real_word_file(client, headers):
+    """Word dökümü gerçek bir .docx olmalı ve plan içeriğini taşımalı."""
+    from io import BytesIO
+    from docx import Document
+
+    _dolu_matris(client, headers)
+    r = client.get("/matrix/export?format=docx", headers=headers)
+    assert r.status_code == 200
+    assert "wordprocessingml" in r.headers["content-type"]
+    assert ".docx" in r.headers["content-disposition"]
+
+    belge = Document(BytesIO(r.content))
+    metinler = [p.text for p in belge.paragraphs]
+    tumu = "\n".join(metinler)
+    assert "Plan Matrisleri" in tumu
+    assert "TUR 1" in tumu and "1. Giriş" in tumu
+    assert "ÇÖZÜN" in tumu                    # tur mirası
+    assert "20 dk" in tumu                    # parça mirası
+    assert "YAZIM KISITLARI" in tumu
+    assert "Sorgu başlar." in tumu            # hücre planı
+    assert "Bölüm 1" in tumu                  # bölüm bağı
+
+    # Başlıklar GERÇEK Word başlığı olmalı - belge içi gezinme çalışsın
+    basliklar = [p.style.name for p in belge.paragraphs if p.style.name.startswith("Heading")]
+    assert basliklar, "hiç Word başlığı yok"
+
+
+def test_export_docx_marks_empty_cells(client, headers):
+    """Boş kesişim basılı planda da görünmeli."""
+    from io import BytesIO
+    from docx import Document
+
+    m = client.post("/matrix/", json={
+        "name": "T", "columns": [{"label": "Tur 1"}],
+        "rows": [{"label": "S1"}, {"label": "S2"}]}, headers=headers).json()
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "Dolu sahne."}}, headers=headers)
+
+    r = client.get(f"/matrix/export?format=docx&matrix_id={m['id']}", headers=headers)
+    tumu = "\n".join(p.text for p in Document(BytesIO(r.content)).paragraphs)
+    assert "Dolu sahne." in tumu
+    assert "(boş)" in tumu
+
+
+def test_export_rejects_unknown_format(client, headers):
+    _dolu_matris(client, headers)
+    r = client.get("/matrix/export?format=pdf", headers=headers)
+    assert r.status_code == 400
+    assert "docx" in r.json()["detail"]
+
+
+def test_human_exports_strip_ai_directives(client, headers):
+    """content MODELE giden metindir: SINIRLAR bloğu, 'sahne BU AN'da
+    geçer' uyarısı, hedef uzunluğun tarifi hep modele söylenmiş şeyler.
+    Basılı planda bunlar gürültü - yazar kendi planını okumak ister."""
+    from io import BytesIO
+    from docx import Document
+
+    m = _matris(client, headers)
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "Sorgu.", "odak": "mendil",
+                 "zaman": {"tarih": "28 Haziran 2030", "saat": "13:30", "tip": "NOKTA"},
+                 "nesneler": [{"ad": "mendil"}, {"ad": "şişe"}]},
+    }, headers=headers)
+
+    md = client.get("/matrix/export?format=md", headers=headers).content.decode("utf-8")
+    dx = "\n".join(p.text for p in Document(
+        BytesIO(client.get("/matrix/export?format=docx", headers=headers).content)).paragraphs)
+
+    for cikti, ad in ((md, "markdown"), (dx, "docx")):
+        assert "SINIRLAR" not in cikti, f"{ad}: AI yönergesi sızdı"
+        assert "sahne BU AN'da geçer" not in cikti, f"{ad}: zaman uyarısı sızdı"
+        assert "betimleme SADECE" not in cikti, f"{ad}: odak uyarısı sızdı"
+        # Bilgi KALMALI - sadece yönerge kuyruğu kesiliyor
+        assert "28 Haziran 2030 13:30" in cikti, f"{ad}: zaman bilgisi kayboldu"
+        assert "ODAK: mendil" in cikti, f"{ad}: odak kayboldu"
+        assert "HEDEF UZUNLUK: NORMAL" in cikti, f"{ad}: uzunluk etiketi kayboldu"
+
+
+def test_ai_context_still_has_the_directives(client, headers):
+    """Temizlik SADECE okunur çıktılarda - modele giden metin dokunulmaz."""
+    m = _matris(client, headers)
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "x", "odak": "mendil"}}, headers=headers)
+    assert "SINIRLAR" in r.json()["content"]
+    assert "betimleme SADECE" in r.json()["content"]

@@ -20,6 +20,32 @@ from . import models
 from . import plan_schema
 
 
+def insan_metni(content: str) -> str:
+    """Plan metnini İNSAN için temizler: AI'ya yönelik yönergeleri atar.
+
+    content, modele giden metindir - içinde SINIRLAR bloğu, "sahne BU AN'da
+    geçer" uyarısı, hedef uzunluğun tarifi gibi MODELE söylenen şeyler var.
+    Basılı bir planda bunlar gürültüdür; yazar kendi planını okumak ister,
+    modele verilen talimatı değil.
+    """
+    if not content:
+        return ""
+    satirlar = []
+    for satir in content.split("\n"):
+        # SINIRLAR bloğu ve altındaki maddeler tamamen çıkar.
+        if satir.startswith("SINIRLAR"):
+            break
+        # Uzun yönerge kuyruklarını kes, bilgiyi bırak.
+        if satir.startswith("ZAMAN:") and " — sahne BU AN" in satir:
+            satir = satir.split(" — sahne BU AN")[0]
+        elif satir.startswith("ODAK:") and " — betimleme" in satir:
+            satir = satir.split(" — betimleme")[0]
+        elif satir.startswith("HEDEF UZUNLUK:"):
+            satir = satir.split(".")[0]
+        satirlar.append(satir)
+    return "\n".join(satirlar).rstrip()
+
+
 def _kolon_basligi(col) -> str:
     tur = plan_schema.normalize_meta(getattr(col, "tur_data", None), plan_schema.TUR_ALANLARI)
     dolu = [(etiket, tur[key]) for key, etiket, _ in plan_schema.TUR_ALANLARI if tur[key]]
@@ -276,7 +302,7 @@ def export_markdown(db, matrisler, novel_id: int) -> str:
             p.append("")
             for row in m.rows:
                 cell = hucre_map.get((col.id, row.id))
-                metin = (cell.content or "").strip() if cell else ""
+                metin = insan_metni((cell.content or "").strip() if cell else "")
                 parca = plan_schema.normalize_meta(
                     getattr(row, "parca_data", None), plan_schema.PARCA_ALANLARI)
                 ek = " · ".join(f"{e}: {parca[k]}"
@@ -342,3 +368,93 @@ def paralellik_bulgulari(columns, rows, cells) -> list[str]:
                 f"ölçüde ({detay}) - paralel sahneler farklı boyda çıkar")
 
     return bulgular
+
+
+def export_docx(db, matrisler, novel_id: int) -> bytes:
+    """Word belgesi: yazdırmak, paylaşmak, üzerine elle not almak için.
+
+    Markdown dökümüyle aynı bilgiyi taşır ama BAŞLIK DÜZEYLERİ gerçek Word
+    başlıkları olduğu için belge içi gezinme ve içindekiler tablosu çalışır.
+    Boş hücreler de yazılır - hangi kesişimin doldurulmadığı basılı planda
+    da görünmeli.
+    """
+    from io import BytesIO
+    from docx import Document
+    from docx.shared import Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    belge = Document()
+
+    baslik = belge.add_heading("Plan Matrisleri", level=0)
+    baslik.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    for m in matrisler:
+        belge.add_heading(m.name, level=1)
+        cols_by_id = {c.id: c for c in m.columns}
+        hucre_map = {(c.column_id, c.row_id): c for c in m.cells}
+
+        for col in m.columns:
+            belge.add_heading(col.label, level=2)
+
+            tur = plan_schema.normalize_meta(
+                getattr(col, "tur_data", None), plan_schema.TUR_ALANLARI)
+            dolu = [(e, tur[k]) for k, e, _ in plan_schema.TUR_ALANLARI if tur[k]]
+            if dolu:
+                p = belge.add_paragraph()
+                r = p.add_run("TUR MİRASI: ")
+                r.bold = True
+                p.add_run(" · ".join(f"{e}: {v}" for e, v in dolu))
+                p.runs[-1].font.size = Pt(9)
+
+            for row in m.rows:
+                cell = hucre_map.get((col.id, row.id))
+                metin = insan_metni((cell.content or "").strip() if cell else "")
+
+                parca = plan_schema.normalize_meta(
+                    getattr(row, "parca_data", None), plan_schema.PARCA_ALANLARI)
+                ek = " · ".join(f"{e}: {parca[k]}"
+                                for k, e, _ in plan_schema.PARCA_ALANLARI if parca[k])
+                girinti = "    " if (row.kind or "main") == "sub" else ""
+                satir_basligi = f"{girinti}{row.label}"
+                if cell and cell.code:
+                    satir_basligi += f"  [{cell.code}]"
+                if cell and cell.chapter_id:
+                    ch = db.query(models.Chapter).filter(
+                        models.Chapter.id == cell.chapter_id).first()
+                    if ch:
+                        satir_basligi += f"  → Bölüm {ch.number}"
+                if ek:
+                    satir_basligi += f"  ({ek})"
+                belge.add_heading(satir_basligi, level=3)
+
+                kurallar = (row.instructions or "").strip()
+                if kurallar:
+                    p = belge.add_paragraph()
+                    r = p.add_run("YAZIM KISITLARI: ")
+                    r.bold = True
+                    p.add_run(kurallar)
+                    for run in p.runs:
+                        run.font.size = Pt(9)
+
+                if not metin:
+                    p = belge.add_paragraph("(boş)")
+                    p.runs[0].italic = True
+                    continue
+
+                # Plan satırları: "ETİKET: içerik" - etiket kalın olsun ki
+                # basılı sayfada göz satırları ayırt edebilsin.
+                for satir in metin.split("\n"):
+                    p = belge.add_paragraph()
+                    if ":" in satir and satir.split(":", 1)[0].isupper():
+                        etiket, icerik = satir.split(":", 1)
+                        r = p.add_run(f"{etiket}:")
+                        r.bold = True
+                        p.add_run(icerik)
+                    else:
+                        p.add_run(satir)
+                    for run in p.runs:
+                        run.font.size = Pt(10)
+
+    tampon = BytesIO()
+    belge.save(tampon)
+    return tampon.getvalue()

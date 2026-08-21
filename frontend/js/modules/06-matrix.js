@@ -1125,6 +1125,7 @@ async function openMatrixExport(m) {
         <select id="mExpFormat">
           <option value="json">JSON — tam veri (yedek, taşıma)</option>
           <option value="md">Markdown — okunur döküm</option>
+          <option value="docx">Word — yazdırmak, paylaşmak, not almak</option>
         </select>
       </div>
       <div class="form-actions">
