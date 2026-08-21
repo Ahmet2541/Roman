@@ -552,16 +552,39 @@ def generate_chapters(
 
     created_parts = created_chapters = linked = 0
     for col in m.columns:
+        # KOLON = KISIM ("Tur 1: Başkan"). Turun kendisi bir bölüm değil,
+        # bölümlerin şemsiyesi.
         db.add(models.Chapter(novel_id=novel_id, number=next_number, kind="part", title=col.label))
         next_number += 1
         created_parts += 1
         for row in m.rows:
+            cell = existing_cells.get((col.id, row.id))
+
+            # ALT SATIR = SAHNE, bölüm DEĞİL.
+            # El yazmasındaki yapı şu: "Tur 1" (kısım) → "1 Hologramdaki
+            # ip uçu (5 Dakika)" (bölüm) → içindeki numaralı sahneler.
+            # Alt satırlara da bölüm açmak o sahneleri fihriste ayrı
+            # girdiler yapıyor ve bölüm sayısını şişiriyordu. Bağsız
+            # kalmaları GEREKİYOR: bağlam katmanı, bir sütunda bağlı
+            # hücrenin altındaki bağsız hücreleri "BU BÖLÜMÜN SAHNELERİ"
+            # diye o bölüme ekliyor.
+            if (row.kind or "main") == "sub":
+                if not cell:
+                    db.add(models.MatrixCell(
+                        matrix_id=m.id, column_id=col.id, row_id=row.id,
+                        content="", chapter_id=None, code=_next_matrix_code(db, novel_id),
+                    ))
+                    db.flush()
+                elif not cell.code:
+                    cell.code = _next_matrix_code(db, novel_id)
+                    db.flush()
+                continue
+
             ch = models.Chapter(novel_id=novel_id, number=next_number, kind="chapter", title=row.label)
             db.add(ch)
             db.flush()  # id lazım
             next_number += 1
             created_chapters += 1
-            cell = existing_cells.get((col.id, row.id))
             if cell:
                 cell.chapter_id = ch.id
                 if not cell.code:

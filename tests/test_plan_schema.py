@@ -851,3 +851,58 @@ def test_index_trimming_actually_shrinks_context(client, headers):
     assert fihrist, "fihrist katmanı yok"
     # 15 bölüm x ~800 karakter budanmadan ~12.000 olurdu
     assert fihrist[0]["char_count"] < 6000, f"budama işe yaramadı: {fihrist[0]['char_count']}"
+
+
+# --- Fihrist üretimi: alt satırlar sahne, bölüm değil ----------------------
+
+def test_generate_chapters_treats_sub_rows_as_scenes(client, headers):
+    """El yazmasındaki yapı: Tur (kısım) → numaralı sahne (bölüm) →
+    içindeki beat'ler (sahne). Alt satırlara da bölüm açmak o beat'leri
+    fihriste ayrı girdi yapıp bölüm sayısını şişiriyordu."""
+    m = client.post("/matrix/", json={
+        "name": "Tur Yapısı", "columns": [{"label": "Tur 1"}],
+        "rows": [{"label": "1 Hologram", "kind": "main"}],
+    }, headers=headers).json()
+    for etiket in ("[0] ÇERÇEVE", "GÖRÜNTÜ 1", "GÖRÜNTÜ 2"):
+        client.post(f"/matrix/{m['id']}/rows", json={"label": etiket, "kind": "sub"}, headers=headers)
+    client.post(f"/matrix/{m['id']}/rows", json={"label": "2 Kamera", "kind": "main"}, headers=headers)
+
+    r = client.post(f"/matrix/{m['id']}/generate-chapters", headers=headers).json()
+    assert r["created_parts"] == 1, "kolon bir KISIM olmalı"
+    assert r["created_chapters"] == 2, f"sadece ana satırlar bölüm olmalı, {r['created_chapters']} açıldı"
+
+    full = client.get(f"/matrix/{m['id']}", headers=headers).json()
+    satir_kind = {x["id"]: x["kind"] for x in full["rows"]}
+    for c in full["cells"]:
+        if satir_kind[c["row_id"]] == "sub":
+            assert c["chapter_id"] is None, "alt satır bölüme bağlanmış"
+        else:
+            assert c["chapter_id"], "ana satır bölüme bağlanmamış"
+        assert c["code"], "her hücre MP kodu almalı"
+
+
+def test_sub_row_plans_reach_their_parent_chapter(client, headers):
+    """Bağsız alt sahneler, üstlerindeki bağlı bölümün bağlamına
+    'BU BÖLÜMÜN SAHNELERİ' olarak girmeli - zincirin ucu burası."""
+    m = client.post("/matrix/", json={
+        "name": "T", "columns": [{"label": "Tur 1"}],
+        "rows": [{"label": "1 Hologram", "kind": "main"}],
+    }, headers=headers).json()
+    client.post(f"/matrix/{m['id']}/rows", json={"label": "Alt sahne", "kind": "sub"}, headers=headers)
+    client.post(f"/matrix/{m['id']}/generate-chapters", headers=headers)
+
+    full = client.get(f"/matrix/{m['id']}", headers=headers).json()
+    col_id = full["columns"][0]["id"]
+    ana = [r for r in full["rows"] if r["kind"] != "sub"][0]
+    alt = [r for r in full["rows"] if r["kind"] == "sub"][0]
+    bagli = [c for c in full["cells"] if c["row_id"] == ana["id"]][0]
+
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": col_id, "row_id": ana["id"], "data": {"olay": "Ana sahne."}}, headers=headers)
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": col_id, "row_id": alt["id"], "data": {"olay": "Alt sahne buraya."}}, headers=headers)
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": bagli["chapter_number"]}, headers=headers).json()["context"]
+    assert "Ana sahne." in ctx
+    assert "Alt sahne buraya." in ctx, "bağsız alt sahne üst bölümün bağlamına girmedi"
