@@ -193,16 +193,44 @@ function selectNovelAndStart(novelId) {
   window.location.reload();
 }
 
+// "Oluştur" düğmesinin bağlanması TEK YERDE toplandı. Eskiden yalnızca
+// showNovelSelectScreen içindeydi; o da sadece hiç kitap yokken çalışıyor.
+// Kitap seçiliyken ekranı üst çubuktan açtığında (openSwitcher) düğmeye
+// hiçbir olay bağlanmıyordu - basınca sessizce hiçbir şey olmuyordu.
+// onclick kullanılıyor ki ekran birden çok kez açılınca olay ÇİFTLENMESİN
+// (addEventListener her açılışta bir tane daha eklerdi, ikinci açılışta
+// tek tıkla iki kitap oluşurdu).
+function bindCreateNovel() {
+  const btn = document.getElementById('createNovelBtn');
+  if (!btn) return;
+  btn.onclick = async () => {
+    const input = document.getElementById('newNovelName');
+    const name = (input?.value || '').trim();
+    const durum = document.getElementById('createNovelState');
+    if (!name) {
+      if (durum) durum.textContent = 'Önce bir kitap adı yaz.';
+      input?.focus();
+      return;
+    }
+    btn.disabled = true;
+    if (durum) durum.textContent = 'Oluşturuluyor…';
+    try {
+      const novel = await api.post('/novels/', { name });
+      selectNovelAndStart(novel.id);
+    } catch (err) {
+      // Eskiden hata sessizce yutuluyordu: istek başarısız olunca düğme
+      // ölü görünüyordu ve sebebi hiçbir yerde yazmıyordu.
+      if (durum) durum.textContent = '✕ ' + err.message;
+      else alert(err.message);
+      btn.disabled = false;
+    }
+  };
+}
+
 function showNovelSelectScreen() {
   el('novelSelectOverlay').style.display = 'flex';
   loadAndRenderNovelList();
-  el('createNovelBtn').addEventListener('click', async () => {
-    const input = document.getElementById('newNovelName');
-    const name = input.value.trim();
-    if (!name) return;
-    const novel = await api.post('/novels/', { name });
-    selectNovelAndStart(novel.id);
-  });
+  bindCreateNovel();
 }
 
 async function initApp() {
@@ -247,6 +275,7 @@ async function initApp() {
     const closeBtn = document.getElementById('closeNovelSelectBtn');
     closeBtn.style.display = '';  // aktif kitap varken vazgeçilebilir
     closeBtn.onclick = () => { el('novelSelectOverlay').style.display = 'none'; };
+    bindCreateNovel();   // bu yoldan açılışta da düğme çalışsın
     el('novelSelectOverlay').style.display = 'flex';
   };
   bar.addEventListener('click', openSwitcher);

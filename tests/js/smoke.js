@@ -496,4 +496,29 @@ test('duygu secici dugmeleri kendi stiliyle ve dort alanda var', () => {
   if (typeof duyguSeciciKapat !== 'function') throw new Error('duyguSeciciKapat yok');
 });
 
+// --- 23. YENİ SERİ OLUŞTUR düğmesi ---
+// Bağlama yalnızca showNovelSelectScreen içindeydi; o da sadece HİÇ kitap
+// yokken çalışıyor. Kitap seçiliyken ekranı üst çubuktan açınca düğmeye
+// hiçbir olay bağlanmıyor, basınca sessizce hiçbir şey olmuyordu.
+test('yeni seri olustur dugmesi her aciliş yolunda baglanir', () => {
+  const fs = require('fs');
+  const kaynak = fs.readFileSync(__dirname + '/../../frontend/js/modules/05-scans.js', 'utf8');
+  const html = fs.readFileSync(__dirname + '/../../frontend/index.html', 'utf8');
+
+  if (typeof bindCreateNovel !== 'function') throw new Error('bindCreateNovel yok');
+  // Her iki açılış yolunda da çağrılmalı
+  const cagri = (kaynak.match(/bindCreateNovel\(\)/g) || []).length;
+  if (cagri < 3) throw new Error(`bindCreateNovel az cagriliyor (${cagri})`);
+  // addEventListener DEĞİL onclick: ekran birden çok kez açılınca olay
+  // çiftlenmemeli, yoksa tek tıkla iki kitap oluşur
+  if (/createNovelBtn'\)\.addEventListener/.test(kaynak))
+    throw new Error('addEventListener kullanilmis - olay ciftlenir');
+  // Hata sessizce yutulmamalı
+  if (!/catch \(err\)/.test(kaynak.slice(kaynak.indexOf('function bindCreateNovel'),
+                                          kaynak.indexOf('function showNovelSelectScreen'))))
+    throw new Error('hata yakalama yok - dugme olu gorunur');
+  if (!html.includes('id="createNovelState"'))
+    throw new Error('hata mesaji icin alan yok');
+});
+
 Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));
