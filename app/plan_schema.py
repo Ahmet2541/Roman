@@ -306,7 +306,10 @@ SAPMA_KILIDI = """SINIRLAR (bu sahne için MUTLAK):
 - Bağlamdaki fihrist ve diğer bölüm özetleri GEÇMİŞİ ANLAMAN İÇİNDİR;
   oradaki olayları, kişileri ve imgeleri bu sahneye TAŞIMA.
 - Hedef uzunluğa ulaşmak için olay uydurma. Yetmiyorsa beat'leri
-  derinleştir: beden, ses, nesne, sessizlik, ritim."""
+  derinleştir: beden, ses, nesne, sessizlik, ritim.
+- ZAMAN ÇİZGİSİ: bu sahnede yalnızca bu ana kadar OLMUŞ şeyler bilinir.
+  Henüz gerçekleşmemiş olayları anlatma, ileride olacakları ima etme,
+  daha sonra ortaya çıkacak varlıkları çalışıyor/biliyor gösterme."""
 
 
 def render_cell(data: Any) -> str:
@@ -332,7 +335,11 @@ def render_cell(data: Any) -> str:
         if z["tip"]:
             gorunen = ZAMAN_TIPI_GORUNEN[z["tip"]]
             tip = f" ({gorunen}: {z['sayac']})" if z["sayac"] else f" ({gorunen})"
-        satirlar.append(f"ZAMAN: {zaman_parca or '—'}{tip}")
+        # ZAMAN da KISIT: "28 Haziran 13:30" yazılıyken model "güneşin son
+        # ışınları", "bu akşam" yazabiliyordu. Saat verilmişse günün
+        # saatiyle çelişen betimleme yapılamaz.
+        uyari = " — sahne BU AN'da geçer; günün saatiyle çelişen ışık, gölge ve zaman ifadesi kullanma." if z["saat"] else ""
+        satirlar.append(f"ZAMAN: {zaman_parca or '—'}{tip}{uyari}")
 
     if d["mekan"]:
         satirlar.append(f"MEKAN: {d['mekan']}")

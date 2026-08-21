@@ -947,3 +947,30 @@ def test_index_layer_declares_it_is_background_only(client, headers):
         "selected_entities": [], "chapter_number": 2}, headers=headers).json()["context"]
     assert "GEÇMİŞİ ANLAMAN İÇİNDİR" in ctx
     assert "sahneye" in ctx and "TAŞIMA" in ctx
+
+
+def test_zaman_is_a_constraint_when_clock_given(client, headers):
+    """Saat verilmişse günün saatiyle çelişen betimleme yasak - plan
+    13:30 derken model 'güneşin son ışınları' yazabiliyordu."""
+    m = _matris(client, headers)
+    ortak = {"column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"]}
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        **ortak, "data": {"olay": "x", "zaman": {"tarih": "28 Haziran 2030", "saat": "13:30",
+                                                 "tip": "NOKTA"}}}, headers=headers)
+    assert "sahne BU AN'da geçer" in r.json()["content"]
+    # Saat yoksa uyarı da olmamalı - gereksiz gürültü
+    r2 = client.put(f"/matrix/{m['id']}/cells", json={
+        **ortak, "data": {"olay": "x", "zaman": {"tarih": "üçüncü gün", "tip": "NOKTA"}}},
+        headers=headers)
+    assert "sahne BU AN'da geçer" not in r2.json()["content"]
+
+
+def test_plan_forbids_future_knowledge(client, headers):
+    """Vicdan aktif edilmeden 'kayıtları tarıyor' diye yazılıyordu."""
+    m = _matris(client, headers)
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "x"}}, headers=headers)
+    metin = r.json()["content"]
+    assert "ZAMAN ÇİZGİSİ" in metin
+    assert "Henüz gerçekleşmemiş olayları anlatma" in metin

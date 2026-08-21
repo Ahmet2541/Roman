@@ -719,6 +719,25 @@ def restore_paragraph_version(
     return paragraph
 
 
+def _paragraflari_yeniden_numarala(db: Session, chapter_id: int) -> None:
+    """Silme sonrası kalan paragrafları 1..N olarak yeniden numaralar.
+
+    Eskiden silinen numara BOŞLUK olarak kalıyordu ve yeni paragraf
+    "en büyük + 1" alıyordu: bütün paragrafları silsen bile bir sonraki
+    9'dan başlayabiliyordu. Paragraf numarası konumdur, kimlik değil -
+    sıranın sürekli olması gerekir.
+    """
+    kalanlar = (
+        db.query(models.Paragraph)
+        .filter(models.Paragraph.chapter_id == chapter_id)
+        .order_by(models.Paragraph.number)
+        .all()
+    )
+    for yeni_no, p in enumerate(kalanlar, start=1):
+        if p.number != yeni_no:
+            p.number = yeni_no
+
+
 @router.delete("/{chapter_id}/paragraphs/{number}", status_code=204)
 def delete_paragraph(
     chapter_id: int, number: int,
@@ -736,6 +755,8 @@ def delete_paragraph(
     if not paragraph:
         raise HTTPException(404, "Paragraf bulunamadı")
     db.delete(paragraph)
+    db.flush()
+    _paragraflari_yeniden_numarala(db, chapter_id)
     db.commit()
     return None
 

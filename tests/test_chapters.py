@@ -36,3 +36,23 @@ def test_empty_paragraph_text_rejected(client, headers):
     # Metin korundu
     guncel = client.get(f"/chapters/{ch['id']}", headers=headers).json()
     assert guncel["paragraphs"][0]["text"] == "Gerçek metin."
+
+
+def test_paragraph_numbers_are_compacted_after_delete(client, headers):
+    """Silinen numara BOŞLUK olarak kalıyordu: bütün paragrafları silsen
+    bile yeni paragraf 9'dan başlayabiliyordu. Numara konumdur, kimlik değil."""
+    ch = client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers).json()
+    for i in range(1, 5):
+        client.put(f"/chapters/{ch['id']}/paragraphs/{i}",
+                   json={"number": i, "text": f"Paragraf {i}"}, headers=headers)
+
+    # Ortadan sil -> kalanlar 1,2,3 olarak sıkışmalı
+    assert client.delete(f"/chapters/{ch['id']}/paragraphs/2", headers=headers).status_code == 204
+    kalan = client.get(f"/chapters/{ch['id']}", headers=headers).json()["paragraphs"]
+    assert [p["number"] for p in kalan] == [1, 2, 3], "silme sonrası boşluk kaldı"
+    assert [p["text"] for p in kalan] == ["Paragraf 1", "Paragraf 3", "Paragraf 4"]
+
+    # Hepsini sil -> bölüm gerçekten boşalmalı
+    for _ in range(3):
+        client.delete(f"/chapters/{ch['id']}/paragraphs/1", headers=headers)
+    assert client.get(f"/chapters/{ch['id']}", headers=headers).json()["paragraphs"] == []
