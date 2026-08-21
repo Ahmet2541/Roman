@@ -475,4 +475,25 @@ test('varlik tanima takma adlari ve kelime sinirini gozetir', () => {
   if (taraVarliklar('a', kayitlar).length !== 0) throw new Error('kisa metin tarandi');
 });
 
+// --- 22. DUYGU SEÇİCİ görünürlüğü ve bağlanması ---
+// Düğme silme (✕) stilini kullanıyordu: soluk, çerçevesiz, hover'da
+// KIRMIZI - hem görünmüyor hem "sil" gibi duruyordu.
+test('duygu secici dugmeleri kendi stiliyle ve dort alanda var', () => {
+  const fs = require('fs');
+  const kaynak = fs.readFileSync(__dirname + '/../../frontend/js/modules/06-matrix.js', 'utf8');
+  const css = fs.readFileSync(__dirname + '/../../frontend/css/style.css', 'utf8');
+
+  if (kaynak.includes('btn-icon-sm duygu-sec'))
+    throw new Error('secici hala silme dugmesi stilini kullaniyor');
+  const sayi = (kaynak.match(/class="duygu-sec"/g) || []).length;
+  if (sayi !== 4) throw new Error(`4 duygu alani beklenirdi, ${sayi} bulundu`);
+  if (!/\.duygu-sec\s*\{/.test(css)) throw new Error('duygu-sec stili tanimli degil');
+
+  // Gruplar tam ve düz liste onlardan türetilmiş olmalı
+  const gruplar = global.DUYGU_GRUPLARI || global.window.DUYGU_GRUPLARI;
+  if (!gruplar || gruplar.length < 8) throw new Error('duygu gruplari eksik');
+  if (typeof duyguSeciciAc !== 'function') throw new Error('duyguSeciciAc yok');
+  if (typeof duyguSeciciKapat !== 'function') throw new Error('duyguSeciciKapat yok');
+});
+
 Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));

@@ -570,3 +570,18 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
   background: transparent; color: var(--text-muted);
   border: 1px dashed var(--border); 
 }
+
+
+/* --- GRUPLU DUYGU SEÇİCİ ---------------------------------------------------
+   Düğme, btn-icon-sm (silme ✕ stili) kullanıyordu: çerçevesiz, soluk gri,
+   üstüne gelince KIRMIZI. Hem görünmüyor hem de "sil" gibi duruyordu.
+   Kendi stili: girdiye bitişik, çerçeveli, yaldız vurgulu. */
+.duygu-sec {
+  background: var(--paper-dim); border: 1px solid var(--border);
+  color: var(--text-ink); cursor: pointer; font-size: 12px;
+  padding: 0 7px; border-radius: 4px; flex: 0 0 auto; line-height: 1.9;
+}
+.duygu-sec:hover { background: var(--gold); border-color: var(--gold); color: var(--paper); }
+
+#duyguSecici .ds-grup:hover { background: var(--paper-dim); }
+#duyguSecici .ds-ton:hover { background: var(--gold); color: var(--paper); }

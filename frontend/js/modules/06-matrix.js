@@ -378,8 +378,6 @@ function duyguSeciciAc(hedefInput, dugme) {
       g.addEventListener('click', () => ciz(+g.dataset.i));
     });
     pencere.querySelectorAll('.ds-ton').forEach(t => {
-      t.addEventListener('mouseenter', () => { t.style.background = 'var(--paper-dim)'; });
-      t.addEventListener('mouseleave', () => { t.style.background = ''; });
       t.addEventListener('click', () => {
         hedefInput.value = t.dataset.ton;
         hedefInput.dispatchEvent(new Event('input'));
@@ -643,12 +641,12 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
         <div class="field" style="flex:1;"><label>ORTAM <span style="font-weight:400;color:var(--text-muted);">(odanın hâli)</span></label>
           <div style="display:flex;gap:2px;">
             <input type="text" id="mcOrtamA" list="mcDuyguList" value="${escapeHtml(ortam.baslangic || '')}" placeholder="endişe" autocomplete="off" style="flex:1;min-width:0;">
-            <button type="button" class="btn-icon-sm duygu-sec" data-hedef="mcOrtamA" title="Duygu listesinden seç">▾</button>
+            <button type="button" class="duygu-sec" data-hedef="mcOrtamA" title="Duygu listesinden seç">▾</button>
           </div></div>
         <div class="field" style="flex:1;"><label>→ (dönüyorsa)</label>
           <div style="display:flex;gap:2px;">
             <input type="text" id="mcOrtamB" list="mcDuyguList" value="${escapeHtml(ortam.bitis || '')}" placeholder="korku" autocomplete="off" style="flex:1;min-width:0;">
-            <button type="button" class="btn-icon-sm duygu-sec" data-hedef="mcOrtamB" title="Duygu listesinden seç">▾</button>
+            <button type="button" class="duygu-sec" data-hedef="mcOrtamB" title="Duygu listesinden seç">▾</button>
           </div></div>
       </div>
       <div style="font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">KİŞİLER <span style="font-weight:400;letter-spacing:0;">(her kişi KENDİ duygu yayını taşır)</span></div>
@@ -817,11 +815,11 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
         </div>
         <div style="flex:1;min-width:90px;display:flex;gap:2px;">
           <input type="text" class="mc-k-a" data-i="${i}" list="mcDuyguList" value="${escapeHtml(k.duygu.baslangic)}" placeholder="umut" autocomplete="off" style="flex:1;min-width:0;">
-          <button type="button" class="btn-icon-sm duygu-sec" data-hedef=".mc-k-a[data-i='${i}']" title="Duygu listesinden seç">▾</button>
+          <button type="button" class="duygu-sec" data-hedef=".mc-k-a[data-i='${i}']" title="Duygu listesinden seç">▾</button>
         </div>
         <div style="flex:1;min-width:90px;display:flex;gap:2px;">
           <input type="text" class="mc-k-b" data-i="${i}" list="mcDuyguList" value="${escapeHtml(k.duygu.bitis)}" placeholder="gurur" autocomplete="off" style="flex:1;min-width:0;">
-          <button type="button" class="btn-icon-sm duygu-sec" data-hedef=".mc-k-b[data-i='${i}']" title="Duygu listesinden seç">▾</button>
+          <button type="button" class="duygu-sec" data-hedef=".mc-k-b[data-i='${i}']" title="Duygu listesinden seç">▾</button>
         </div>
         <button class="btn-icon-sm mc-k-sil" data-i="${i}" title="Kişiyi çıkar" style="flex:0 0 auto;">✕</button>
       </div>`;
