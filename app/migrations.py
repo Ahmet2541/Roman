@@ -33,6 +33,10 @@ def run_startup_migrations(engine):
     try:
         _add_missing_columns(engine)
         _add_sections_columns(engine)
+        # ORM KULLANAN ADIMLARDAN ÖNCE: modelde var olan bir sütun tabloda
+        # yoksa, aradaki her ORM sorgusu "no such column" ile patlar.
+        # Sütun ekleyen göçler her zaman önce gelmeli.
+        _upgrade_entity_lifespan(engine)
         _add_universe_columns(engine)
         _backfill_default_novel(engine)
         _backfill_universes(engine)
@@ -362,6 +366,24 @@ def _merge_legacy_sections(engine):
         if moved:
             db.commit()
             logger.info("Göç: %s kayıtta eski derin profil başlıkları yeni yapıya taşındı", moved)
+
+
+def _upgrade_entity_lifespan(engine):
+    """VAROLUŞ ARALIĞI: kişi/mekan/nesne ne zaman var oldu, ne zaman yok
+    oldu. Kronolojik denetimin temeli - sahne tarihinde henüz var olmayan
+    bir varlığın profili modele gitmemeli ("Vicdan aktifleşmeden kayıtları
+    tarıyor" hatası bu eksiklikten doğuyordu)."""
+    inspector = inspect(engine)
+    existing = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for tablo in ("characters", "places", "objects"):
+            if tablo not in existing:
+                continue
+            cols = {c["name"] for c in inspector.get_columns(tablo)}
+            for alan in ("var_olus", "yok_olus"):
+                if alan not in cols:
+                    logger.info("Göç: %s.%s (varoluş aralığı) ekleniyor", tablo, alan)
+                    conn.execute(text(f"ALTER TABLE {tablo} ADD COLUMN {alan} TEXT"))
 
 
 def _upgrade_matrix_tables(engine):

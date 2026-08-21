@@ -284,7 +284,31 @@ def build_index_layer(db: Session, universe_id: int, current_novel_id: int,
 # + bu varlıkların geçtiği en alakalı geçmiş paragraflar.
 # ---------------------------------------------------------------------------
 
-def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3, instruction_text: str = "", include_hidden: bool = False) -> str:
+def _varolus_notu(record, sahne_zamani) -> str:
+    """Varlık, sahnenin geçtiği anda VAR MI?
+
+    "Vicdan aktifleşmeden kayıtları tarıyor" bir üslup hatası değil VARLIK
+    hatasıydı. Sistem bunu bilemiyordu, sadece "geleceği anlatma" diye
+    rica ediyordu. Artık veri: sahne tarihi varoluş aralığının dışındaysa
+    profil açık bir uyarıyla gider.
+
+    Tarihi çözülemeyen varlık ("yedi yıl önce") denetimin dışında kalır -
+    uydurma tarihle yanlış hüküm vermektense susmak doğru.
+    """
+    if sahne_zamani is None:
+        return ""
+    var = story_time.parse_tarih(getattr(record, "var_olus", "") or "")
+    yok = story_time.parse_tarih(getattr(record, "yok_olus", "") or "")
+    if var is not None and sahne_zamani < var:
+        return (f"⚠ BU SAHNEDE HENÜZ YOK ({record.var_olus} tarihinde var oluyor). "
+                f"Sahnede bulunamaz, adı anılamaz, eylemi anlatılamaz.")
+    if yok is not None and sahne_zamani > yok:
+        return (f"⚠ BU SAHNEDE ARTIK YOK ({record.yok_olus} tarihinde yok oldu). "
+                f"Sahnede canlı/mevcut gösterilemez; yalnızca hatırlanabilir.")
+    return ""
+
+
+def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3, instruction_text: str = "", include_hidden: bool = False, sahne_zamani: int | None = None) -> str:
     if not selected_entities:
         return ""
 
@@ -299,6 +323,15 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
 
         label = ENTITY_LABELS_TR.get(ref.entity_type, ref.entity_type.upper())
         blocks.append(f"\n[{label}] {record.name} (id: {record.id}, tip: {ref.entity_type})")
+        # Varoluş uyarısı ÖZETTEN ÖNCE: model kaydı okumaya başlamadan
+        # önce sahnede olup olmadığını bilmeli.
+        uyari = _varolus_notu(record, sahne_zamani)
+        if uyari:
+            blocks.append(uyari)
+        elif getattr(record, "var_olus", "") or getattr(record, "yok_olus", ""):
+            aralik = " – ".join(x for x in (getattr(record, "var_olus", ""),
+                                            getattr(record, "yok_olus", "")) if x)
+            blocks.append(f"Varoluş: {aralik}")
         if record.description:
             blocks.append(f"Özet: {record.description}")
         if getattr(record, "notes", ""):
@@ -863,7 +896,19 @@ def build_context(
     for r in plan_refs:
         if (r.entity_type, r.entity_id) not in mevcut:
             birlesik.append(r)
-    dynamic = build_dynamic_layer(db, universe_id, birlesik, instruction_text=instruction_text, include_hidden=include_hidden)
+    # Sahnenin hikâye zamanı: varlık yokluk denetiminin ölçüsü.
+    try:
+        sahne_zamani = None
+        if chapter_number is not None:
+            _ch = (db.query(models.Chapter)
+                   .filter(models.Chapter.novel_id == novel_id,
+                           models.Chapter.number == chapter_number).first())
+            if _ch is not None:
+                sahne_zamani = story_time.bolum_zamanlari(db, novel_id).get(_ch.id)
+    except Exception:
+        logger.exception("Sahne zamanı okunamadı, varlık denetimi atlanıyor")
+        sahne_zamani = None
+    dynamic = build_dynamic_layer(db, universe_id, birlesik, instruction_text=instruction_text, include_hidden=include_hidden, sahne_zamani=sahne_zamani)
     # KATMAN SIRASI - plan EN SONA alındı.
     # Plan, modelin en çok uyması gereken katman ama on beşin sekizincisi
     # olarak yığının ortasında kalıyordu; fihrist ise ikinci sıradaydı.

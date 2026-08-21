@@ -81,6 +81,16 @@ class Character(Base):
     description = Column(EncryptedString, default="")
     notes = Column(EncryptedString, default="")
     status = Column(String(30), default="aktif")  # aktif | pasif | öldü - içerik değil, düz kalabilir
+    # VAROLUŞ ARALIĞI - kronolojik denetimin temeli.
+    # "Vicdan aktifleşmeden kayıtları tarıyor" bir üslup hatası değil
+    # VARLIK hatasıydı: o anda henüz yoktu. Sistem bunu bilemiyordu,
+    # sadece "geleceği anlatma" diye rica ediyordu. Artık veri:
+    # sahne tarihi bu aralığın dışındaysa profil "HENÜZ YOK" / "ARTIK
+    # YOK" etiketiyle gider ya da hiç gitmez.
+    # Serbest metin: "28 Haziran 2030" çözülür ve süzmede kullanılır,
+    # "yedi yıl önce" çözülmez - o zaman süzmenin dışında kalır.
+    var_olus = Column(EncryptedString, default="")   # doğum
+    yok_olus = Column(EncryptedString, default="")   # ölüm
     # Konuya göre bölünmüş derin profil: duygusal_yapi, fiziksel_yapi,
     # gecmis, kariyer, iliskiler, konusma_tarzi, meta (bkz. app/sections.py).
     # description/notes kısa/genel bilgi için kalmaya devam ediyor - sections
@@ -121,6 +131,16 @@ class Place(Base):
     aliases = Column(EncryptedJSON(default_empty=list), default=list)  # bkz. Character.aliases
     description = Column(EncryptedString, default="")
     notes = Column(EncryptedString, default="")
+    # VAROLUŞ ARALIĞI - kronolojik denetimin temeli.
+    # "Vicdan aktifleşmeden kayıtları tarıyor" bir üslup hatası değil
+    # VARLIK hatasıydı: o anda henüz yoktu. Sistem bunu bilemiyordu,
+    # sadece "geleceği anlatma" diye rica ediyordu. Artık veri:
+    # sahne tarihi bu aralığın dışındaysa profil "HENÜZ YOK" / "ARTIK
+    # YOK" etiketiyle gider ya da hiç gitmez.
+    # Serbest metin: "28 Haziran 2030" çözülür ve süzmede kullanılır,
+    # "yedi yıl önce" çözülmez - o zaman süzmenin dışında kalır.
+    var_olus = Column(EncryptedString, default="")   # yapım / kuruluş
+    yok_olus = Column(EncryptedString, default="")   # yıkım / terk
     # bkz. Character.sections yorumu - aynı mantık, mekan için farklı bölüm
     # kümesiyle (fiziksel_yapi, atmosfer, gecmis, kurallar, baglantilar,
     # zamansal_degisim, meta).
@@ -199,6 +219,16 @@ class Object(Base):
     aliases = Column(EncryptedJSON(default_empty=list), default=list)  # "Kül Şişesi"ne "şişe" da denebilir - mention tespiti bunlardan beslenir
     description = Column(EncryptedString, default="")
     notes = Column(EncryptedString, default="")
+    # VAROLUŞ ARALIĞI - kronolojik denetimin temeli.
+    # "Vicdan aktifleşmeden kayıtları tarıyor" bir üslup hatası değil
+    # VARLIK hatasıydı: o anda henüz yoktu. Sistem bunu bilemiyordu,
+    # sadece "geleceği anlatma" diye rica ediyordu. Artık veri:
+    # sahne tarihi bu aralığın dışındaysa profil "HENÜZ YOK" / "ARTIK
+    # YOK" etiketiyle gider ya da hiç gitmez.
+    # Serbest metin: "28 Haziran 2030" çözülür ve süzmede kullanılır,
+    # "yedi yıl önce" çözülmez - o zaman süzmenin dışında kalır.
+    var_olus = Column(EncryptedString, default="")   # yapım / ortaya çıkış
+    yok_olus = Column(EncryptedString, default="")   # kayboluş / yok oluş
     sections = Column(EncryptedJSON, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

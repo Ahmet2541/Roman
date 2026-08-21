@@ -484,6 +484,14 @@ async function showEntityForm(type, item) {
         </select></div>` : ''}
       ${sectionsHtml}
       ${entityRulesHtml}${rulesHintHtml}
+      ${cfg.hasLifespan ? `<div style="display:flex;gap:6px;margin-top:10px;">
+        <div class="field" style="flex:1;margin:0;"><label>${cfg.lifespanLabels[0]}
+          <span style="font-weight:400;color:var(--text-muted);font-size:11.5px;">(kronoloji denetimi)</span></label>
+          <input type="text" id="f_var_olus" value="${escapeHtml(isEdit ? (item.var_olus || '') : '')}" placeholder="28 Haziran 2030"></div>
+        <div class="field" style="flex:1;margin:0;"><label>${cfg.lifespanLabels[1]}</label>
+          <input type="text" id="f_yok_olus" value="${escapeHtml(isEdit ? (item.yok_olus || '') : '')}" placeholder="(boşsa hâlâ var)"></div>
+      </div>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">Sahne bu aralığın dışındaysa AI'ya "bu sahnede henüz yok / artık yok" uyarısı gider. Çözülemeyen ifadeler ("yedi yıl önce") denetime girmez.</div>` : ''}
       ${cfg.isRule ? '' : `<div class="field" style="margin-top:10px;"><label>Notlar <span style="font-weight:400;color:var(--text-muted);font-size:11.5px;">(serbest not - kişi seçiliyken AI'ya gider)</span></label><textarea id="f_notes">${escapeHtml(notesValue)}</textarea></div>`}
       <div class="form-actions">
         <button class="btn btn-primary" id="saveBtn">${isEdit ? 'Güncelle' : 'Kaydet'}</button>
@@ -520,6 +528,10 @@ async function showEntityForm(type, item) {
     payload[titleField] = el('f_title').value.trim();
     payload.description = el('f_desc').value;
     if (!cfg.isRule) payload.notes = el('f_notes').value;
+    if (cfg.hasLifespan) {
+      payload.var_olus = el('f_var_olus').value.trim();
+      payload.yok_olus = el('f_yok_olus').value.trim();
+    }
     if (cfg.hasStatus) payload.status = el('f_status').value;
     if (cfg.hasAliases) {
       payload.aliases = el('f_aliases').value.split(',').map(s => s.trim()).filter(Boolean);

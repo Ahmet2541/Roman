@@ -1203,3 +1203,99 @@ def test_ai_context_still_has_the_directives(client, headers):
         "data": {"olay": "x", "odak": "mendil"}}, headers=headers)
     assert "SINIRLAR" in r.json()["content"]
     assert "betimleme SADECE" in r.json()["content"]
+
+
+# --- Varoluş aralığı: varlık bu sahnede var mı? ---------------------------
+
+def _zamanli_bolum(client, headers, tarih, saat=""):
+    """Belirli bir hikâye zamanına bağlı bölüm kurar."""
+    ch = client.post("/chapters/", json={"number": 1, "title": "Sahne"}, headers=headers).json()
+    m = _matris(client, headers)
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "chapter_id": ch["id"],
+        "data": {"olay": "x", "zaman": {"tarih": tarih, "saat": saat, "tip": "NOKTA"}},
+    }, headers=headers)
+    return ch
+
+
+def test_entity_not_yet_existing_is_flagged(client, headers):
+    """'Vicdan aktifleşmeden kayıtları tarıyor' bir ÜSLUP hatası değil
+    VARLIK hatasıydı - o anda henüz yoktu."""
+    v = client.post("/characters/", json={
+        "name": "Vicdan", "description": "Yapay zekâ.",
+        "var_olus": "28 Haziran 2030"}, headers=headers).json()
+    _zamanli_bolum(client, headers, "20 Haziran 2030")
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [{"entity_type": "character", "entity_id": v["id"]}],
+        "chapter_number": 1}, headers=headers).json()["context"]
+    assert "HENÜZ YOK" in ctx
+    assert "adı anılamaz" in ctx
+
+
+def test_entity_already_gone_is_flagged(client, headers):
+    k = client.post("/characters/", json={
+        "name": "Leyla", "description": "Eşi.",
+        "yok_olus": "1 Ocak 2027"}, headers=headers).json()
+    _zamanli_bolum(client, headers, "28 Haziran 2030")
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [{"entity_type": "character", "entity_id": k["id"]}],
+        "chapter_number": 1}, headers=headers).json()["context"]
+    assert "ARTIK YOK" in ctx
+    assert "yalnızca hatırlanabilir" in ctx
+
+
+def test_entity_within_lifespan_is_not_flagged(client, headers):
+    """Aralığın içindeyse uyarı YOK - sadece bilgi olarak yazılır."""
+    k = client.post("/characters/", json={
+        "name": "Genç Mühendis", "description": "Mühendis.",
+        "var_olus": "3 Mayıs 2004"}, headers=headers).json()
+    _zamanli_bolum(client, headers, "28 Haziran 2030")
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [{"entity_type": "character", "entity_id": k["id"]}],
+        "chapter_number": 1}, headers=headers).json()["context"]
+    assert "HENÜZ YOK" not in ctx and "ARTIK YOK" not in ctx
+    assert "Varoluş: 3 Mayıs 2004" in ctx
+
+
+def test_unparseable_lifespan_is_left_alone(client, headers):
+    """'yedi yıl önce' çözülemez - uydurma tarihle yanlış hüküm vermektense
+    denetimin dışında kalmalı."""
+    k = client.post("/characters/", json={
+        "name": "Belirsiz", "description": "x", "var_olus": "yedi yıl önce"},
+        headers=headers).json()
+    _zamanli_bolum(client, headers, "28 Haziran 2030")
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [{"entity_type": "character", "entity_id": k["id"]}],
+        "chapter_number": 1}, headers=headers).json()["context"]
+    assert "HENÜZ YOK" not in ctx
+
+
+def test_place_and_object_have_lifespan_too(client, headers):
+    """Lümen binası yedi yıl önce yıkılan binanın yerine dikildi -
+    enkaz sahnelerinde yeni bina YOK."""
+    y = client.post("/places/", json={
+        "name": "Lümen Binası", "description": "Cam kabuk.",
+        "var_olus": "1 Haziran 2030"}, headers=headers).json()
+    n = client.post("/objects/", json={
+        "name": "Süper bilgisayar", "description": "Kabin.",
+        "var_olus": "28 Haziran 2030"}, headers=headers).json()
+    _zamanli_bolum(client, headers, "1 Ocak 2029")
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [{"entity_type": "place", "entity_id": y["id"]},
+                              {"entity_type": "object", "entity_id": n["id"]}],
+        "chapter_number": 1}, headers=headers).json()["context"]
+    assert ctx.count("HENÜZ YOK") == 2
+
+
+def test_lifespan_not_added_to_factions_or_terms(client, headers):
+    """Varoluş aralığı SADECE kişi/mekan/nesne için - gruplar ve terimler
+    zamansız kavramlar."""
+    r = client.post("/factions/", json={"name": "Grup", "var_olus": "2030"}, headers=headers)
+    assert r.status_code in (200, 201)
+    assert "var_olus" not in r.json()

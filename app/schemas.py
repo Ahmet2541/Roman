@@ -50,7 +50,11 @@ class ObjectCreate(SimpleEntityBase):
     @classmethod
     def _check_sections(cls, v):
         return validate_section_keys(v, "object")
-
+    # VAROLUŞ ARALIĞI - serbest metin. Çözülebilen tarihler ("28 Haziran
+    # 2030") kronolojik süzmede kullanılır; "yedi yıl önce" gibi göreli
+    # ifadeler çözülmez ve süzmenin dışında kalır.
+    var_olus: str = ""
+    yok_olus: str = ""
 
 class ObjectUpdate(SimpleEntityUpdate):
     aliases: Optional[List[str]] = None
@@ -64,7 +68,8 @@ class ObjectUpdate(SimpleEntityUpdate):
         if v is None:
             return v
         return validate_section_keys(v, "object")
-
+    var_olus: Optional[str] = None
+    yok_olus: Optional[str] = None
 
 class ObjectOut(SimpleEntityOut):
     aliases: List[str] = []
@@ -72,6 +77,11 @@ class ObjectOut(SimpleEntityOut):
 
 
 # ---- İpuçları (durum alanı ekli) -------------------------------------------
+    # VAROLUŞ ARALIĞI - serbest metin. Çözülebilen tarihler ("28 Haziran
+    # 2030") kronolojik süzmede kullanılır; "yedi yıl önce" gibi göreli
+    # ifadeler çözülmez ve süzmenin dışında kalır.
+    var_olus: str = ""
+    yok_olus: str = ""
 
 class ForeshadowingCreate(SimpleEntityBase):
     status: str = "açık"
@@ -101,7 +111,11 @@ class CharacterCreate(SimpleEntityBase):
     @classmethod
     def _check_sections(cls, v):
         return validate_section_keys(v, "character")
-
+    # VAROLUŞ ARALIĞI - serbest metin. Çözülebilen tarihler ("28 Haziran
+    # 2030") kronolojik süzmede kullanılır; "yedi yıl önce" gibi göreli
+    # ifadeler çözülmez ve süzmenin dışında kalır.
+    var_olus: str = ""
+    yok_olus: str = ""
 
 class CharacterUpdate(SimpleEntityUpdate):
     status: Optional[str] = None
@@ -118,7 +132,8 @@ class CharacterUpdate(SimpleEntityUpdate):
         if v is None:
             return v
         return validate_section_keys(v, "character")
-
+    var_olus: Optional[str] = None
+    yok_olus: Optional[str] = None
 
 class CharacterOut(SimpleEntityOut):
     status: str
@@ -129,6 +144,11 @@ class CharacterOut(SimpleEntityOut):
 # ---- Mekanlar (artık SimpleEntity* paylaşmıyor - sections alanı için) -----
 # Not: Diğer basit menüler (Nesneler, Terimler) hâlâ SimpleEntity* şemasını
 # kullanıyor - sadece Mekanlar'a (Kişiler gibi) bölüm sistemi eklendi.
+    # VAROLUŞ ARALIĞI - serbest metin. Çözülebilen tarihler ("28 Haziran
+    # 2030") kronolojik süzmede kullanılır; "yedi yıl önce" gibi göreli
+    # ifadeler çözülmez ve süzmenin dışında kalır.
+    var_olus: str = ""
+    yok_olus: str = ""
 
 class PlaceCreate(SimpleEntityBase):
     aliases: List[str] = []
@@ -141,7 +161,11 @@ class PlaceCreate(SimpleEntityBase):
     @classmethod
     def _check_sections(cls, v):
         return validate_section_keys(v, "place")
-
+    # VAROLUŞ ARALIĞI - serbest metin. Çözülebilen tarihler ("28 Haziran
+    # 2030") kronolojik süzmede kullanılır; "yedi yıl önce" gibi göreli
+    # ifadeler çözülmez ve süzmenin dışında kalır.
+    var_olus: str = ""
+    yok_olus: str = ""
 
 class PlaceUpdate(SimpleEntityUpdate):
     aliases: Optional[List[str]] = None
@@ -154,7 +178,8 @@ class PlaceUpdate(SimpleEntityUpdate):
         if v is None:
             return v
         return validate_section_keys(v, "place")
-
+    var_olus: Optional[str] = None
+    yok_olus: Optional[str] = None
 
 class PlaceOut(SimpleEntityOut):
     aliases: List[str] = []
@@ -163,6 +188,11 @@ class PlaceOut(SimpleEntityOut):
 
 
 # ---- Karakter ilişkileri (ilişki haritası) ---------------------------------
+    # VAROLUŞ ARALIĞI - serbest metin. Çözülebilen tarihler ("28 Haziran
+    # 2030") kronolojik süzmede kullanılır; "yedi yıl önce" gibi göreli
+    # ifadeler çözülmez ve süzmenin dışında kalır.
+    var_olus: str = ""
+    yok_olus: str = ""
 
 class RelationshipCreate(BaseModel):
     character_a_id: int

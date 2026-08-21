@@ -80,10 +80,17 @@ const ENTITY_SECTIONS = {
 };
 
 const ENTITY_TYPES = {
-  character: { endpoint: '/characters/', label: 'Kişi', plural: 'Kişiler', hasStatus: true, statusOptions: ['aktif', 'pasif', 'öldü'], isRule: false, hasAliases: true },
-  place: { endpoint: '/places/', label: 'Mekan', plural: 'Mekanlar', hasStatus: false, isRule: false, hasAliases: true },
+  // hasLifespan: VAROLUŞ ARALIĞI - varlık ne zaman var oldu, ne zaman yok
+  // oldu. Sahne tarihinde henüz var olmayan varlığın profili modele
+  // "HENÜZ YOK" uyarısıyla gider. Etiketler türe göre değişir; kavramsal
+  // menülerde (gruplar, terimler) bu alan YOK - onlar zamansız.
+  character: { endpoint: '/characters/', label: 'Kişi', plural: 'Kişiler', hasStatus: true, statusOptions: ['aktif', 'pasif', 'öldü'], isRule: false, hasAliases: true,
+    hasLifespan: true, lifespanLabels: ['Doğum', 'Ölüm'] },
+  place: { endpoint: '/places/', label: 'Mekan', plural: 'Mekanlar', hasStatus: false, isRule: false, hasAliases: true,
+    hasLifespan: true, lifespanLabels: ['Yapım / kuruluş', 'Yıkım / terk'] },
   event: { endpoint: '/events/', label: 'Olay', plural: 'Olaylar', hasStatus: false, isRule: false, isCustom: true },
-  object: { endpoint: '/objects/', label: 'Nesne', plural: 'Nesneler', hasStatus: false, isRule: false, hasAliases: true },
+  object: { endpoint: '/objects/', label: 'Nesne', plural: 'Nesneler', hasStatus: false, isRule: false, hasAliases: true,
+    hasLifespan: true, lifespanLabels: ['Yapım / ortaya çıkış', 'Kayboluş / yok oluş'] },
   foreshadowing: { endpoint: '/foreshadowings/', label: 'İpucu', plural: 'İpuçları', hasStatus: true, statusOptions: ['açık', 'kapandı'], isRule: false },
   term: { endpoint: '/glossary/', label: 'Terim', plural: 'Terimler', hasStatus: false, isRule: false },
   rule: { endpoint: '/rules/', label: 'Kural', plural: 'Roman Kuralları', hasStatus: false, isRule: true, hasTags: true },
