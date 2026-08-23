@@ -23,13 +23,14 @@ import logging
 from ..database import get_db
 from ..auth import get_current_user
 from .. import models, schemas
-from ..novel_context import get_novel_id
+from ..novel_context import get_novel_id, get_universe_id
 from ..migrations import _next_matrix_code
 from ..ratelimit import rate_limit
 from .. import qwen_client
 from ..outline import build_hierarchy, children_of
 from .. import plan_schema
 from .. import plan_audit
+from .. import plan_import
 
 logger = logging.getLogger("roman_api.matrix")
 
@@ -203,6 +204,33 @@ def move_matrix(
     m.position, komsu.position = komsu.position, m.position
     db.commit()
     return {"moved": True}
+
+
+@router.post("/import")
+def import_matrices(
+    payload: dict,
+    db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
+    universe_id: int = Depends(get_universe_id),
+):
+    """Dışa aktarılan plan matrisi JSON'unu geri yükler.
+
+    Mevcut matrislerin ÜZERİNE YAZMAZ - her zaman yeni matris oluşturur.
+    Varlık ID'leri hedef evrende ADLA yeniden çözülür (dosyadaki ID'ler
+    kaynak evrene aittir, körlemesine kullanmak yanlış kayda bağlar).
+
+    "/import" yolu "/{matrix_id}" kalıbından ÖNCE tanımlı olmalı.
+    """
+    try:
+        rapor = plan_import.import_json(
+            db, novel_id, universe_id, payload, _next_matrix_code)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Matris içe aktarımı başarısız")
+        raise HTTPException(500, f"İçe aktarılamadı: {type(exc).__name__}: {exc}")
+    return rapor
 
 
 @router.get("/export")

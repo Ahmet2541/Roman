@@ -1336,3 +1336,83 @@ def test_meta_never_reaches_context_even_in_hidden_mode(client, headers):
         "include_hidden": True}, headers=headers).json()["context"]
     assert "İntikam peşinde." not in kapali
     assert "İntikam peşinde." in acik
+
+
+# --- İçe aktarım -----------------------------------------------------------
+
+def test_import_roundtrip_recreates_the_matrix(client, headers):
+    """Dışa aktar → içe aktar: yapı ve içerik korunmalı."""
+    import json as _json
+    _dolu_matris(client, headers)
+    veri = _json.loads(client.get("/matrix/export?format=json",
+                                  headers=headers).content.decode("utf-8"))
+
+    r = client.post("/matrix/import", json=veri, headers=headers).json()
+    assert r["matris"] == 1 and r["kolon"] == 1 and r["satir"] == 1 and r["hucre"] == 1
+
+    liste = client.get("/matrix/", headers=headers).json()
+    yeni = [m for m in liste if "(içe aktarıldı)" in m["name"]]
+    assert yeni, "aynı adlı matris ayırt edilmedi"
+    tam = client.get(f"/matrix/{yeni[0]['id']}", headers=headers).json()
+    assert tam["columns"][0]["tur_data"]["damga"] == "ÇÖZÜN"
+    assert tam["rows"][0]["parca_data"]["sure"] == "20 dk"
+    assert tam["rows"][0]["instructions"] == "- Tek cümle"
+    assert "OLAY: Sorgu başlar." in tam["cells"][0]["content"]
+
+
+def test_import_never_overwrites_existing(client, headers):
+    """Mevcut matrisin ÜZERİNE YAZMAMALI - yeni matris eklenmeli."""
+    import json as _json
+    m = _dolu_matris(client, headers)
+    veri = _json.loads(client.get("/matrix/export?format=json",
+                                  headers=headers).content.decode("utf-8"))
+    client.post("/matrix/import", json=veri, headers=headers)
+
+    eski = client.get(f"/matrix/{m['id']}", headers=headers).json()
+    assert "OLAY: Sorgu başlar." in eski["cells"][0]["content"], "orijinal bozuldu"
+    assert len(client.get("/matrix/", headers=headers).json()) == 2
+
+
+def test_import_reresolves_entities_by_name(client, headers):
+    """Dosyadaki ID'ler KAYNAK evrene ait - körlemesine kullanmak yanlış
+    kayda bağlar. Hedef evrende ADLA yeniden çözülmeli."""
+    import json as _json
+    k = client.post("/characters/", json={"name": "Genç Mühendis"}, headers=headers).json()
+    m = _matris(client, headers)
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "x", "kisiler": [
+            {"id": 9999, "ad": "Genç Mühendis"},          # YANLIŞ id
+            {"id": 8888, "ad": "Kayıtsız Kişi"}]}}, headers=headers)
+    veri = _json.loads(client.get("/matrix/export?format=json",
+                                  headers=headers).content.decode("utf-8"))
+
+    r = client.post("/matrix/import", json=veri, headers=headers).json()
+    assert r["cozulen"] >= 1 and r["cozulemeyen"] >= 1
+
+    yeni = [x for x in client.get("/matrix/", headers=headers).json()
+            if "(içe aktarıldı)" in x["name"]][0]
+    hucre = client.get(f"/matrix/{yeni['id']}", headers=headers).json()["cells"][0]
+    kisiler = {p["ad"]: p["id"] for p in hucre["data"]["kisiler"]}
+    assert kisiler["Genç Mühendis"] == k["id"], "ID adla yeniden çözülmedi"
+    assert kisiler["Kayıtsız Kişi"] is None, "bulunamayan ad için ölü ID kaldı"
+
+
+def test_import_leaves_missing_chapters_unbound(client, headers):
+    """O numarada bölüm yoksa sessizce yanlış bölüme bağlamaktansa
+    bağsız bırakmalı - ve bunu raporlamalı."""
+    import json as _json
+    _dolu_matris(client, headers)
+    veri = _json.loads(client.get("/matrix/export?format=json",
+                                  headers=headers).content.decode("utf-8"))
+    veri["matrisler"][0]["hucreler"][0]["bolum"] = 999
+
+    r = client.post("/matrix/import", json=veri, headers=headers).json()
+    assert r["baglanamayan"] == 1
+    assert any("999" in u for u in r["uyarilar"])
+
+
+def test_import_rejects_wrong_file(client, headers):
+    r = client.post("/matrix/import", json={"foo": "bar"}, headers=headers)
+    assert r.status_code == 400
+    assert "matrisler" in r.json()["detail"]

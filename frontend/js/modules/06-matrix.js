@@ -1133,10 +1133,47 @@ async function openMatrixExport(m) {
         <button class="btn btn-sm" id="mExpClose">Kapat</button>
       </div>
       <div id="mExpState" style="font-size:12px;color:var(--text-muted);"></div>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;">
+      <b>⬆ İçe Aktar (JSON)</b>
+      <div style="font-size:11.5px;color:var(--text-muted);margin:4px 0 8px;">
+        Dışa aktarılmış bir JSON dosyasını geri yükler. Mevcut matrislerin
+        ÜZERİNE YAZMAZ - yeni matris olarak eklenir. Kişi/mekan/nesne bağları
+        bu kitabın evreninde <b>adla</b> yeniden kurulur; bulunamayan adlar
+        serbest metin kalır.
+      </div>
+      <input type="file" id="mImpFile" accept=".json,application/json">
+      <div class="form-actions"><button class="btn btn-sm" id="mImpGo">Yükle</button></div>
+      <div id="mImpState" style="font-size:12px;"></div>
     </div>`;
   editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
   el('mExpClose').addEventListener('click', () => { editor.innerHTML = ''; });
+
+  el('mImpGo').addEventListener('click', async () => {
+    const durum = document.getElementById('mImpState');
+    const dosya = document.getElementById('mImpFile').files[0];
+    if (!dosya) { durum.textContent = 'Önce bir JSON dosyası seç.'; return; }
+    durum.textContent = 'Okunuyor…';
+    try {
+      const metin = await dosya.text();
+      let veri;
+      try { veri = JSON.parse(metin); }
+      catch (e) { throw new Error('Dosya geçerli JSON değil.'); }
+      const r = await api.post('/matrix/import', veri);
+      const uyari = (r.uyarilar || []).length
+        ? `<div style="margin-top:4px;color:var(--gold);">${r.uyarilar.map(escapeHtml).join('<br>')}</div>`
+        : '';
+      durum.innerHTML = `<span style="color:var(--text-muted);">
+        ✓ ${r.matris} matris · ${r.kolon} tur · ${r.satir} aşama · ${r.hucre} hücre ·
+        ${r.baglanan} bölüm bağı${r.baglanamayan ? ` (${r.baglanamayan} bağlanamadı)` : ''} ·
+        ${r.cozulen} varlık eşleşti${r.cozulemeyen ? `, ${r.cozulemeyen} eşleşmedi` : ''}
+        </span>${uyari}`;
+      await loadMatrixList();
+    } catch (err) {
+      durum.innerHTML = `<span class="error-text">✕ ${escapeHtml(err.message)}</span>`;
+    }
+  });
   el('mExpGo').addEventListener('click', async () => {
     const durum = el('mExpState');
     const bicim = el('mExpFormat').value;
