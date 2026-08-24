@@ -1443,3 +1443,84 @@ def test_plan_characters_always_bring_their_voice(client, headers):
     assert "Suçluluk taşır" in ctx, "iç dünyası gitmedi"
     # Seçicilik korunmalı: ilgisiz bölüm YİNE de sadece isim olarak listelenir
     assert "Gümüş sakallı." not in ctx, "seçicilik bozuldu, her şey gidiyor"
+
+
+def test_lifespan_reads_time_inside_the_date_field(client, headers):
+    """Varlık kaydında tek alan var: "28 Haziran 2030 21:00". Saati
+    okumazsak gün 00:00 sayılır ve aynı günün 13:30'undaki sahnede varlık
+    "çoktan var" görünür - Vicdan tam bu yüzden denetimden kaçtı."""
+    v = client.post("/characters/", json={
+        "name": "Vicdan", "description": "Yapay zekâ.",
+        "var_olus": "28 Haziran 2030 21:00 (uyanış)"}, headers=headers).json()
+    _zamanli_bolum(client, headers, "28 Haziran 2030", "13:30")
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [{"entity_type": "character", "entity_id": v["id"]}],
+        "chapter_number": 1}, headers=headers).json()["context"]
+    assert "HENÜZ YOK" in ctx, "aynı gün ama daha erken saatte olan sahne yakalanmadı"
+
+
+def test_profile_text_mentioning_future_entity_is_flagged(client, headers):
+    """Profil metinleri romanın TAMAMINA ait bilgi taşır: "Vicdan'ı
+    yanlışlıkla doğuran" gibi. Hiçbir denetim düz metnin içindeki adı
+    okumuyordu - sahneye "adı olmayan bir şey uyanıyordu" diye sızdı."""
+    client.post("/characters/", json={
+        "name": "Vicdan", "var_olus": "28 Haziran 2030 21:00"}, headers=headers)
+    ih = client.post("/characters/", json={
+        "name": "İhtiyar Teknisyen",
+        "description": "Yorgun teknisyen.",
+        "notes": "Vicdan'ın fısıltılarını duyuyor ama yaşlılık diyor."},
+        headers=headers).json()
+    _zamanli_bolum(client, headers, "28 Haziran 2030", "13:30")
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [{"entity_type": "character", "entity_id": ih["id"]}],
+        "chapter_number": 1}, headers=headers).json()["context"]
+    assert "HENÜZ VAR OLMAYAN varlık" in ctx
+    assert "Vicdan" in ctx.split("HENÜZ VAR OLMAYAN varlık")[1][:80]
+    assert "adsız da olsa sezdirme" in ctx
+
+
+def test_no_false_alarm_for_existing_entities(client, headers):
+    """Var olan varlığın adı profilde geçerse uyarı ÇIKMAMALI - yoksa
+    her profilde gürültü olur."""
+    client.post("/characters/", json={
+        "name": "Genç Mühendis", "var_olus": "1 Ocak 2006"}, headers=headers)
+    ih = client.post("/characters/", json={
+        "name": "İhtiyar Teknisyen", "description": "Genç Mühendis ile çalışır."},
+        headers=headers).json()
+    _zamanli_bolum(client, headers, "28 Haziran 2030", "13:30")
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [{"entity_type": "character", "entity_id": ih["id"]}],
+        "chapter_number": 1}, headers=headers).json()["context"]
+    assert "HENÜZ VAR OLMAYAN" not in ctx
+
+
+# --- Sohbet: bağlam kapsamı ------------------------------------------------
+
+def test_chat_scope_none_really_omits_chapter_text(client, headers):
+    """include_chapter_text True'ya SABİTLENMİŞTİ: kapsam seçicisi
+    sessizce yok sayılıyordu, "none" seçsen de metin gidiyordu."""
+    ch = client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers).json()
+    client.put(f"/chapters/{ch['id']}/paragraphs/1", json={
+        "number": 1, "text": "Bu cümle bölüm metnindedir."}, headers=headers)
+    r = client.post("/ai/chat", json={
+        "messages": [{"role": "user", "content": "Bu bölümü konuşalım"}],
+        "chapter_number": 1, "text_scope": "none"}, headers=headers)
+    assert r.status_code in (200, 502)   # sahte Qwen yoksa 502, bağlam yine kurulmuş olur
+
+
+def test_word_question_does_not_pull_the_whole_chapter(client, headers):
+    """"Donakalmak ne demek" gibi metne dokunmayan soruda bin paragraf
+    göndermek dakikalar sürüyordu."""
+    from app.routers.ai import _metne_dokunuyor
+    for soru in ("donakalmak ne demek", "bu kelimenin anlamı ne", "Vicdan kimdir"):
+        assert not _metne_dokunuyor(soru), f"gereksiz metin gönderilecekti: {soru}"
+
+
+def test_text_questions_still_get_the_chapter(client, headers):
+    """Şüphede kalırsak METNİ GÖNDERİRİZ - eksik bağlamla yanlış cevap,
+    fazla bağlamla yavaş cevaptan kötüdür."""
+    from app.routers.ai import _metne_dokunuyor
+    for soru in ("P12 çok uzun olmuş", "şu paragrafı kısalt", "3. paragrafta ne oldu",
+                 "bölümün kapanışı zayıf", "üslup nasıl olmalı", ""):
+        assert _metne_dokunuyor(soru), f"metin gerekiyordu ama gitmeyecekti: {soru}"

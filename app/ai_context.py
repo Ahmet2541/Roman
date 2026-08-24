@@ -317,10 +317,58 @@ def _varolus_notu(record, sahne_zamani) -> str:
 PLAN_KISI_ZORUNLU = ["konusma_tarzi", "duygusal_yapi"]
 
 
+def _tr_lower(metin: str) -> str:
+    return (metin or "").replace("İ", "i").replace("I", "ı").lower()
+
+
+def _gelecek_varliklar(db: Session, universe_id: int, sahne_zamani) -> list:
+    """Sahne anında HENÜZ VAR OLMAYAN varlıkların adları (+ takma adları).
+
+    Profil metinleri düz yazıdır ve romanın TAMAMINA ait bilgi taşır:
+    "Vicdan'ı yanlışlıkla doğuran", "Vicdan'ın fısıltılarını duyuyor" gibi.
+    Bu cümleler sahneye gelecek sızdırıyor ama hiçbir denetim düz metnin
+    içindeki adı okumuyordu - varoluş denetimi yalnızca varlığın KENDİ
+    kaydına bakıyordu.
+    """
+    if sahne_zamani is None:
+        return []
+    from .entities import ENTITY_MODELS
+    adlar = []
+    for tip in ("character", "place", "object"):
+        model = ENTITY_MODELS.get(tip)
+        if model is None:
+            continue
+        for kayit in db.query(model).filter(model.universe_id == universe_id).all():
+            var = story_time.parse_tarih(getattr(kayit, "var_olus", "") or "")
+            if var is not None and sahne_zamani < var:
+                adlar.append(kayit.name)
+                adlar.extend(a for a in (kayit.aliases or []) if str(a).strip())
+    return [a for a in adlar if len(str(a).strip()) >= 3]
+
+
+def _gelecek_uyarisi(metin: str, gelecek_adlar: list) -> str:
+    """Profil metninde henüz var olmayan bir varlığın adı geçiyor mu?"""
+    if not metin or not gelecek_adlar:
+        return ""
+    dusuk = _tr_lower(metin)
+    gecen = []
+    for ad in gelecek_adlar:
+        kalip = r"(?<!\w)" + re.escape(_tr_lower(str(ad))) + r"(?!\w)"
+        if re.search(kalip, dusuk):
+            gecen.append(str(ad))
+    if not gecen:
+        return ""
+    return ("⚠ Bu profilde HENÜZ VAR OLMAYAN varlık(lar) anılıyor: "
+            + ", ".join(sorted(set(gecen)))
+            + ". Bunlar sahnenin GELECEĞİDİR - metne taşıma, ima etme, "
+              "adsız da olsa sezdirme.")
+
+
 def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3, instruction_text: str = "", include_hidden: bool = False, sahne_zamani: int | None = None, plan_kaynakli: set | None = None) -> str:
     if not selected_entities:
         return ""
 
+    gelecek_adlar = _gelecek_varliklar(db, universe_id, sahne_zamani)
     blocks = ["İLGİLİ GEÇMİŞ BİLGİLER:"]
     for ref in selected_entities:
         model = ENTITY_MODELS.get(ref.entity_type)
@@ -352,6 +400,13 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
             blocks.append(f"Özet: {record.description}")
         if getattr(record, "notes", ""):
             blocks.append(f"Notlar: {record.notes}")
+        # Profil metni geleceği sızdırıyor mu? Yazarın dikkatsizliği
+        # sahneye "adı olmayan bir şey uyanıyordu" olarak geri dönüyordu.
+        _gel = _gelecek_uyarisi(
+            " ".join(filter(None, [record.description, getattr(record, "notes", "")])),
+            gelecek_adlar)
+        if _gel:
+            blocks.append(_gel)
 
         # MEKAN HİYERARŞİSİ: bir mekan başka bir mekanın içindeyse (bkz.
         # Place.parent_place_id), bu zinciri otomatik ekliyoruz - ör.

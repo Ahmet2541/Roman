@@ -103,6 +103,35 @@ def preview_context(
     )
 
 
+# Bölüm metnine atıf yapan işaretler. Biri geçiyorsa metin gönderilir.
+_METIN_ISARETLERI = (
+    "bölüm", "bolum", "paragraf", "sahne", "metin", "yazdık", "yazdim",
+    "yazdım", "cümle", "cumle", "replik", "diyalog", "kapanış", "kapanis",
+    "açılış", "acilis", "burada", "buradaki", "yukarıda", "yukarida",
+    "devam", "düzenle", "duzenle", "kısalt", "kisalt", "uzat", "değiştir",
+    "degistir", "yeniden yaz", "üslup", "uslup", "ton", "akış", "akis",
+)
+
+
+def _metne_dokunuyor(soru: str) -> bool:
+    """Soru bölümün METNİNE mi dair, yoksa genel bir soru mu?
+
+    "P12", "3. paragraf" gibi doğrudan atıflar ve yukarıdaki anahtar
+    kelimeler metni gerektirir. "Donakalmak ne demek" gerektirmez.
+    Şüphede kalırsak METNİ GÖNDERİRİZ - eksik bağlamla yanlış cevap
+    vermek, fazla bağlamla yavaş cevap vermekten kötüdür.
+    """
+    import re as _re
+    s = (soru or "").replace("İ", "i").replace("I", "ı").lower()
+    if not s.strip():
+        return True
+    if _re.search(r"\bp\s*\d+\b", s):        # "P12", "p 3"
+        return True
+    if _re.search(r"\d+\s*\.\s*(paragraf|bölüm|bolum)", s):
+        return True
+    return any(k in s for k in _METIN_ISARETLERI)
+
+
 @router.post("/chat", response_model=schemas.AiChatResponse)
 def chat(
     payload: schemas.AiChatRequest, db: Session = Depends(get_db),
@@ -120,14 +149,28 @@ def chat(
         raise HTTPException(400, "En az bir mesaj gerekli")
 
     last_user_message = next((m.content for m in reversed(payload.messages) if getattr(m, "role", None) == "user"), "")
+
+    # OTOMATİK DARALTMA: soru METNE dokunmuyorsa bölüm metnini gönderme.
+    # "Donakalmak ne demek", "şu terimi açıkla" gibi sorularda bin
+    # paragraf göndermek dakikalarca sürüyor ve boşuna maliyet. Kullanıcı
+    # kapsamı ELLE seçtiyse (none/novel) ona dokunulmaz - sadece
+    # varsayılan "chapter" durumunda daraltılır.
+    metin_kapsami = payload.text_scope
+    if metin_kapsami == "chapter" and not _metne_dokunuyor(last_user_message):
+        metin_kapsami = "none"
     context = build_context(
         db, novel_id, universe_id, payload.selected_entities,
         chapter_number=payload.chapter_number, instruction_text=last_user_message,
         include_hidden=payload.include_hidden,
         # Sohbette bölümün METNİ de gitmeli: "bu bölümü konuşalım",
         # "P12'yi tartışalım" gibi istekler ancak metin varsa anlamlı.
-        include_chapter_text=True,
-        text_scope=payload.text_scope,
+        # AMA KOŞULSUZ DEĞİL: burası True'ya sabitlenmişti ve kapsam
+        # seçicisi (text_scope) sessizce yok sayılıyordu. "Donakalmak ne
+        # demek" gibi metne hiç dokunmayan bir soruda bile bin paragraf
+        # gidiyor, cevap dakikalar sürüyordu. Artık seçim gerçekten
+        # dinleniyor: "none" seçilirse metin gitmez.
+        include_chapter_text=(metin_kapsami != "none"),
+        text_scope=metin_kapsami,
     )
     try:
         # GEÇMİŞ BUDAMA: son turlar tam, öncesi özet (bkz. trim_chat_history).

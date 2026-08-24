@@ -316,6 +316,39 @@ const TUR_ALANLARI = [
 // Anahtar ASCII 'SAYAC' olarak saklanır (eski kayıtlar bozulmasın),
 // ekranda 'SAYAÇ' yazılır. Açıklama etiketin içinde: kısaltmanın ne
 // demek olduğu açılır listeden anlaşılmalı, tahmin ettirmemeli.
+// YARDIM BALONLARI - alanın modele giden GERÇEK etkisini anlatır.
+// Uydurma bir açıklama yazmak, yazarın bir şey sanıp sistemin başka şey
+// yapmasına yol açar; bu yüzden metinler render_cell'in ürettiği kısıtla
+// birebir tutulur.
+function yardim(metin, hiza) {
+  const k = hiza ? ` ${hiza}` : '';
+  return `<span class="yardim${k}" tabindex="0">?<span class="balon">${escapeHtml(metin)}</span></span>`;
+}
+
+const YARDIM = {
+  olay: 'Sahnenin tek cümlelik kimliği: KİM KİME NE YAPAR. Izgarada bu cümle görünür. Uzayıp sahne özetine dönerse uyarı çıkar - burası olay dizisi değil, tek cümle.',
+  tarih: '"03,05,27" yazıp alandan çıkarsan "03 Mayıs 2027" olur. Nokta, eğik çizgi, tire de olur. Takvim dışı zaman da yazabilirsin ("üçüncü gün") - dokunulmaz, ama o zaman kronolojik süzmeye girmez.',
+  saat: 'Saat yazarsan plana bir KISIT olarak gider: "sahne BU AN\'da geçer, günün saatiyle çelişen ışık ve zaman ifadesi kullanma". 13:30 yazılıyken "akşam" yazılmasını engeller.',
+  zamanTip: 'NOKTA: sahne tek bir anda geçer, süre işlemez. ATLAMA: önceki sahneden zaman sıçraması var. SAYAÇ: sahne boyunca işleyen bir süre var (ambulansın yedi dakikası gibi).',
+  sayac: 'Tip SAYAÇ ya da ATLAMA ise neyin sayacı / neyden atlandığı yazılmalı. Tek başına "SAYAÇ" modele hiçbir şey söylemez.',
+  mekan: 'Kayıtlı bir Mekan seçersen o mekanın PROFİLİ de otomatik olarak bağlama gider. Rozet dolu değilse kayıtta yok demektir - serbest metin kalır, profil gitmez.',
+  ortam: 'Mekânın o andaki hâli - kişilerin duygusundan AYRI. Asıl değer aradaki farkta: odada gerilim varken Başkan\'da korku olması, adamın kalabalıktan fazlasını hissettiğini söyler. İkisi birebir aynıysa uyarı çıkar.',
+  kisiler: 'Her kişi KENDİ duygu yayını taşır, böylece iki bilinç sahneyi bölmeden aktarılır. Rozet dolu olan kişilerin profili ve KONUŞMA TARZI otomatik olarak bağlama gider - model onları aynı ağızdan yazmasın diye.',
+  nesneler: 'Virgülle ayır. Rozet dolu olanların profili bağlama gider. Bir nesneyi kayda geçirmek, romanın her yerinde aynı nesne olarak tanınmasını sağlar.',
+  odak: 'Bir İPUCU değil KISIT: plana "betimleme SADECE bunun üzerinde kalacak, başka nesneye geçme" diye gider. NESNELER listesinden tek bir nesne olmalı. Birden çok nesne varken boş bırakırsan uyarı çıkar - dikkat dağılır.',
+  uzunluk: 'Etiket değil, somut karşılığı gider: Özet = "1-2 paragraf, sahne AÇILMAZ", Normal = "4-6 paragraf", Uzun = "8+ paragraf, ritim yavaşlar". Uzunluk istiyorsan BEAT SAYISINI artır - modele olay uydurması yasak, beat yetmezse metni derinleştirir.',
+  giris: 'Sahne neyle BAŞLIYOR: ilk hareket ya da ilk replik. Bir AN, olay dizisi değil. "+ GİRİŞ" ile birden çok beat ekleyebilirsin (paralel matriste tek beat olmalı).',
+  gelisme: 'Sahnenin DÖNDÜĞÜ an: baskı, tehdit, tanıma. Birden çok bağımsız hareket varsa "+ GELİŞME" ile ayrı beat yap - hepsini tek kutuya yazarsan yazana kuracak yer kalmaz.',
+  sonuc: 'Sahne neyle KAPANIYOR. Turun damga kelimesi burada asılı kalmalı; geçmiyorsa uyarı çıkar. Kapanış bir eşik bıraksın, sonraki sahnenin hedefini doğursun.',
+  baglanti: 'Başka bir hücreye (MP kodu) gönderme. Tür ayna/ileri/geri. Not alanına REFERANS değil EYLEM yaz: "T1\'deki mendil jestini burada raporla tekrarla" gibi. Yalnızca kod yazarsan model ne yapacağını bilmez, uyarı çıkar.',
+  bagliBolum: 'Bu plan SADECE seçilen bölüm yazılırken AI\'ya gider. Bağ yoksa plan hiçbir yere gitmez - hücrede durur, kimse okumaz. Alt satırlar bilerek bağsız bırakılır; onlar üstlerindeki bölümün SAHNELERİ olarak gider.',
+  turMirasi: 'Bu turun HER hücresine otomatik giden bilgi - hücreye kopyalanmaz. Damgayı değiştirirsen 56 hücreyi yeniden yazman gerekmez. Soyut tema yazma ("görenle görmeyen" gibi), model onu harfiyen okur; somut yaz.',
+  parcaMirasi: 'Bu aşamanın no ve süresi - el yazmasındaki "### 1 Hologramdaki ip uçları (5 Dakika)" biçiminin karşılığı. Bütün turlarda aynı konumu işaretler.',
+  talimatKasasi: 'Bu aşamanın KALICI yazım kısıtları. Her turda, o aşamanın her hücresinde AI\'ya gider. "İyi talimatı" her seferinde yeniden yazmak zorunda kalmazsın.',
+};
+
+if (typeof window !== 'undefined') window.YARDIM = YARDIM;
+
 const ZAMAN_TIPLERI = [
   ['NOKTA', 'NOKTA — tek bir an, süre işlemiyor'],
   ['ATLAMA', 'ATLAMA — önceki sahneden zaman sıçraması'],
@@ -606,6 +639,8 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     tur.matematik_cifti ? `matematik: ${escapeHtml(tur.matematik_cifti)}` : '',
   ].filter(Boolean).join(' · ');
 
+  // etiket artık HTML içerebilir (yardım balonu) - escapeHtml UYGULANMAZ.
+  // Sadece bu dosyadaki sabit metinlerle çağrılıyor, kullanıcı girdisi girmiyor.
   const alan = (id, etiket, deger, ipucu, satir) => `
     <div class="field">
       <label>${etiket}${ipucu ? ` <span style="font-weight:400;color:var(--text-muted);">${ipucu}</span>` : ''}</label>
@@ -619,26 +654,26 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       ${mirasSatiri ? `<div style="margin-top:6px;font-size:11.5px;color:var(--text-muted);background:var(--paper-dim);border:1px solid var(--border);border-radius:4px;padding:4px 8px;">TUR MİRASI — ${mirasSatiri}</div>` : ''}
 
       <div style="margin-top:10px;font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">ÜST — SAHNE KİMLİĞİ</div>
-      ${alan('mcOlay', 'OLAY', d.olay, '(tek cümle: kim kime ne yapar)', 44)}
+      ${alan('mcOlay', 'OLAY' + yardim(YARDIM.olay, 'sol'), d.olay, '', 44)}
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        <div class="field" style="flex:1;min-width:110px;"><label>Tarih</label>
+        <div class="field" style="flex:1;min-width:110px;"><label>Tarih${yardim(YARDIM.tarih, 'sol')}</label>
           <input type="text" id="mcTarih" value="${escapeHtml(zaman.tarih || '')}" placeholder="03,05,27 → 03 Mayıs 2027" title="03,05,27 yazarsan 03 Mayıs 2027 olur. Nokta, eğik çizgi, tire de olur. 'üçüncü gün' gibi serbest metin de yazabilirsin - dokunulmaz."></div>
-        <div class="field" style="flex:1;min-width:90px;"><label>Saat</label>
+        <div class="field" style="flex:1;min-width:90px;"><label>Saat${yardim(YARDIM.saat)}</label>
           <input type="text" id="mcSaat" value="${escapeHtml(zaman.saat || '')}" placeholder="21:40"></div>
-        <div class="field" style="flex:1;min-width:110px;"><label>Tip</label>
+        <div class="field" style="flex:1;min-width:110px;"><label>Tip${yardim(YARDIM.zamanTip, 'sag')}</label>
           <select id="mcZamanTip">
             <option value="">(seç)</option>
             ${ZAMAN_TIPLERI.map(([k, e]) => `<option value="${k}" ${zaman.tip === k ? 'selected' : ''}>${e}</option>`).join('')}
           </select></div>
       </div>
-      <div class="field" id="mcSayacKutu"><label id="mcSayacEtiket">Neyin sayacı / atlaması</label>
+      <div class="field" id="mcSayacKutu"><label id="mcSayacEtiket">Neyin sayacı / atlaması</label>${yardim(YARDIM.sayac, 'sol')}
         <input type="text" id="mcSayac" value="${escapeHtml(zaman.sayac || '')}" placeholder="ambulans bekleme süresi"></div>
-      <div class="field"><label>MEKAN</label>
+      <div class="field"><label>MEKAN${yardim(YARDIM.mekan, 'sol')}</label>
         <input type="text" id="mcMekan" list="mcMekanList" value="${escapeHtml(d.mekan || '')}" placeholder="VIP Salonu">
         <datalist id="mcMekanList">${_datalistSecenekleri(varliklar.mekanlar)}</datalist></div>
       <datalist id="mcDuyguList">${DUYGU_LISTESI.map(x => `<option value="${escapeHtml(x)}"></option>`).join('')}</datalist>
       <div style="display:flex;gap:6px;">
-        <div class="field" style="flex:1;"><label>ORTAM <span style="font-weight:400;color:var(--text-muted);">(odanın hâli)</span></label>
+        <div class="field" style="flex:1;"><label>ORTAM <span style="font-weight:400;color:var(--text-muted);">(odanın hâli)</span>${yardim(YARDIM.ortam, 'sol')}</label>
           <div style="display:flex;gap:2px;">
             <input type="text" id="mcOrtamA" list="mcDuyguList" value="${escapeHtml(ortam.baslangic || '')}" placeholder="endişe" autocomplete="off" style="flex:1;min-width:0;">
             <button type="button" class="duygu-sec" data-hedef="mcOrtamA" title="Duygu listesinden seç">▾</button>
@@ -649,19 +684,19 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
             <button type="button" class="duygu-sec" data-hedef="mcOrtamB" title="Duygu listesinden seç">▾</button>
           </div></div>
       </div>
-      <div style="font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">KİŞİLER <span style="font-weight:400;letter-spacing:0;">(her kişi KENDİ duygu yayını taşır)</span></div>
+      <div style="font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">KİŞİLER${yardim(YARDIM.kisiler, 'sol')}</div>
       <div id="mcKisiListe"></div>
       <button class="btn btn-sm" id="mcKisiEkle" style="margin-top:4px;">+ Kişi</button>
       <datalist id="mcKisiList">${_datalistSecenekleri(varliklar.kisiler)}</datalist>
-      <div class="field"><label>NESNELER <span style="font-weight:400;color:var(--text-muted);">(virgülle)</span></label>
+      <div class="field"><label>NESNELER <span style="font-weight:400;color:var(--text-muted);">(virgülle)</span>${yardim(YARDIM.nesneler, 'sol')}</label>
         <input type="text" id="mcNesneler" value="${escapeHtml(_adListesi(d.nesneler))}" placeholder="mendil, şişe" autocomplete="off">
         <datalist id="mcNesneList">${_datalistSecenekleri(varliklar.nesneler)}</datalist></div>
-      <div class="field"><label>ODAK <span style="font-weight:400;color:var(--text-muted);">(yukarıdakilerden hangisi dramatik ağırlığı taşıyor)</span></label>
+      <div class="field"><label>ODAK${yardim(YARDIM.odak, 'sol')}</label>
         <input type="text" id="mcOdak" list="mcOdakList" value="${escapeHtml(d.odak || '')}" placeholder="Tetraoksin-7 şişesi" autocomplete="off">
         <datalist id="mcOdakList"></datalist></div>
 
       <div class="field" style="margin-top:12px;">
-        <label>HEDEF UZUNLUK <span style="font-weight:400;color:var(--text-muted);">(bu plandan çıkacak metnin ölçüsü)</span></label>
+        <label>HEDEF UZUNLUK${yardim(YARDIM.uzunluk, 'sol')}</label>
         <select id="mcUzunluk">
           ${UZUNLUK_SEVIYELERI.map(([k, e, a]) => `<option value="${k}" ${(d.uzunluk || 'normal') === k ? 'selected' : ''}>${e} — ${a}</option>`).join('')}
         </select>
@@ -670,12 +705,12 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       <div style="margin-top:12px;font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">ALT — YAY</div>
       <div id="mcYay"></div>
 
-      <div style="margin-top:12px;font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">BAĞLANTI</div>
+      <div style="margin-top:12px;font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">BAĞLANTI${yardim(YARDIM.baglanti, 'sol')}</div>
       <div id="mcBagListe"></div>
       <button class="btn btn-sm" id="mcBagEkle" style="margin-top:4px;">+ Bağlantı</button>
 
       <div class="field" style="margin-top:12px;">
-        <label>Bağlı bölüm <span style="font-weight:400;color:var(--text-muted);">(plan SADECE bu bölüm yazılırken AI'ya gider)</span></label>
+        <label>Bağlı bölüm${yardim(YARDIM.bagliBolum, 'sol')}</label>
         <select id="mCellChapter">
           <option value="">(bağlı değil)</option>
           ${chapters.map(c => {
@@ -841,9 +876,9 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
   // (ihtiyar mendilini siler, genç twit atar). Paralel matriste tek beat
   // kalmalı - kaydedince uyarı çıkar, engellenmez.
   const YAY = [
-    ['giris', 'GİRİŞ', "açılış beat'i: ilk replik / ret"],
-    ['gelisme', 'GELİŞME', "dönme beat'i: baskı / tehdit / tanıma"],
-    ['sonuc', 'SONUÇ', tur.damga ? `kapanış beat'i — "${tur.damga}" burada asılı kalmalı` : "kapanış beat'i"],
+    ['giris', 'GİRİŞ', "açılış beat'i", YARDIM.giris],
+    ['gelisme', 'GELİŞME', "dönme beat'i", YARDIM.gelisme],
+    ['sonuc', 'SONUÇ', tur.damga ? `"${tur.damga}" burada asılı kalmalı` : "kapanış beat'i", YARDIM.sonuc],
   ];
   const beatler = {};
   YAY.forEach(([k]) => {
@@ -855,10 +890,10 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
   function cizYay() {
     const kutu = document.getElementById('mcYay');
     if (!kutu) return;
-    kutu.innerHTML = YAY.map(([k, etiket, ipucu]) => `
+    kutu.innerHTML = YAY.map(([k, etiket, ipucu, yardimMetni]) => `
       <div style="margin-bottom:8px;">
         <label style="font-size:12px;font-weight:600;">${etiket}
-          <span style="font-weight:400;color:var(--text-muted);">(${escapeHtml(ipucu)})</span></label>
+          <span style="font-weight:400;color:var(--text-muted);">(${escapeHtml(ipucu)})</span>${yardim(yardimMetni, 'sol')}</label>
         ${beatler[k].map((b, i) => `
           <div style="display:flex;gap:4px;align-items:flex-start;margin-top:3px;">
             ${beatler[k].length > 1 ? `<span style="font-size:11px;color:var(--text-muted);padding-top:8px;min-width:14px;">${i + 1}</span>` : ''}
@@ -1570,7 +1605,7 @@ async function openMatrixColumnEditor(m, colId) {
           <option value="">(bağlı değil)</option>
           ${characters.map(c => `<option value="${c.id}" ${col.character_id === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
         </select></div>
-      <div style="font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;margin-top:10px;">TUR MİRASI <span style="font-weight:400;letter-spacing:0;">(bir kez yazılır - bu turun HER hücresinde AI'ya gider)</span></div>
+      <div style="font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;margin-top:10px;">TUR MİRASI${yardim(YARDIM.turMirasi, 'sol')}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
         ${TUR_ALANLARI.map(([anahtar, etiket, ipucu]) => `
           <div class="field" style="flex:1;min-width:140px;">
@@ -2075,7 +2110,7 @@ async function openMatrixRowEditor(m, rowId) {
           <option value="main" ${row.kind !== 'sub' ? 'selected' : ''}>Ana başlık</option>
           <option value="sub" ${row.kind === 'sub' ? 'selected' : ''}>Ara başlık</option>
         </select></div>
-      <div style="font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;margin-top:6px;">PARÇA MİRASI <span style="font-weight:400;letter-spacing:0;">(hücrelere yazılmaz, buradan AI'ya gider)</span></div>
+      <div style="font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;margin-top:6px;">PARÇA MİRASI${yardim(YARDIM.parcaMirasi, 'sol')}</div>
       <div style="display:flex;gap:6px;">
         <div class="field" style="flex:1;"><label>Parça no</label>
           <input type="text" id="mRowNo" value="${escapeHtml((row.parca_data || {}).no || '')}" placeholder="3 veya 5a"></div>
@@ -2083,7 +2118,7 @@ async function openMatrixRowEditor(m, rowId) {
           <input type="text" id="mRowSure" value="${escapeHtml((row.parca_data || {}).sure || '')}" placeholder="20 dk"></div>
       </div>
       <div class="field">
-        <label>📌 Talimat Kasası <span style="font-weight:400;color:var(--text-muted);font-size:11.5px;">(bu aşamanın KALICI yazım kısıtları - bağlı her bölümde AI'ya gider)</span></label>
+        <label>📌 Talimat Kasası${yardim(YARDIM.talimatKasasi, 'sol')}</label>
         <textarea id="mRowInstructions" style="min-height:110px;" placeholder="Örn:&#10;- Duyguyu ADLANDIRMA: beden, ses, nesne ve sessizlikle göster&#10;- Sanık bu aşamada en fazla tek cümle konuşur&#10;- Şişenin rengini betimlemeye yedir, rapor gibi verme">${escapeHtml(row.instructions || '')}</textarea>
       </div>
       <div class="form-actions">
