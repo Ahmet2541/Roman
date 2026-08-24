@@ -1416,3 +1416,30 @@ def test_import_rejects_wrong_file(client, headers):
     r = client.post("/matrix/import", json={"foo": "bar"}, headers=headers)
     assert r.status_code == 400
     assert "matrisler" in r.json()["detail"]
+
+
+def test_plan_characters_always_bring_their_voice(client, headers):
+    """Bölüm seçimi talimattaki anahtar kelimeye bakıyor; "bu sahneyi yaz"
+    talimatında "konuş/replik" geçmez. Ama PLANDA yazılı kişiler o sahnede
+    KONUŞACAK kişilerdir - sesleri gitmezse model hepsini aynı ağızdan yazar."""
+    k = client.post("/characters/", json={
+        "name": "İhtiyar Teknisyen", "description": "Elektronikçi.",
+        "sections": {"konusma_tarzi": "Soruya soruyla karşılık verir.",
+                     "duygusal_yapi": "Suçluluk taşır ama dile getirmez.",
+                     "fiziksel_yapi": "Gümüş sakallı."}}, headers=headers).json()
+    ch = client.post("/chapters/", json={"number": 1, "title": "S"}, headers=headers).json()
+    m = _matris(client, headers)
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "chapter_id": ch["id"],
+        "data": {"olay": "x", "kisiler": [
+            {"id": k["id"], "ad": "İhtiyar Teknisyen",
+             "duygu": {"baslangic": "umut", "bitis": "keder"}}]}}, headers=headers)
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [], "chapter_number": 1,
+        "instruction": "Bu sahneyi yaz."}, headers=headers).json()["context"]
+    assert "Soruya soruyla karşılık verir." in ctx, "plandaki kişinin sesi gitmedi"
+    assert "Suçluluk taşır" in ctx, "iç dünyası gitmedi"
+    # Seçicilik korunmalı: ilgisiz bölüm YİNE de sadece isim olarak listelenir
+    assert "Gümüş sakallı." not in ctx, "seçicilik bozuldu, her şey gidiyor"

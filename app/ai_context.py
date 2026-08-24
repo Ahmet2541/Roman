@@ -308,7 +308,16 @@ def _varolus_notu(record, sahne_zamani) -> str:
     return ""
 
 
-def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3, instruction_text: str = "", include_hidden: bool = False, sahne_zamani: int | None = None) -> str:
+# PLANDAN GELEN KİŞİLER İÇİN ZORUNLU BÖLÜMLER.
+# Bölüm seçimi talimattaki anahtar kelimeye bakıyor ("konuş", "replik"...).
+# Ama "bu sahneyi yaz" talimatında o kelimeler geçmez, oysa PLANDA yazılı
+# kişiler o sahnede KONUŞACAK kişilerdir - konuşma tarzları gitmezse model
+# hepsini aynı sesle yazar. Bu yüzden plandan gelen kişilerde bu bölümler
+# anahtar kelime aranmadan eklenir.
+PLAN_KISI_ZORUNLU = ["konusma_tarzi", "duygusal_yapi"]
+
+
+def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3, instruction_text: str = "", include_hidden: bool = False, sahne_zamani: int | None = None, plan_kaynakli: set | None = None) -> str:
     if not selected_entities:
         return ""
 
@@ -403,6 +412,11 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
         entity_sections = getattr(record, "sections", None) or {}
         visible = ai_visible_sections(entity_sections)
         relevant_keys = relevant_sections_for_instruction(instruction_text, ref.entity_type)
+        # Plandan gelen kişi bu sahnede konuşacak - sesi her hâlükârda gitsin.
+        if (plan_kaynakli and ref.entity_type == "character"
+                and (ref.entity_type, ref.entity_id) in plan_kaynakli):
+            relevant_keys = list(relevant_keys) + [
+                k for k in PLAN_KISI_ZORUNLU if k not in relevant_keys]
         injected = []
         for key in relevant_keys:
             content = (visible.get(key) or "").strip()
@@ -915,7 +929,8 @@ def build_context(
     except Exception:
         logger.exception("Sahne zamanı okunamadı, varlık denetimi atlanıyor")
         sahne_zamani = None
-    dynamic = build_dynamic_layer(db, universe_id, birlesik, instruction_text=instruction_text, include_hidden=include_hidden, sahne_zamani=sahne_zamani)
+    plan_kaynakli = {(r.entity_type, r.entity_id) for r in plan_refs}
+    dynamic = build_dynamic_layer(db, universe_id, birlesik, instruction_text=instruction_text, include_hidden=include_hidden, sahne_zamani=sahne_zamani, plan_kaynakli=plan_kaynakli)
     # KATMAN SIRASI - plan EN SONA alındı.
     # Plan, modelin en çok uyması gereken katman ama on beşin sekizincisi
     # olarak yığının ortasında kalıyordu; fihrist ise ikinci sıradaydı.
