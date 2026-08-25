@@ -329,15 +329,48 @@ async function loadProgressionPanel(entityType, entityId) {
   panel.innerHTML = '<div class="empty-state">Yükleniyor…</div>';
   try {
     const items = await api.get(`/progressions/?entity_type=${entityType}&entity_id=${entityId}`);
-    const rows = items.map(p => `
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px;padding:4px 0;">
-        <span><strong>${p.chapter_number ? 'Bölüm ' + p.chapter_number : 'Bölüm belirtilmemiş'}:</strong> ${escapeHtml(p.note)}</span>
+
+    // KRONOLOJİK SIRA: önce hikâye tarihi, sonra bölüm numarası, en sonda
+    // zamansız notlar. Yazar araya not eklerken doğru yeri görmeli -
+    // "üstüne mi altına mı" sorusu ancak sıralı listede cevaplanır.
+    const sirali = items.slice().sort((a, b) => {
+      const ta = normalizeTarihSirasi(a.story_date), tb = normalizeTarihSirasi(b.story_date);
+      if (ta !== null && tb !== null) return ta - tb;
+      if (ta !== null) return -1;
+      if (tb !== null) return 1;
+      const ca = a.chapter_number, cb = b.chapter_number;
+      if (ca != null && cb != null) return ca - cb;
+      if (ca != null) return -1;
+      if (cb != null) return 1;
+      return a.id - b.id;
+    });
+
+    const rows = sirali.map(p => {
+      const tarih = (p.story_date || '').trim();
+      const bolum = p.chapter_number ? `Bölüm ${p.chapter_number}` : '';
+      const damga = [tarih, bolum].filter(Boolean).join(' · ') || 'zamansız';
+      return `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;font-size:12.5px;padding:5px 0;border-bottom:1px dotted var(--border);">
+        <span style="flex:1;"><strong style="color:var(--gold);">${escapeHtml(damga)}</strong> — ${escapeHtml(p.note)}</span>
         <button class="btn-icon-sm del-progression-btn" data-id="${p.id}" title="Sil">✕</button>
-      </div>`).join('');
+      </div>`;
+    }).join('');
+
     panel.innerHTML = `
-      <strong style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">GELİŞİM ÇİZELGESİ</strong>
-      ${rows || '<div class="empty-state" style="padding:4px 0;">Henüz gelişim notu yok.</div>'}
-      <button class="btn btn-sm" id="addProgressionBtn" style="margin-top:6px;">+ Yeni gelişim notu</button>`;
+      <strong style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">KRONOLOJİ / GELİŞİM ÇİZELGESİ</strong>
+      <div style="font-size:11px;color:var(--text-muted);margin:2px 0 6px;">
+        Bu kaydın zaman içindeki değişimi. Bir sahne yazılırken SADECE o ana kadar
+        olan notlar AI'ya gider - sonraki notlar gönderilmez. Tarih yazarsan süzme
+        tarihe göre, yazmazsan bölüm numarasına göre yapılır.
+      </div>
+      ${rows || '<div class="empty-state" style="padding:4px 0;">Henüz not yok.</div>'}
+      <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">
+        <input type="text" id="progDate_${entityId}" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:150px;">
+        <input type="text" id="progChapter_${entityId}" placeholder="Bölüm no" style="flex:0 0 80px;">
+        <input type="text" id="progNote_${entityId}" placeholder="Ne değişti?" style="flex:3;min-width:170px;">
+        <button class="btn btn-sm" id="addProgressionBtn">+ Ekle</button>
+      </div>
+      <div id="progErr_${entityId}" class="error-text" style="font-size:11.5px;"></div>`;
 
     panel.querySelectorAll('.del-progression-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -347,27 +380,58 @@ async function loadProgressionPanel(entityType, entityId) {
         } catch (err) { alert(err.message); }
       });
     });
+
+    // Prompt() yerine ALAN: prompt sırayla iki pencere açıyordu, tarih
+    // eklenince üç olacaktı - üstelik yazdığını göremiyordun.
     el('addProgressionBtn').addEventListener('click', async () => {
-      const chapterNumber = prompt('Hangi bölümden itibaren geçerli? Bir SAYI gir (ör. 3), boş da bırakabilirsin:');
-      if (chapterNumber === null) return;
-      if (chapterNumber.trim() && Number.isNaN(parseInt(chapterNumber.trim(), 10))) {
-        alert(`"${chapterNumber}" bir sayı değil - bölüm numarasını rakamla yaz (ör. 3) ya da boş bırak.`);
+      const hata = document.getElementById(`progErr_${entityId}`);
+      const tarih = document.getElementById(`progDate_${entityId}`).value.trim();
+      const bolumHam = document.getElementById(`progChapter_${entityId}`).value.trim();
+      const note = document.getElementById(`progNote_${entityId}`).value.trim();
+      hata.textContent = '';
+      if (!note) { hata.textContent = 'Ne değiştiğini yaz.'; return; }
+      if (bolumHam && Number.isNaN(parseInt(bolumHam, 10))) {
+        hata.textContent = `"${bolumHam}" bir sayı değil - bölüm numarasını rakamla yaz ya da boş bırak.`;
         return;
       }
-      const note = prompt('Ne değişti? (ör: "Bacağından yaralandı")');
-      if (!note) return;
       try {
         await api.post('/progressions/', {
           entity_type: entityType, entity_id: parseInt(entityId, 10),
-          chapter_number: chapterNumber.trim() ? parseInt(chapterNumber.trim(), 10) : null,
+          chapter_number: bolumHam ? parseInt(bolumHam, 10) : null,
+          story_date: normalizeTarih ? normalizeTarih(tarih) : tarih,
           note,
         });
         loadProgressionPanel(entityType, entityId);
-      } catch (err) { alert(err.message); }
+      } catch (err) { hata.textContent = err.message; }
     });
   } catch (err) {
     panel.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
   }
+}
+
+// Sıralama için tarihi sayıya çevirir (06-matrix.js'teki normalizeTarih ile
+// aynı biçimleri anlar). Çözülemezse null - o not bölüm numarasına düşer.
+function normalizeTarihSirasi(ham) {
+  const metin = (ham || '').trim();
+  if (!metin) return null;
+  const AYLAR = ['ocak','şubat','mart','nisan','mayıs','haziran','temmuz',
+                 'ağustos','eylül','ekim','kasım','aralık'];
+  const kucuk = metin.replace(/İ/g, 'i').replace(/I/g, 'ı').toLowerCase();
+  let g = null, a = null, y = null;
+  let m = kucuk.match(/(\d{1,2})\s+([a-zçğıöşü]+)\s*(\d{4})?/);
+  if (m && AYLAR.indexOf(m[2]) >= 0) {
+    g = parseInt(m[1], 10); a = AYLAR.indexOf(m[2]) + 1;
+    y = m[3] ? parseInt(m[3], 10) : 0;
+  } else {
+    m = kucuk.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
+    if (!m) return null;
+    g = parseInt(m[1], 10); a = parseInt(m[2], 10); y = parseInt(m[3], 10);
+    if (y < 100) y += 2000;
+  }
+  if (!(g >= 1 && g <= 31 && a >= 1 && a <= 12)) return null;
+  const sa = kucuk.match(/(\d{1,2})[:.](\d{2})/);
+  const dk = sa ? parseInt(sa[1], 10) * 100 + parseInt(sa[2], 10) : 0;
+  return ((y * 100 + a) * 100 + g) * 10000 + dk;
 }
 
 async function showEntityForm(type, item) {
@@ -494,12 +558,21 @@ async function showEntityForm(type, item) {
       </div>
       <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">Sahne bu aralığın dışındaysa AI'ya "bu sahnede henüz yok / artık yok" uyarısı gider. Çözülemeyen ifadeler ("yedi yıl önce") denetime girmez.</div>` : ''}
       ${cfg.isRule ? '' : `<div class="field" style="margin-top:10px;"><label>Notlar <span style="font-weight:400;color:var(--text-muted);font-size:11.5px;">(serbest not - kişi seçiliyken AI'ya gider)</span></label><textarea id="f_notes">${escapeHtml(notesValue)}</textarea></div>`}
+      ${(isEdit && cfg.hasLifespan) ? `
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;">
+      <div class="progression-panel" data-id="${item.id}"></div>` : ''}
       <div class="form-actions">
         <button class="btn btn-primary" id="saveBtn">${isEdit ? 'Güncelle' : 'Kaydet'}</button>
         <button class="btn" id="cancelBtn">Vazgeç</button>
       </div>
       <div id="formError" class="error-text"></div>
     </div>`;
+
+  // KRONOLOJİ DÜZENLEME EKRANINDA: eskiden listede ayrı bir "Gelişim"
+  // düğmesindeydi, yani kaydı düzenlerken kronolojisini göremiyordun -
+  // yeni notu nereye ekleyeceğini kestiremiyordun. Artık formun içinde,
+  // kronolojik sırayla.
+  if (isEdit && cfg.hasLifespan) loadProgressionPanel(type, item.id);
 
   el('cancelBtn').addEventListener('click', () => { container.innerHTML = ''; });
   if (supportsRules) {

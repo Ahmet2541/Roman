@@ -1582,3 +1582,39 @@ def test_undated_progressions_always_pass(client, headers):
         "chapter_number": 1}, headers=headers).json()["context"]
     assert "tane tane konuşur" in ctx
     assert "Yargılar." not in ctx
+
+
+def test_progression_story_date_drives_filtering(client, headers):
+    """Bölüm NUMARASI hikâye sırası değil - geriye giden bir romanda
+    Bölüm 21, Bölüm 2'den önce geçebilir. Tarih varsa süzme onu kullanır."""
+    k = client.post("/characters/", json={"name": "Vicdan", "description": "Bilinç."},
+                    headers=headers).json()
+    client.post("/progressions/", json={
+        "entity_type": "character", "entity_id": k["id"],
+        "story_date": "28 Haziran 2030 21:00", "note": "Uyanır."}, headers=headers)
+    client.post("/progressions/", json={
+        "entity_type": "character", "entity_id": k["id"],
+        "story_date": "7 Temmuz 2030 21:00", "note": "Yargılamaya başlar."}, headers=headers)
+    _zamanli_bolum(client, headers, "29 Haziran 2030", "10:00")
+
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [{"entity_type": "character", "entity_id": k["id"]}],
+        "chapter_number": 1}, headers=headers).json()["context"]
+    assert "Uyanır." in ctx, "geçmiş not gitmedi"
+    assert "Yargılamaya başlar." not in ctx, "gelecek not sızdı"
+    assert "28 Haziran 2030 21:00" in ctx, "tarih damgası gösterilmedi"
+
+
+def test_progression_date_beats_chapter_number(client, headers):
+    """Tarih ve bölüm numarası ÇELİŞİRSE tarih kazanmalı."""
+    k = client.post("/characters/", json={"name": "Vicdan", "description": "x"},
+                    headers=headers).json()
+    # Bölüm numarası küçük (geçmiş gibi) ama tarihi GELECEK
+    client.post("/progressions/", json={
+        "entity_type": "character", "entity_id": k["id"], "chapter_number": 1,
+        "story_date": "7 Temmuz 2030", "note": "Gelecek olay."}, headers=headers)
+    _zamanli_bolum(client, headers, "29 Haziran 2030", "10:00")
+    ctx = client.post("/ai/context-preview", json={
+        "selected_entities": [{"entity_type": "character", "entity_id": k["id"]}],
+        "chapter_number": 1}, headers=headers).json()["context"]
+    assert "Gelecek olay." not in ctx, "bölüm numarası tarihi ezdi"

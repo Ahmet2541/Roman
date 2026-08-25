@@ -604,7 +604,7 @@ class ProgressionBase(BaseModel):
 
 class ProgressionCreate(ProgressionBase):
     pass
-
+    story_date: str = ""
 
 class ProgressionOut(ProgressionBase):
     model_config = ConfigDict(from_attributes=True)
@@ -615,7 +615,7 @@ class ProgressionOut(ProgressionBase):
     # o an aktif olan kitaba (X-Novel-Id) göre otomatik doldurulur.
     source_novel_id: Optional[int] = None
     source_novel_name: Optional[str] = None
-
+    story_date: str = ""
 
 class ProgressionSuggestion(BaseModel):
     """AI'nın bir bölümü tarayıp önerdiği gelişim notu taslağı. Kaydedilmez -

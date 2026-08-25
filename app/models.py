@@ -396,6 +396,11 @@ class Progression(Base):
     entity_type = Column(String(30), nullable=False)
     entity_id = Column(Integer, nullable=False)
     chapter_number = Column(Integer, nullable=True)
+    # HİKÂYE TARİHİ (serbest metin, ör. "28 Haziran 2030 21:00").
+    # Bölüm NUMARASI hikâye sırası değildir - kronolojik olarak geriye
+    # giden bir romanda Bölüm 21, Bölüm 2'den ÖNCE geçebilir. Tarih
+    # varsa kronolojik süzme onu kullanır; yoksa bölüm numarasına düşer.
+    story_date = Column(EncryptedString, default="")
     note = Column(EncryptedString, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 

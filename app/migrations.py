@@ -37,6 +37,7 @@ def run_startup_migrations(engine):
         # yoksa, aradaki her ORM sorgusu "no such column" ile patlar.
         # Sütun ekleyen göçler her zaman önce gelmeli.
         _upgrade_entity_lifespan(engine)
+        _add_progression_story_date(engine)
         _add_universe_columns(engine)
         _backfill_default_novel(engine)
         _backfill_universes(engine)
@@ -366,6 +367,19 @@ def _merge_legacy_sections(engine):
         if moved:
             db.commit()
             logger.info("Göç: %s kayıtta eski derin profil başlıkları yeni yapıya taşındı", moved)
+
+
+def _add_progression_story_date(engine):
+    """Gelişim notlarına HİKÂYE TARİHİ. Bölüm numarası hikâye sırası
+    değil; tarih varsa kronolojik süzme onu kullanır."""
+    inspector = inspect(engine)
+    if "progressions" not in set(inspector.get_table_names()):
+        return
+    cols = {c["name"] for c in inspector.get_columns("progressions")}
+    if "story_date" not in cols:
+        logger.info("Göç: progressions.story_date (hikâye tarihi) ekleniyor")
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE progressions ADD COLUMN story_date TEXT"))
 
 
 def _upgrade_entity_lifespan(engine):

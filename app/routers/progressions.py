@@ -71,6 +71,9 @@ def create_progression(
         entity_type=payload.entity_type,
         entity_id=payload.entity_id,
         chapter_number=payload.chapter_number,
+        # HİKÂYE TARİHİ: kronolojik süzmenin ölçüsü. Bölüm numarasından
+        # önce gelir - geriye giden bir romanda numara yanıltır.
+        story_date=(payload.story_date or "").strip(),
         note=payload.note,
     )
     db.add(item)

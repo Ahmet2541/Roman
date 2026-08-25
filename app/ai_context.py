@@ -567,17 +567,34 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
         # gönderilirse profildeki "ileride suçluluk duyacak" sorununun
         # aynısı ilerlemede tekrarlanır. Bölümü belirtilmemiş notlar
         # (zamansız genel bilgi) her zaman kalır.
-        gelecek_not = 0
-        if su_anki_bolum is not None:
-            once = len(progressions)
-            progressions = [
-                p for p in progressions
-                if p.chapter_number is None or p.chapter_number <= su_anki_bolum
-            ]
-            gelecek_not = once - len(progressions)
+        # Süzme ölçüsü: ÖNCE tarih, sonra bölüm numarası. Bölüm numarası
+        # hikâye sırası değildir - geriye giden bir romanda Bölüm 21,
+        # Bölüm 2'den önce geçebilir. İkisi de yoksa not zamansızdır ve
+        # her zaman gider.
+        def _gelecekte_mi(pr):
+            pd = story_time.parse_tarih(getattr(pr, "story_date", "") or "")
+            if pd is not None and sahne_zamani is not None:
+                return pd > sahne_zamani
+            if pr.chapter_number is not None and su_anki_bolum is not None:
+                return pr.chapter_number > su_anki_bolum
+            return False
+
+        once = len(progressions)
+        progressions = [p for p in progressions if not _gelecekte_mi(p)]
+        gelecek_not = once - len(progressions)
 
         if progressions or gelecek_not:
-            progressions.sort(key=lambda p: (p.chapter_number is None, p.chapter_number or 0, p.id))
+            # Kronolojik sıra: tarihi olan önce tarihe, olmayan bölüm
+            # numarasına göre dizilir. Yazar notu araya eklerken doğru
+            # yeri görsün diye sıralama tutarlı olmalı.
+            def _sira(pr):
+                pd = story_time.parse_tarih(getattr(pr, "story_date", "") or "")
+                if pd is not None:
+                    return (0, pd, pr.id)
+                if pr.chapter_number is not None:
+                    return (1, pr.chapter_number, pr.id)
+                return (2, 0, pr.id)
+            progressions.sort(key=_sira)
             blocks.append("Zaman içindeki gelişimi (kronolojik sırayla, EN GÜNCEL EN ALTTA):")
             # Devasa bir seride (yüzlerce bölüm) bir karakterin gelişim
             # notu listesi tek başına sınırsız büyüyebilir - bu yüzden
@@ -597,7 +614,15 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
                 blocks.append(f"  - [ESKİ NOTLARIN ÖZETİ] {older_preview}{extra}")
                 progressions = recent
             for prog in progressions:
-                chapter_part = f"Bölüm {prog.chapter_number}" if prog.chapter_number else "bölüm belirtilmemiş"
+                _tarih = (getattr(prog, "story_date", "") or "").strip()
+                if _tarih and prog.chapter_number:
+                    chapter_part = f"{_tarih} · Bölüm {prog.chapter_number}"
+                elif _tarih:
+                    chapter_part = _tarih
+                elif prog.chapter_number:
+                    chapter_part = f"Bölüm {prog.chapter_number}"
+                else:
+                    chapter_part = "zamansız"
                 blocks.append(f"  - ({chapter_part}) {prog.note}")
             if gelecek_not:
                 blocks.append(
