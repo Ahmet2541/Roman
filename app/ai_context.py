@@ -317,10 +317,58 @@ def _varolus_notu(record, sahne_zamani) -> str:
 PLAN_KISI_ZORUNLU = ["konusma_tarzi", "duygusal_yapi"]
 
 
-def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3, instruction_text: str = "", include_hidden: bool = False, sahne_zamani: int | None = None, plan_kaynakli: set | None = None) -> str:
+def _tr_lower(metin: str) -> str:
+    return (metin or "").replace("İ", "i").replace("I", "ı").lower()
+
+
+def _gelecek_varliklar(db: Session, universe_id: int, sahne_zamani) -> list:
+    """Sahne anında HENÜZ VAR OLMAYAN varlıkların adları (+ takma adları).
+
+    Profil metinleri düz yazıdır ve romanın TAMAMINA ait bilgi taşır:
+    "Vicdan'ı yanlışlıkla doğuran", "Vicdan'ın fısıltılarını duyuyor" gibi.
+    Bu cümleler sahneye gelecek sızdırıyor ama hiçbir denetim düz metnin
+    içindeki adı okumuyordu - varoluş denetimi yalnızca varlığın KENDİ
+    kaydına bakıyordu.
+    """
+    if sahne_zamani is None:
+        return []
+    from .entities import ENTITY_MODELS
+    adlar = []
+    for tip in ("character", "place", "object"):
+        model = ENTITY_MODELS.get(tip)
+        if model is None:
+            continue
+        for kayit in db.query(model).filter(model.universe_id == universe_id).all():
+            var = story_time.parse_tarih(getattr(kayit, "var_olus", "") or "")
+            if var is not None and sahne_zamani < var:
+                adlar.append(kayit.name)
+                adlar.extend(a for a in (kayit.aliases or []) if str(a).strip())
+    return [a for a in adlar if len(str(a).strip()) >= 3]
+
+
+def _gelecek_uyarisi(metin: str, gelecek_adlar: list) -> str:
+    """Profil metninde henüz var olmayan bir varlığın adı geçiyor mu?"""
+    if not metin or not gelecek_adlar:
+        return ""
+    dusuk = _tr_lower(metin)
+    gecen = []
+    for ad in gelecek_adlar:
+        kalip = r"(?<!\w)" + re.escape(_tr_lower(str(ad))) + r"(?!\w)"
+        if re.search(kalip, dusuk):
+            gecen.append(str(ad))
+    if not gecen:
+        return ""
+    return ("⚠ Bu profilde HENÜZ VAR OLMAYAN varlık(lar) anılıyor: "
+            + ", ".join(sorted(set(gecen)))
+            + ". Bunlar sahnenin GELECEĞİDİR - metne taşıma, ima etme, "
+              "adsız da olsa sezdirme.")
+
+
+def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3, instruction_text: str = "", include_hidden: bool = False, sahne_zamani: int | None = None, plan_kaynakli: set | None = None, su_anki_bolum: int | None = None) -> str:
     if not selected_entities:
         return ""
 
+    gelecek_adlar = _gelecek_varliklar(db, universe_id, sahne_zamani)
     blocks = ["İLGİLİ GEÇMİŞ BİLGİLER:"]
     for ref in selected_entities:
         model = ENTITY_MODELS.get(ref.entity_type)
@@ -352,6 +400,13 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
             blocks.append(f"Özet: {record.description}")
         if getattr(record, "notes", ""):
             blocks.append(f"Notlar: {record.notes}")
+        # Profil metni geleceği sızdırıyor mu? Yazarın dikkatsizliği
+        # sahneye "adı olmayan bir şey uyanıyordu" olarak geri dönüyordu.
+        _gel = _gelecek_uyarisi(
+            " ".join(filter(None, [record.description, getattr(record, "notes", "")])),
+            gelecek_adlar)
+        if _gel:
+            blocks.append(_gel)
 
         # MEKAN HİYERARŞİSİ: bir mekan başka bir mekanın içindeyse (bkz.
         # Place.parent_place_id), bu zinciri otomatik ekliyoruz - ör.
@@ -507,7 +562,21 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
             )
             .all()
         )
-        if progressions:
+        # KRONOLOJİK SÜZME: gelişim notları "Bölüm X'ten itibaren şu
+        # geçerli" demek. Bölüm 1 yazılırken Bölüm 12'nin notu GELECEKTİR -
+        # gönderilirse profildeki "ileride suçluluk duyacak" sorununun
+        # aynısı ilerlemede tekrarlanır. Bölümü belirtilmemiş notlar
+        # (zamansız genel bilgi) her zaman kalır.
+        gelecek_not = 0
+        if su_anki_bolum is not None:
+            once = len(progressions)
+            progressions = [
+                p for p in progressions
+                if p.chapter_number is None or p.chapter_number <= su_anki_bolum
+            ]
+            gelecek_not = once - len(progressions)
+
+        if progressions or gelecek_not:
             progressions.sort(key=lambda p: (p.chapter_number is None, p.chapter_number or 0, p.id))
             blocks.append("Zaman içindeki gelişimi (kronolojik sırayla, EN GÜNCEL EN ALTTA):")
             # Devasa bir seride (yüzlerce bölüm) bir karakterin gelişim
@@ -530,6 +599,10 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
             for prog in progressions:
                 chapter_part = f"Bölüm {prog.chapter_number}" if prog.chapter_number else "bölüm belirtilmemiş"
                 blocks.append(f"  - ({chapter_part}) {prog.note}")
+            if gelecek_not:
+                blocks.append(
+                    f"  - ({gelecek_not} gelişim notu bu bölümden SONRAYA ait olduğu için "
+                    f"çıkarıldı - o gelişmeler bu anda henüz OLMAMIŞTIR.)")
 
         mentions = (
             db.query(models.Mention)
@@ -930,7 +1003,7 @@ def build_context(
         logger.exception("Sahne zamanı okunamadı, varlık denetimi atlanıyor")
         sahne_zamani = None
     plan_kaynakli = {(r.entity_type, r.entity_id) for r in plan_refs}
-    dynamic = build_dynamic_layer(db, universe_id, birlesik, instruction_text=instruction_text, include_hidden=include_hidden, sahne_zamani=sahne_zamani, plan_kaynakli=plan_kaynakli)
+    dynamic = build_dynamic_layer(db, universe_id, birlesik, instruction_text=instruction_text, include_hidden=include_hidden, sahne_zamani=sahne_zamani, plan_kaynakli=plan_kaynakli, su_anki_bolum=chapter_number)
     # KATMAN SIRASI - plan EN SONA alındı.
     # Plan, modelin en çok uyması gereken katman ama on beşin sekizincisi
     # olarak yığının ortasında kalıyordu; fihrist ise ikinci sıradaydı.

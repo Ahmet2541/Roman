@@ -68,8 +68,17 @@ def parse_tarih(tarih: str, saat: str = "") -> Optional[int]:
         # sonra gelir ki bu da doğrudur.
         yil = 0
 
+    # Saat AYRI verilmediyse tarih metninin İÇİNDE ara: varlık kayıtlarında
+    # (doğum/ölüm) tek bir alan var, "28 Haziran 2030 21:00" diye yazılıyor.
+    # Saati okumazsak gün 00:00 sayılır ve aynı günün 13:30'undaki sahnede
+    # varlık "çoktan var" görünür - Vicdan tam bu yüzden denetimden kaçtı.
+    saat_kaynak = str(saat or "")
+    if not re.search(r"\d{1,2}[:.]\d{2}", saat_kaynak):
+        # Tarihin gün/ay/yıl kısmını atla, kalanda saat ara.
+        kalan = ham[m.end():] if m else ham
+        saat_kaynak = kalan
     saat_dk = 0
-    m = re.search(r"(\d{1,2})[:.](\d{2})", str(saat or ""))
+    m = re.search(r"(\d{1,2})[:.](\d{2})", saat_kaynak)
     if m:
         sa, dk = int(m.group(1)), int(m.group(2))
         if 0 <= sa <= 23 and 0 <= dk <= 59:

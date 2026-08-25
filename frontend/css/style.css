@@ -585,3 +585,42 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
 
 #duyguSecici .ds-grup:hover { background: var(--paper-dim); }
 #duyguSecici .ds-ton:hover { background: var(--gold); color: var(--paper); }
+
+/* --- YARDIM BALONU (? işareti) ---------------------------------------------
+   Plan matrisi formlarında on dörtten fazla alan var; çoğunun ne işe
+   yaradığı etikete sığmıyor. Uzun açıklamalar etiketten çıkarılıp buraya
+   taşındı: form daralır, bilgi kaybolmaz.
+   Balon SADECE CSS ile çalışır - JS gerektirmez, dolayısıyla yeniden
+   çizilen dinamik satırlarda (kişi listesi, beat listesi) da bozulmaz. */
+.yardim {
+  position: relative; display: inline-flex; align-items: center;
+  justify-content: center; width: 15px; height: 15px; margin-left: 4px;
+  border: 1px solid var(--border); border-radius: 50%;
+  background: var(--paper-dim); color: var(--text-muted);
+  font-size: 10px; font-weight: 700; cursor: help; vertical-align: middle;
+  font-family: var(--font-ui); flex: 0 0 auto;
+}
+.yardim:hover { background: var(--gold); border-color: var(--gold); color: var(--paper); }
+
+.yardim > .balon {
+  position: absolute; left: 50%; bottom: calc(100% + 7px);
+  transform: translateX(-50%);
+  width: 270px; max-width: 78vw; padding: 8px 10px;
+  background: var(--ink-900); color: #f3efe6;
+  border-radius: 6px; font-size: 11.5px; line-height: 1.45;
+  font-weight: 400; text-align: left; letter-spacing: 0;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  opacity: 0; visibility: hidden; transition: opacity 0.12s;
+  z-index: 9999; pointer-events: none; white-space: normal;
+}
+.yardim > .balon::after {
+  content: ""; position: absolute; top: 100%; left: 50%;
+  transform: translateX(-50%); border: 5px solid transparent;
+  border-top-color: var(--ink-900);
+}
+.yardim:hover > .balon, .yardim:focus > .balon { opacity: 1; visibility: visible; }
+/* Balon ekranın solunda/sağında taşmasın: kenardaki alanlarda hizayı kaydır */
+.yardim.sol > .balon { left: 0; transform: none; }
+.yardim.sol > .balon::after { left: 12px; }
+.yardim.sag > .balon { left: auto; right: 0; transform: none; }
+.yardim.sag > .balon::after { left: auto; right: 12px; }

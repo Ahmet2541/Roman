@@ -521,4 +521,31 @@ test('yeni seri olustur dugmesi her aciliş yolunda baglanir', () => {
     throw new Error('hata mesaji icin alan yok');
 });
 
+// --- 24. YARDIM BALONLARI ---
+// Balon metinleri modele giden GERÇEK kısıtı anlatmalı. Uydurma bir
+// açıklama, yazarın bir şey sanıp sistemin başka şey yapmasına yol açar.
+test('yardim balonlari gercek kisiti anlatiyor', () => {
+  const fs = require('fs');
+  const kaynak = fs.readFileSync(__dirname + '/../../frontend/js/modules/06-matrix.js', 'utf8');
+  const css = fs.readFileSync(__dirname + '/../../frontend/css/style.css', 'utf8');
+
+  if (!/\.yardim\s*\{/.test(css)) throw new Error('yardim stili yok');
+  if (!/\.yardim > \.balon/.test(css)) throw new Error('balon stili yok');
+  if (typeof yardim !== 'function') throw new Error('yardim() yok');
+
+  const Y = global.YARDIM || global.window.YARDIM;
+  const beklenen = ['olay','tarih','saat','zamanTip','sayac','mekan','ortam','kisiler',
+                    'nesneler','odak','uzunluk','giris','gelisme','sonuc','baglanti',
+                    'bagliBolum','turMirasi','parcaMirasi','talimatKasasi'];
+  for (const k of beklenen) {
+    if (!Y || !Y[k]) throw new Error(`yardim metni eksik: ${k}`);
+    if (Y[k].length < 40) throw new Error(`yardim metni fazla kisa: ${k}`);
+  }
+  // ODAK bir KISIT - eski "dikkat toplanır" ifadesi yanlis olurdu
+  if (!/SADECE/.test(Y.odak)) throw new Error('odak balonu kisit oldugunu soylemiyor');
+  // Balon her alana baglanmis mi
+  const sayi = (kaynak.match(/yardim\(YARDIM\./g) || []).length;
+  if (sayi < 15) throw new Error(`balon baglantisi az (${sayi})`);
+});
+
 Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));
