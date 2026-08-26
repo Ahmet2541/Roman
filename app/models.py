@@ -381,25 +381,29 @@ class ParagraphVersion(Base):
 class Progression(Base):
     """Bir varlığın (karakter/mekan/nesne/olay/ipucu/faksiyon) zaman içinde
     DEĞİŞEN bilgisi. Ana description/notes alanları statiktir (evren
-    boyunca geçerli genel bilgi); Progression ise 'Bölüm X'ten itibaren şu
+    boyunca geçerli genel bilgi); Progression ise 'şu tarihten itibaren şu
     geçerli' şeklinde kronolojik bir iz tutar. Evren düzeyinde tutulur -
     bir karakterin gelişimi kitap sınırını aşabilir (2. kitapta öğrenilen
     bir şey 1. kitaptaki haliyle çelişmemeli).
 
     source_novel_id (opsiyonel): bu notun hangi KİTAPTA öğrenildiğini
-    belirtir (chapter_number o kitabın içindeki sırayı ifade eder) -
-    'Kitap 2, Bölüm 12' gibi göstermek için, filtrelemede kullanılmaz."""
+    belirtir - sadece bilgi amaçlı, filtrelemede kullanılmaz.
+
+    chapter_number: KALDIRILDI (kronoloji anchor'ı olarak kullanılmıyor -
+    bölüm numarası hikâye sırası değildir, roman yeniden bölümlenirse/
+    kısımlar taşınırsa numara anlamını yitirir). Kolon eski kayıtlar için
+    DB'de duruyor ama uygulama artık okumuyor/yazmıyor - tek kronoloji
+    anahtarı story_date. Tarih yoksa not zamansız kabul edilir."""
     __tablename__ = "progressions"
     id = Column(Integer, primary_key=True)
     universe_id = Column(Integer, ForeignKey("universes.id"), nullable=True)
     source_novel_id = Column(Integer, ForeignKey("novels.id"), nullable=True)
     entity_type = Column(String(30), nullable=False)
     entity_id = Column(Integer, nullable=False)
-    chapter_number = Column(Integer, nullable=True)
-    # HİKÂYE TARİHİ (serbest metin, ör. "28 Haziran 2030 21:00").
-    # Bölüm NUMARASI hikâye sırası değildir - kronolojik olarak geriye
-    # giden bir romanda Bölüm 21, Bölüm 2'den ÖNCE geçebilir. Tarih
-    # varsa kronolojik süzme onu kullanır; yoksa bölüm numarasına düşer.
+    chapter_number = Column(Integer, nullable=True)  # legacy - bkz. yukarıdaki not
+    # HİKÂYE TARİHİ (serbest metin, ör. "28 Haziran 2030 21:00") - TEK
+    # kronoloji anahtarı. Çözülemezse ("yedi yıl önce" gibi) not zamansız
+    # kabul edilir ve süzmeye girmeden her zaman gösterilir.
     story_date = Column(EncryptedString, default="")
     note = Column(EncryptedString, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)

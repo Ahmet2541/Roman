@@ -330,25 +330,19 @@ async function loadProgressionPanel(entityType, entityId) {
   try {
     const items = await api.get(`/progressions/?entity_type=${entityType}&entity_id=${entityId}`);
 
-    // KRONOLOJİK SIRA: önce hikâye tarihi, sonra bölüm numarası, en sonda
-    // zamansız notlar. Yazar araya not eklerken doğru yeri görmeli -
-    // "üstüne mi altına mı" sorusu ancak sıralı listede cevaplanır.
+    // KRONOLOJİK SIRA: TEK ölçü hikâye tarihi, en sonda zamansız notlar.
+    // Yazar araya not eklerken doğru yeri görmeli - "üstüne mi altına mı"
+    // sorusu ancak sıralı listede cevaplanır.
     const sirali = items.slice().sort((a, b) => {
       const ta = normalizeTarihSirasi(a.story_date), tb = normalizeTarihSirasi(b.story_date);
       if (ta !== null && tb !== null) return ta - tb;
       if (ta !== null) return -1;
       if (tb !== null) return 1;
-      const ca = a.chapter_number, cb = b.chapter_number;
-      if (ca != null && cb != null) return ca - cb;
-      if (ca != null) return -1;
-      if (cb != null) return 1;
       return a.id - b.id;
     });
 
     const rows = sirali.map(p => {
-      const tarih = (p.story_date || '').trim();
-      const bolum = p.chapter_number ? `Bölüm ${p.chapter_number}` : '';
-      const damga = [tarih, bolum].filter(Boolean).join(' · ') || 'zamansız';
+      const damga = (p.story_date || '').trim() || 'zamansız';
       return `
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;font-size:12.5px;padding:5px 0;border-bottom:1px dotted var(--border);">
         <span style="flex:1;"><strong style="color:var(--gold);">${escapeHtml(damga)}</strong> — ${escapeHtml(p.note)}</span>
@@ -360,13 +354,12 @@ async function loadProgressionPanel(entityType, entityId) {
       <strong style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">KRONOLOJİ / GELİŞİM ÇİZELGESİ</strong>
       <div style="font-size:11px;color:var(--text-muted);margin:2px 0 6px;">
         Bu kaydın zaman içindeki değişimi. Bir sahne yazılırken SADECE o ana kadar
-        olan notlar AI'ya gider - sonraki notlar gönderilmez. Tarih yazarsan süzme
-        tarihe göre, yazmazsan bölüm numarasına göre yapılır.
+        olan notlar AI'ya gider - sonraki notlar gönderilmez. Süzme SADECE tarihe
+        göre yapılır; tarih yazmazsan not zamansız kabul edilir ve her zaman gider.
       </div>
       ${rows || '<div class="empty-state" style="padding:4px 0;">Henüz not yok.</div>'}
       <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">
         <input type="text" id="progDate_${entityId}" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:150px;">
-        <input type="text" id="progChapter_${entityId}" placeholder="Bölüm no" style="flex:0 0 80px;">
         <input type="text" id="progNote_${entityId}" placeholder="Ne değişti?" style="flex:3;min-width:170px;">
         <button class="btn btn-sm" id="addProgressionBtn">+ Ekle</button>
       </div>
@@ -386,18 +379,12 @@ async function loadProgressionPanel(entityType, entityId) {
     el('addProgressionBtn').addEventListener('click', async () => {
       const hata = document.getElementById(`progErr_${entityId}`);
       const tarih = document.getElementById(`progDate_${entityId}`).value.trim();
-      const bolumHam = document.getElementById(`progChapter_${entityId}`).value.trim();
       const note = document.getElementById(`progNote_${entityId}`).value.trim();
       hata.textContent = '';
       if (!note) { hata.textContent = 'Ne değiştiğini yaz.'; return; }
-      if (bolumHam && Number.isNaN(parseInt(bolumHam, 10))) {
-        hata.textContent = `"${bolumHam}" bir sayı değil - bölüm numarasını rakamla yaz ya da boş bırak.`;
-        return;
-      }
       try {
         await api.post('/progressions/', {
           entity_type: entityType, entity_id: parseInt(entityId, 10),
-          chapter_number: bolumHam ? parseInt(bolumHam, 10) : null,
           story_date: normalizeTarih ? normalizeTarih(tarih) : tarih,
           note,
         });

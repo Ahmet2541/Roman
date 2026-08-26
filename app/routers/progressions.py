@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..auth import get_current_user
-from .. import models, schemas
+from .. import models, schemas, story_time
 from ..entities import ENTITY_MODELS
 from ..novel_context import get_universe_id, get_novel_id
 
@@ -26,7 +26,7 @@ def _to_out(db: Session, item: models.Progression) -> schemas.ProgressionOut:
     novel = db.query(models.Novel).filter(models.Novel.id == item.source_novel_id).first() if item.source_novel_id else None
     return schemas.ProgressionOut(
         id=item.id, entity_type=item.entity_type, entity_id=item.entity_id,
-        chapter_number=item.chapter_number, note=item.note, created_at=item.created_at,
+        note=item.note, created_at=item.created_at, story_date=item.story_date or "",
         source_novel_id=item.source_novel_id, source_novel_name=novel.name if novel else None,
     )
 
@@ -45,9 +45,12 @@ def list_progressions(
     if entity_id is not None:
         query = query.filter(models.Progression.entity_id == entity_id)
     items = query.all()
-    # Kronolojik sırala: chapter_number'ı olmayanlar (henüz bölüme
-    # bağlanmamış notlar) en sona düşer.
-    items.sort(key=lambda p: (p.chapter_number is None, p.chapter_number or 0, p.id))
+    # Kronolojik sırala: TEK ölçü story_date. Tarihi olmayan (çözülemeyen
+    # ya da hiç girilmemiş) notlar zamansız kabul edilip en sona düşer.
+    def _sira(p):
+        cozulen = story_time.parse_tarih(p.story_date or "")
+        return (cozulen is None, cozulen or 0, p.id)
+    items.sort(key=_sira)
     return [_to_out(db, p) for p in items]
 
 
@@ -70,9 +73,7 @@ def create_progression(
         source_novel_id=novel_id,
         entity_type=payload.entity_type,
         entity_id=payload.entity_id,
-        chapter_number=payload.chapter_number,
-        # HİKÂYE TARİHİ: kronolojik süzmenin ölçüsü. Bölüm numarasından
-        # önce gelir - geriye giden bir romanda numara yanıltır.
+        # HİKÂYE TARİHİ: kronolojik süzmenin TEK ölçüsü.
         story_date=(payload.story_date or "").strip(),
         note=payload.note,
     )

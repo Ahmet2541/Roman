@@ -598,7 +598,6 @@ class ContextLayerSize(BaseModel):
 class ProgressionBase(BaseModel):
     entity_type: str
     entity_id: int
-    chapter_number: Optional[int] = None
     note: str
 
 
@@ -619,11 +618,13 @@ class ProgressionOut(ProgressionBase):
 
 class ProgressionSuggestion(BaseModel):
     """AI'nın bir bölümü tarayıp önerdiği gelişim notu taslağı. Kaydedilmez -
-    kullanıcı onaylarsa mevcut POST /progressions/ ile kaydedilir."""
+    kullanıcı onaylarsa mevcut POST /progressions/ ile kaydedilir.
+    story_date: metinde AÇIKÇA geçen bir tarih varsa onu taşır; yoksa boş
+    kalır ve not zamansız olarak kaydedilir (bölüm numarasına düşülmez)."""
     entity_type: str
     entity_id: int
     entity_name: str
-    chapter_number: int
+    story_date: str = ""
     note: str
 
 

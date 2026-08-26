@@ -77,7 +77,7 @@ def export_all(
             for r in db.query(models.CharacterRelationship).filter(models.CharacterRelationship.universe_id == universe_id).all()
         ],
         "progressions": [
-            _serialize(p, ["id", "entity_type", "entity_id", "chapter_number", "note", "created_at"])
+            _serialize(p, ["id", "entity_type", "entity_id", "story_date", "note", "created_at"])
             for p in db.query(models.Progression).filter(models.Progression.universe_id == universe_id).all()
         ],
         "chapters": [],
@@ -207,7 +207,7 @@ async def import_all(
             continue
         db.add(models.Progression(
             universe_id=universe_id, source_novel_id=novel_id, entity_type=entity_type, entity_id=new_entity_id,
-            chapter_number=row.get("chapter_number"), note=row.get("note", ""),
+            story_date=row.get("story_date", ""), note=row.get("note", ""),
         ))
         n += 1
     counts["progressions"] = n

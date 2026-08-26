@@ -127,14 +127,15 @@ Kurallar:
 - Emin olmadığın ya da önemsiz gördüğün varlıklar için not üretme.
 - Sadece sana verilen varlık listesindeki (entity_type + entity_id
   eşleşen) kayıtlar için öneri yap, yeni varlık uydurma.
-- Birden fazla bölüm verildiyse, her notun HANGİ bölümde geçtiğini
-  chapter_number alanında doğru belirt - bu, notun kronolojik sırasını
-  tutmak için kritik.
+- story_date alanına SADECE metinde AÇIKÇA geçen bir tarih/zaman ifadesini
+  yaz (ör. "28 Haziran 2030", "3. gün"). Metin bir tarih vermiyorsa
+  story_date'i BOŞ bırak - bölüm numarasını tarih yerine KULLANMA, bölüm
+  sırası hikâye zamanı değildir.
 
 Yanıtını SADECE aşağıdaki JSON formatında ver:
 {
   "updates": [
-    {"entity_type": "character", "entity_id": 3, "chapter_number": 5, "note": "..."}
+    {"entity_type": "character", "entity_id": 3, "story_date": "", "note": "..."}
   ]
 }
 Yeni/değişen bilgi yoksa updates boş liste olsun."""
