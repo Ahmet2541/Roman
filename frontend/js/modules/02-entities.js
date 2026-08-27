@@ -341,12 +341,15 @@ async function loadProgressionPanel(entityType, entityId) {
       return a.id - b.id;
     });
 
-    // Her satırın ÜSTÜNDE bir "+ buraya ekle" ince çubuğu var (satır
-    // sayısı N ise N+1 slot: en üst, aralar, en alt). Konum sadece görsel
-    // ipucu - gerçek sıra HER ZAMAN tarihe göre yeniden hesaplanır, o
-    // yüzden slot'a tıklamak "buraya zorla" değil "buraya yakın bir tarih
-    // gireceğim, komşu tarihleri görmek istiyorum" demek.
-    const slot = (i) => {
+    // Her satırın SONUNDA iki belirgin ikon buton var: ▲+ (bu notun
+    // ÜSTÜNE ekle) ve ▼+ (bu notun ALTINA ekle). İkisi de aynı gizli
+    // "slot" formunu açar (satır i=0..N-1'in üstü = slot i, altı = slot
+    // i+1) - komşu iki satırın "üstüne" ve "altına" butonları aynı slot'a
+    // işaret eder. Konum sadece görsel ipucu - gerçek sıra HER ZAMAN
+    // tarihe göre yeniden hesaplanır, slot'a tıklamak "buraya zorla" değil
+    // "buraya yakın bir tarih gireceğim, komşu tarihleri görmek istiyorum"
+    // demek.
+    const slotForm = (i) => {
       const onceki = sirali[i - 1], sonraki = sirali[i];
       const ipucu = onceki && sonraki
         ? `${(onceki.story_date || 'zamansız')} ile ${(sonraki.story_date || 'zamansız')} arası`
@@ -354,27 +357,27 @@ async function loadProgressionPanel(entityType, entityId) {
         : sonraki ? `${(sonraki.story_date || 'zamansız')} öncesi`
         : 'ilk not';
       return `
-      <div class="progression-slot" data-slot="${i}" style="position:relative;">
-        <button class="btn-icon-sm add-slot-btn" data-slot="${i}" title="Buraya ekle (${escapeHtml(ipucu)})"
-                style="font-size:10px;color:var(--text-muted);opacity:0.5;padding:1px 4px;">+ buraya ekle</button>
-        <div class="slot-form" data-slot="${i}" style="display:none;gap:4px;flex-wrap:wrap;margin:4px 0;padding:6px;border:1px dashed var(--border);border-radius:4px;">
-          <div style="width:100%;font-size:10.5px;color:var(--text-muted);">${escapeHtml(ipucu)}</div>
-          <input type="text" class="slot-date" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:150px;">
-          <input type="text" class="slot-note" placeholder="Ne değişti?" style="flex:3;min-width:170px;">
-          <button class="btn btn-sm slot-save-btn" data-slot="${i}">Kaydet</button>
-        </div>
+      <div class="slot-form" data-slot="${i}" style="display:none;gap:4px;flex-wrap:wrap;margin:4px 0;padding:6px;border:1px dashed var(--border);border-radius:4px;">
+        <div style="width:100%;font-size:10.5px;color:var(--text-muted);">${escapeHtml(ipucu)}</div>
+        <input type="text" class="slot-date" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:150px;">
+        <input type="text" class="slot-note" placeholder="Ne değişti?" style="flex:3;min-width:170px;">
+        <button class="btn btn-sm slot-save-btn" data-slot="${i}">Kaydet</button>
       </div>`;
     };
 
     const rows = sirali.map((p, i) => {
       const damga = (p.story_date || '').trim() || 'zamansız';
       return `
-      ${slot(i)}
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;font-size:12.5px;padding:5px 0;border-bottom:1px dotted var(--border);">
         <span style="flex:1;"><strong style="color:var(--gold);">${escapeHtml(damga)}</strong> — ${escapeHtml(p.note)}</span>
-        <button class="btn-icon-sm del-progression-btn" data-id="${p.id}" title="Sil">✕</button>
-      </div>`;
-    }).join('') + slot(sirali.length);
+        <div style="display:flex;gap:2px;flex-shrink:0;">
+          <button class="btn-icon-sm add-slot-btn" data-slot="${i}" title="Bu notun ÜSTÜNE ekle">▲+</button>
+          <button class="btn-icon-sm add-slot-btn" data-slot="${i + 1}" title="Bu notun ALTINA ekle">▼+</button>
+          <button class="btn-icon-sm del-progression-btn" data-id="${p.id}" title="Sil">✕</button>
+        </div>
+      </div>
+      ${slotForm(i + 1)}`;
+    }).join('');
 
     panel.innerHTML = `
       <strong style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">KRONOLOJİ / GELİŞİM ÇİZELGESİ</strong>
@@ -383,7 +386,12 @@ async function loadProgressionPanel(entityType, entityId) {
         olan notlar AI'ya gider - sonraki notlar gönderilmez. Süzme SADECE tarihe
         göre yapılır; tarih yazmazsan not zamansız kabul edilir ve her zaman gider.
       </div>
-      ${sirali.length ? rows : '<div class="empty-state" style="padding:4px 0;">Henüz not yok.</div>' + slot(0)}
+      ${sirali.length ? slotForm(0) + rows : `
+        <div class="empty-state" style="padding:4px 0;display:flex;justify-content:space-between;align-items:center;">
+          <span>Henüz not yok.</span>
+          <button class="btn btn-sm add-slot-btn" data-slot="0">+ Ekle</button>
+        </div>
+        ${slotForm(0)}`}
       <div id="progErr_${entityId}" class="error-text" style="font-size:11.5px;"></div>`;
 
     panel.querySelectorAll('.del-progression-btn').forEach(btn => {
