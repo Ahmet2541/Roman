@@ -341,14 +341,40 @@ async function loadProgressionPanel(entityType, entityId) {
       return a.id - b.id;
     });
 
-    const rows = sirali.map(p => {
+    // Her satırın ÜSTÜNDE bir "+ buraya ekle" ince çubuğu var (satır
+    // sayısı N ise N+1 slot: en üst, aralar, en alt). Konum sadece görsel
+    // ipucu - gerçek sıra HER ZAMAN tarihe göre yeniden hesaplanır, o
+    // yüzden slot'a tıklamak "buraya zorla" değil "buraya yakın bir tarih
+    // gireceğim, komşu tarihleri görmek istiyorum" demek.
+    const slot = (i) => {
+      const onceki = sirali[i - 1], sonraki = sirali[i];
+      const ipucu = onceki && sonraki
+        ? `${(onceki.story_date || 'zamansız')} ile ${(sonraki.story_date || 'zamansız')} arası`
+        : onceki ? `${(onceki.story_date || 'zamansız')} sonrası`
+        : sonraki ? `${(sonraki.story_date || 'zamansız')} öncesi`
+        : 'ilk not';
+      return `
+      <div class="progression-slot" data-slot="${i}" style="position:relative;">
+        <button class="btn-icon-sm add-slot-btn" data-slot="${i}" title="Buraya ekle (${escapeHtml(ipucu)})"
+                style="font-size:10px;color:var(--text-muted);opacity:0.5;padding:1px 4px;">+ buraya ekle</button>
+        <div class="slot-form" data-slot="${i}" style="display:none;gap:4px;flex-wrap:wrap;margin:4px 0;padding:6px;border:1px dashed var(--border);border-radius:4px;">
+          <div style="width:100%;font-size:10.5px;color:var(--text-muted);">${escapeHtml(ipucu)}</div>
+          <input type="text" class="slot-date" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:150px;">
+          <input type="text" class="slot-note" placeholder="Ne değişti?" style="flex:3;min-width:170px;">
+          <button class="btn btn-sm slot-save-btn" data-slot="${i}">Kaydet</button>
+        </div>
+      </div>`;
+    };
+
+    const rows = sirali.map((p, i) => {
       const damga = (p.story_date || '').trim() || 'zamansız';
       return `
+      ${slot(i)}
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;font-size:12.5px;padding:5px 0;border-bottom:1px dotted var(--border);">
         <span style="flex:1;"><strong style="color:var(--gold);">${escapeHtml(damga)}</strong> — ${escapeHtml(p.note)}</span>
         <button class="btn-icon-sm del-progression-btn" data-id="${p.id}" title="Sil">✕</button>
       </div>`;
-    }).join('');
+    }).join('') + slot(sirali.length);
 
     panel.innerHTML = `
       <strong style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">KRONOLOJİ / GELİŞİM ÇİZELGESİ</strong>
@@ -357,12 +383,7 @@ async function loadProgressionPanel(entityType, entityId) {
         olan notlar AI'ya gider - sonraki notlar gönderilmez. Süzme SADECE tarihe
         göre yapılır; tarih yazmazsan not zamansız kabul edilir ve her zaman gider.
       </div>
-      ${rows || '<div class="empty-state" style="padding:4px 0;">Henüz not yok.</div>'}
-      <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">
-        <input type="text" id="progDate_${entityId}" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:150px;">
-        <input type="text" id="progNote_${entityId}" placeholder="Ne değişti?" style="flex:3;min-width:170px;">
-        <button class="btn btn-sm" id="addProgressionBtn">+ Ekle</button>
-      </div>
+      ${sirali.length ? rows : '<div class="empty-state" style="padding:4px 0;">Henüz not yok.</div>' + slot(0)}
       <div id="progErr_${entityId}" class="error-text" style="font-size:11.5px;"></div>`;
 
     panel.querySelectorAll('.del-progression-btn').forEach(btn => {
@@ -374,22 +395,39 @@ async function loadProgressionPanel(entityType, entityId) {
       });
     });
 
+    // Her "+ buraya ekle" kendi slot'undaki formu açar/kapatır - aynı anda
+    // sadece bir tanesi açık kalsın diye önce hepsini kapatıyoruz.
+    panel.querySelectorAll('.add-slot-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const i = btn.dataset.slot;
+        panel.querySelectorAll('.slot-form').forEach(f => {
+          f.style.display = (f.dataset.slot === i && f.style.display === 'none') ? 'flex' : 'none';
+        });
+        if (panel.querySelector(`.slot-form[data-slot="${i}"]`).style.display === 'flex') {
+          panel.querySelector(`.slot-form[data-slot="${i}"] .slot-date`).focus();
+        }
+      });
+    });
+
     // Prompt() yerine ALAN: prompt sırayla iki pencere açıyordu, tarih
     // eklenince üç olacaktı - üstelik yazdığını göremiyordun.
-    el('addProgressionBtn').addEventListener('click', async () => {
-      const hata = document.getElementById(`progErr_${entityId}`);
-      const tarih = document.getElementById(`progDate_${entityId}`).value.trim();
-      const note = document.getElementById(`progNote_${entityId}`).value.trim();
-      hata.textContent = '';
-      if (!note) { hata.textContent = 'Ne değiştiğini yaz.'; return; }
-      try {
-        await api.post('/progressions/', {
-          entity_type: entityType, entity_id: parseInt(entityId, 10),
-          story_date: normalizeTarih ? normalizeTarih(tarih) : tarih,
-          note,
-        });
-        loadProgressionPanel(entityType, entityId);
-      } catch (err) { hata.textContent = err.message; }
+    panel.querySelectorAll('.slot-save-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const hata = document.getElementById(`progErr_${entityId}`);
+        const form = panel.querySelector(`.slot-form[data-slot="${btn.dataset.slot}"]`);
+        const tarih = form.querySelector('.slot-date').value.trim();
+        const note = form.querySelector('.slot-note').value.trim();
+        hata.textContent = '';
+        if (!note) { hata.textContent = 'Ne değiştiğini yaz.'; return; }
+        try {
+          await api.post('/progressions/', {
+            entity_type: entityType, entity_id: parseInt(entityId, 10),
+            story_date: normalizeTarih ? normalizeTarih(tarih) : tarih,
+            note,
+          });
+          loadProgressionPanel(entityType, entityId);
+        } catch (err) { hata.textContent = err.message; }
+      });
     });
   } catch (err) {
     panel.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;

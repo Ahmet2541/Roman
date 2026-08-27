@@ -1528,21 +1528,22 @@ def test_text_questions_still_get_the_chapter(client, headers):
 
 # --- Gelişim çizelgesi: kronolojik süzme -----------------------------------
 
-def _ilerleme(client, headers, entity_id, bolum, not_metni):
+def _ilerleme(client, headers, entity_id, story_date, not_metni):
     return client.post("/progressions/", json={
         "entity_type": "character", "entity_id": entity_id,
-        "chapter_number": bolum, "note": not_metni}, headers=headers)
+        "story_date": story_date or "", "note": not_metni}, headers=headers)
 
 
 def test_future_progressions_are_filtered(client, headers):
-    """Gelişim notları "Bölüm X'ten itibaren şu geçerli" demek. Bölüm 1
-    yazılırken Bölüm 12'nin notu GELECEKTİR - gönderilirse profildeki
-    "ileride suçluluk duyacak" sorunu ilerlemede tekrarlanır."""
+    """Gelişim notları "şu tarihten itibaren şu geçerli" demek. Sahnenin
+    tarihinden SONRAKİ bir not GELECEKTİR - gönderilirse profildeki
+    "ileride suçluluk duyacak" sorunu ilerlemede tekrarlanır. TEK ölçü
+    story_date - bölüm numarası kronoloji anchor'ı DEĞİL."""
     k = client.post("/characters/", json={"name": "Vicdan", "description": "Bilinç."},
                     headers=headers).json()
-    client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers)
-    _ilerleme(client, headers, k["id"], 1, "Uyanır, hiçbir şey bilmiyor.")
-    _ilerleme(client, headers, k["id"], 12, "Sekiz sanığı yargılamaya başlar.")
+    _zamanli_bolum(client, headers, "29 Haziran 2030", "10:00")
+    _ilerleme(client, headers, k["id"], "28 Haziran 2030 21:00", "Uyanır, hiçbir şey bilmiyor.")
+    _ilerleme(client, headers, k["id"], "7 Temmuz 2030", "Sekiz sanığı yargılamaya başlar.")
 
     ctx = client.post("/ai/context-preview", json={
         "selected_entities": [{"entity_type": "character", "entity_id": k["id"]}],
@@ -1556,32 +1557,35 @@ def test_past_progressions_still_reach_context(client, headers):
     """Süzme sadece GELECEĞİ keser - geçmiş gelişim yerinde kalmalı."""
     k = client.post("/characters/", json={"name": "Vicdan", "description": "Bilinç."},
                     headers=headers).json()
-    for n in (1, 2, 3):
-        client.post("/chapters/", json={"number": n, "title": f"B{n}"}, headers=headers)
-    _ilerleme(client, headers, k["id"], 1, "Uyanır.")
-    _ilerleme(client, headers, k["id"], 2, "Babasının ölümünü öğrenir.")
-    _ilerleme(client, headers, k["id"], 9, "Yargılar.")
+    _zamanli_bolum(client, headers, "10 Temmuz 2030", "10:00")
+    _ilerleme(client, headers, k["id"], "28 Haziran 2030", "Uyanır.")
+    _ilerleme(client, headers, k["id"], "29 Haziran 2030", "Babasının ölümünü öğrenir.")
+    _ilerleme(client, headers, k["id"], "20 Temmuz 2030", "Yargılar.")
 
     ctx = client.post("/ai/context-preview", json={
         "selected_entities": [{"entity_type": "character", "entity_id": k["id"]}],
-        "chapter_number": 3}, headers=headers).json()["context"]
+        "chapter_number": 1}, headers=headers).json()["context"]
     assert "Uyanır." in ctx and "Babasının ölümünü öğrenir." in ctx
     assert "Yargılar." not in ctx
 
 
 def test_undated_progressions_always_pass(client, headers):
-    """Bölümü belirtilmemiş not = zamansız genel bilgi, her zaman kalır."""
+    """Tarihi olmayan not = zamansız genel bilgi, her zaman kalır - ve
+    bölüm numarası artık kronoloji ölçüsü DEĞİL: gönderilse bile (eski
+    istemci/veri) şema tarafından yok sayılır, notu süzmez."""
     k = client.post("/characters/", json={"name": "Vicdan", "description": "Bilinç."},
                     headers=headers).json()
-    client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers)
-    _ilerleme(client, headers, k["id"], None, "Her zaman tane tane konuşur.")
-    _ilerleme(client, headers, k["id"], 12, "Yargılar.")
+    _zamanli_bolum(client, headers, "29 Haziran 2030", "10:00")
+    _ilerleme(client, headers, k["id"], "", "Her zaman tane tane konuşur.")
+    client.post("/progressions/", json={
+        "entity_type": "character", "entity_id": k["id"],
+        "chapter_number": 999, "note": "Bölüm numarası artık etkisiz."}, headers=headers)
 
     ctx = client.post("/ai/context-preview", json={
         "selected_entities": [{"entity_type": "character", "entity_id": k["id"]}],
         "chapter_number": 1}, headers=headers).json()["context"]
     assert "tane tane konuşur" in ctx
-    assert "Yargılar." not in ctx
+    assert "Bölüm numarası artık etkisiz." in ctx
 
 
 def test_progression_story_date_drives_filtering(client, headers):

@@ -1,0 +1,116 @@
+warning: in the working copy of 'frontend/js/modules/02-entities.js', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/frontend/js/modules/02-entities.js b/frontend/js/modules/02-entities.js[m
+[1mindex b4c5865..23fd709 100644[m
+[1m--- a/frontend/js/modules/02-entities.js[m
+[1m+++ b/frontend/js/modules/02-entities.js[m
+[36m@@ -341,14 +341,40 @@[m [masync function loadProgressionPanel(entityType, entityId) {[m
+       return a.id - b.id;[m
+     });[m
+ [m
+[31m-    const rows = sirali.map(p => {[m
+[32m+[m[32m    // Her satırın ÜSTÜNDE bir "+ buraya ekle" ince çubuğu var (satır[m
+[32m+[m[32m    // sayısı N ise N+1 slot: en üst, aralar, en alt). Konum sadece görsel[m
+[32m+[m[32m    // ipucu - gerçek sıra HER ZAMAN tarihe göre yeniden hesaplanır, o[m
+[32m+[m[32m    // yüzden slot'a tıklamak "buraya zorla" değil "buraya yakın bir tarih[m
+[32m+[m[32m    // gireceğim, komşu tarihleri görmek istiyorum" demek.[m
+[32m+[m[32m    const slot = (i) => {[m
+[32m+[m[32m      const onceki = sirali[i - 1], sonraki = sirali[i];[m
+[32m+[m[32m      const ipucu = onceki && sonraki[m
+[32m+[m[32m        ? `${(onceki.story_date || 'zamansız')} ile ${(sonraki.story_date || 'zamansız')} arası`[m
+[32m+[m[32m        : onceki ? `${(onceki.story_date || 'zamansız')} sonrası`[m
+[32m+[m[32m        : sonraki ? `${(sonraki.story_date || 'zamansız')} öncesi`[m
+[32m+[m[32m        : 'ilk not';[m
+[32m+[m[32m      return `[m
+[32m+[m[32m      <div class="progression-slot" data-slot="${i}" style="position:relative;">[m
+[32m+[m[32m        <button class="btn-icon-sm add-slot-btn" data-slot="${i}" title="Buraya ekle (${escapeHtml(ipucu)})"[m
+[32m+[m[32m                style="font-size:10px;color:var(--text-muted);opacity:0.5;padding:1px 4px;">+ buraya ekle</button>[m
+[32m+[m[32m        <div class="slot-form" data-slot="${i}" style="display:none;gap:4px;flex-wrap:wrap;margin:4px 0;padding:6px;border:1px dashed var(--border);border-radius:4px;">[m
+[32m+[m[32m          <div style="width:100%;font-size:10.5px;color:var(--text-muted);">${escapeHtml(ipucu)}</div>[m
+[32m+[m[32m          <input type="text" class="slot-date" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:150px;">[m
+[32m+[m[32m          <input type="text" class="slot-note" placeholder="Ne değişti?" style="flex:3;min-width:170px;">[m
+[32m+[m[32m          <button class="btn btn-sm slot-save-btn" data-slot="${i}">Kaydet</button>[m
+[32m+[m[32m        </div>[m
+[32m+[m[32m      </div>`;[m
+[32m+[m[32m    };[m
+[32m+[m
+[32m+[m[32m    const rows = sirali.map((p, i) => {[m
+       const damga = (p.story_date || '').trim() || 'zamansız';[m
+       return `[m
+[32m+[m[32m      ${slot(i)}[m
+       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;font-size:12.5px;padding:5px 0;border-bottom:1px dotted var(--border);">[m
+         <span style="flex:1;"><strong style="color:var(--gold);">${escapeHtml(damga)}</strong> — ${escapeHtml(p.note)}</span>[m
+         <button class="btn-icon-sm del-progression-btn" data-id="${p.id}" title="Sil">✕</button>[m
+       </div>`;[m
+[31m-    }).join('');[m
+[32m+[m[32m    }).join('') + slot(sirali.length);[m
+ [m
+     panel.innerHTML = `[m
+       <strong style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">KRONOLOJİ / GELİŞİM ÇİZELGESİ</strong>[m
+[36m@@ -357,12 +383,7 @@[m [masync function loadProgressionPanel(entityType, entityId) {[m
+         olan notlar AI'ya gider - sonraki notlar gönderilmez. Süzme SADECE tarihe[m
+         göre yapılır; tarih yazmazsan not zamansız kabul edilir ve her zaman gider.[m
+       </div>[m
+[31m-      ${rows || '<div class="empty-state" style="padding:4px 0;">Henüz not yok.</div>'}[m
+[31m-      <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">[m
+[31m-        <input type="text" id="progDate_${entityId}" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:150px;">[m
+[31m-        <input type="text" id="progNote_${entityId}" placeholder="Ne değişti?" style="flex:3;min-width:170px;">[m
+[31m-        <button class="btn btn-sm" id="addProgressionBtn">+ Ekle</button>[m
+[31m-      </div>[m
+[32m+[m[32m      ${sirali.length ? rows : '<div class="empty-state" style="padding:4px 0;">Henüz not yok.</div>' + slot(0)}[m
+       <div id="progErr_${entityId}" class="error-text" style="font-size:11.5px;"></div>`;[m
+ [m
+     panel.querySelectorAll('.del-progression-btn').forEach(btn => {[m
+[36m@@ -374,22 +395,39 @@[m [masync function loadProgressionPanel(entityType, entityId) {[m
+       });[m
+     });[m
+ [m
+[32m+[m[32m    // Her "+ buraya ekle" kendi slot'undaki formu açar/kapatır - aynı anda[m
+[32m+[m[32m    // sadece bir tanesi açık kalsın diye önce hepsini kapatıyoruz.[m
+[32m+[m[32m    panel.querySelectorAll('.add-slot-btn').forEach(btn => {[m
+[32m+[m[32m      btn.addEventListener('click', () => {[m
+[32m+[m[32m        const i = btn.dataset.slot;[m
+[32m+[m[32m        panel.querySelectorAll('.slot-form').forEach(f => {[m
+[32m+[m[32m          f.style.display = (f.dataset.slot === i && f.style.display === 'none') ? 'flex' : 'none';[m
+[32m+[m[32m        });[m
+[32m+[m[32m        if (panel.querySelector(`.slot-form[data-slot="${i}"]`).style.display === 'flex') {[m
+[32m+[m[32m          panel.querySelector(`.slot-form[data-slot="${i}"] .slot-date`).focus();[m
+[32m+[m[32m        }[m
+[32m+[m[32m      });[m
+[32m+[m[32m    });[m
+[32m+[m
+     // Prompt() yerine ALAN: prompt sırayla iki pencere açıyordu, tarih[m
+     // eklenince üç olacaktı - üstelik yazdığını göremiyordun.[m
+[31m-    el('addProgressionBtn').addEventListener('click', async () => {[m
+[31m-      const hata = document.getElementById(`progErr_${entityId}`);[m
+[31m-      const tarih = document.getElementById(`progDate_${entityId}`).value.trim();[m
+[31m-      const note = document.getElementById(`progNote_${entityId}`).value.trim();[m
+[31m-      hata.textContent = '';[m
+[31m-      if (!note) { hata.textContent = 'Ne değiştiğini yaz.'; return; }[m
+[31m-      try {[m
+[31m-        await api.post('/progressions/', {[m
+[31m-          entity_type: entityType, entity_id: parseInt(entityId, 10),[m
+[31m-          story_date: normalizeTarih ? normalizeTarih(tarih) : tarih,[m
+[31m-          note,[m
+[31m-        });[m
+[31m-        loadProgressionPanel(entityType, entityId);[m
+[31m-      } catch (err) { hata.textContent = err.message; }[m
+[32m+[m[32m    panel.querySelectorAll('.slot-save-btn').forEach(btn => {[m
+[32m+[m[32m      btn.addEventListener('click', async () => {[m
+[32m+[m[32m        const hata = document.getElementById(`progErr_${entityId}`);[m
+[32m+[m[32m        const form = panel.querySelector(`.slot-form[data-slot="${btn.dataset.slot}"]`);[m
+[32m+[m[32m        const tarih = form.querySelector('.slot-date').value.trim();[m
+[32m+[m[32m        const note = form.querySelector('.slot-note').value.trim();[m
+[32m+[m[32m        hata.textContent = '';[m
+[32m+[m[32m        if (!note) { hata.textContent = 'Ne değiştiğini yaz.'; return; }[m
+[32m+[m[32m        try {[m
+[32m+[m[32m          await api.post('/progressions/', {[m
+[32m+[m[32m            entity_type: entityType, entity_id: parseInt(entityId, 10),[m
+[32m+[m[32m            story_date: normalizeTarih ? normalizeTarih(tarih) : tarih,[m
+[32m+[m[32m            note,[m
+[32m+[m[32m          });[m
+[32m+[m[32m          loadProgressionPanel(entityType, entityId);[m
+[32m+[m[32m        } catch (err) { hata.textContent = err.message; }[m
+[32m+[m[32m      });[m
+     });[m
+   } catch (err) {[m
+     panel.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;[m
