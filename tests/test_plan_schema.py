@@ -1609,6 +1609,29 @@ def test_progression_story_date_drives_filtering(client, headers):
     assert "28 Haziran 2030 21:00" in ctx, "tarih damgası gösterilmedi"
 
 
+def test_progression_update_edits_in_place(client, headers):
+    """Silip yeniden eklemek yerine PUT ile yerinde günceller - id/entity
+    sabit kalır, sadece tarih/not değişir."""
+    k = client.post("/characters/", json={"name": "Vicdan", "description": "x"},
+                    headers=headers).json()
+    p = client.post("/progressions/", json={
+        "entity_type": "character", "entity_id": k["id"],
+        "story_date": "1 Ocak 2020", "note": "ilk"}, headers=headers).json()
+
+    r = client.put(f"/progressions/{p['id']}", json={
+        "story_date": "2 Ocak 2020", "note": "güncellendi"}, headers=headers)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["id"] == p["id"], "yerinde güncellenmeli, yeni kayıt oluşmamalı"
+    assert out["note"] == "güncellendi"
+    assert out["story_date"] == "2 Ocak 2020"
+
+    items = client.get(f"/progressions/?entity_type=character&entity_id={k['id']}",
+                       headers=headers).json()
+    assert len(items) == 1, "güncelleme yeni bir kayıt eklememeli"
+    assert items[0]["note"] == "güncellendi"
+
+
 def test_progression_date_beats_chapter_number(client, headers):
     """Tarih ve bölüm numarası ÇELİŞİRSE tarih kazanmalı."""
     k = client.post("/characters/", json={"name": "Vicdan", "description": "x"},

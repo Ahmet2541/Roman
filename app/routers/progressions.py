@@ -83,6 +83,26 @@ def create_progression(
     return _to_out(db, item)
 
 
+@router.put("/{progression_id}", response_model=schemas.ProgressionOut)
+def update_progression(
+    progression_id: int,
+    payload: schemas.ProgressionUpdate,
+    db: Session = Depends(get_db),
+    _user=Depends(get_current_user),
+    universe_id: int = Depends(get_universe_id),
+):
+    item = db.query(models.Progression).filter(
+        models.Progression.id == progression_id, models.Progression.universe_id == universe_id
+    ).first()
+    if not item:
+        raise HTTPException(404, "Kayıt bulunamadı")
+    item.story_date = (payload.story_date or "").strip()
+    item.note = payload.note
+    db.commit()
+    db.refresh(item)
+    return _to_out(db, item)
+
+
 @router.delete("/{progression_id}", status_code=204)
 def delete_progression(
     progression_id: int,

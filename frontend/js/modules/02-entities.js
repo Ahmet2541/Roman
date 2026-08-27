@@ -365,6 +365,15 @@ async function loadProgressionPanel(entityType, entityId) {
       </div>`;
     };
 
+    // Düzenleme formu: silip yeniden eklemek yerine var olan notun
+    // tarih/metnini yerinde günceller (PUT /progressions/{id}).
+    const editForm = (p) => `
+      <div class="edit-form" data-edit-id="${p.id}" style="display:none;gap:4px;flex-wrap:wrap;margin:4px 0;padding:6px;border:1px dashed var(--gold);border-radius:4px;">
+        <input type="text" class="edit-date" value="${escapeHtml(p.story_date || '')}" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:150px;">
+        <input type="text" class="edit-note" value="${escapeHtml(p.note)}" placeholder="Ne değişti?" style="flex:3;min-width:170px;">
+        <button class="btn btn-sm edit-save-btn" data-edit-id="${p.id}">Kaydet</button>
+      </div>`;
+
     const rows = sirali.map((p, i) => {
       const damga = (p.story_date || '').trim() || 'zamansız';
       return `
@@ -373,9 +382,11 @@ async function loadProgressionPanel(entityType, entityId) {
         <div style="display:flex;gap:2px;flex-shrink:0;">
           <button class="btn-icon-sm add-slot-btn" data-slot="${i}" title="Bu notun ÜSTÜNE ekle">▲+</button>
           <button class="btn-icon-sm add-slot-btn" data-slot="${i + 1}" title="Bu notun ALTINA ekle">▼+</button>
+          <button class="btn-icon-sm edit-toggle-btn" data-edit-id="${p.id}" title="Düzenle">✎</button>
           <button class="btn-icon-sm del-progression-btn" data-id="${p.id}" title="Sil">✕</button>
         </div>
       </div>
+      ${editForm(p)}
       ${slotForm(i + 1)}`;
     }).join('');
 
@@ -403,17 +414,47 @@ async function loadProgressionPanel(entityType, entityId) {
       });
     });
 
-    // Her "+ buraya ekle" kendi slot'undaki formu açar/kapatır - aynı anda
-    // sadece bir tanesi açık kalsın diye önce hepsini kapatıyoruz.
+    // Tüm ekle/düzenle formlarını kapatır - aynı anda sadece bir tanesi
+    // açık kalsın diye her yeni form açılışından önce çağrılır.
+    const kapatHepsini = () => {
+      panel.querySelectorAll('.slot-form, .edit-form').forEach(f => { f.style.display = 'none'; });
+    };
+
     panel.querySelectorAll('.add-slot-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const i = btn.dataset.slot;
-        panel.querySelectorAll('.slot-form').forEach(f => {
-          f.style.display = (f.dataset.slot === i && f.style.display === 'none') ? 'flex' : 'none';
-        });
-        if (panel.querySelector(`.slot-form[data-slot="${i}"]`).style.display === 'flex') {
-          panel.querySelector(`.slot-form[data-slot="${i}"] .slot-date`).focus();
-        }
+        const form = panel.querySelector(`.slot-form[data-slot="${btn.dataset.slot}"]`);
+        const acikMi = form.style.display === 'flex';
+        kapatHepsini();
+        if (!acikMi) { form.style.display = 'flex'; form.querySelector('.slot-date').focus(); }
+      });
+    });
+
+    // ✎ Düzenle: satırın altında var olan tarih/metinle önceden dolu bir
+    // form açar - silip yeniden girmek yerine yerinde günceller.
+    panel.querySelectorAll('.edit-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const form = panel.querySelector(`.edit-form[data-edit-id="${btn.dataset.editId}"]`);
+        const acikMi = form.style.display === 'flex';
+        kapatHepsini();
+        if (!acikMi) { form.style.display = 'flex'; form.querySelector('.edit-date').focus(); }
+      });
+    });
+
+    panel.querySelectorAll('.edit-save-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const hata = document.getElementById(`progErr_${entityId}`);
+        const form = panel.querySelector(`.edit-form[data-edit-id="${btn.dataset.editId}"]`);
+        const tarih = form.querySelector('.edit-date').value.trim();
+        const note = form.querySelector('.edit-note').value.trim();
+        hata.textContent = '';
+        if (!note) { hata.textContent = 'Ne değiştiğini yaz.'; return; }
+        try {
+          await api.put(`/progressions/${btn.dataset.editId}`, {
+            story_date: normalizeTarih ? normalizeTarih(tarih) : tarih,
+            note,
+          });
+          loadProgressionPanel(entityType, entityId);
+        } catch (err) { hata.textContent = err.message; }
       });
     });
 

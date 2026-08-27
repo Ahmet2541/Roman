@@ -605,6 +605,13 @@ class ProgressionCreate(ProgressionBase):
     pass
     story_date: str = ""
 
+
+class ProgressionUpdate(BaseModel):
+    """Var olan bir gelişim notunu düzenler - entity_type/entity_id
+    değişmez (yanlış kayda taşınmasın), sadece tarih/not güncellenir."""
+    story_date: str = ""
+    note: str
+
 class ProgressionOut(ProgressionBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
