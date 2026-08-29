@@ -548,4 +548,36 @@ test('yardim balonlari gercek kisiti anlatiyor', () => {
   if (sayi < 15) throw new Error(`balon baglantisi az (${sayi})`);
 });
 
+// --- 25. GELİŞİM PANELİ gerçekten doluyor mu ---
+// Panel "Yükleniyor…" yazıp öylece kalıyordu: içerik yazılmadan önce
+// düğmelere olay bağlanmaya çalışılıyor, hata try/catch'e düşüyor ve
+// kullanıcı hiçbir şey göremiyordu. Sessiz kırılmayı yakalayan test.
+test('gelisim paneli yukleniyorda kalmiyor', async () => {
+  const eskiApi = global.api;
+  global.api = { get: async () => ([
+    { id: 1, story_date: '28 Haziran 2030 21:00', note: 'Uyandı.' },
+    { id: 2, story_date: '7 Temmuz 2030', note: 'Yargıladı.' },
+    { id: 3, story_date: '', note: 'Zamansız not.' },
+  ])};
+  try {
+    await loadProgressionPanel('character', 77);
+    const panel = document.querySelector('.progression-panel[data-id="77"]');
+    const html = (panel && panel.innerHTML) || '';
+    if (html.includes('Yükleniyor')) throw new Error('panel Yükleniyorda kaldi');
+    // Panelde BOŞ bir hata alanı var (id="progErr_..") - onu hata sanma.
+    // Gerçek hata: <div class="error-text">MESAJ</div>
+    if (/<div class="error-text">[^<]/.test(html))
+      throw new Error('panel hata gosterdi: ' + html.slice(0, 120));
+    if (!html.includes('KRONOLOJİ')) throw new Error('panel basligi yok');
+    // Notlar ve düğmeler basılmış olmalı
+    for (const parca of ['Uyandı.', 'Zamansız not.', 'prog-ust', 'prog-alt',
+                         'prog-duzenle', 'addProgressionBtn']) {
+      if (!html.includes(parca)) throw new Error(`panelde eksik: ${parca}`);
+    }
+    // Tarihli notlar ZAMANSIZ olandan ÖNCE gelmeli
+    if (html.indexOf('Uyandı.') > html.indexOf('Zamansız not.'))
+      throw new Error('kronolojik sira bozuk');
+  } finally { global.api = eskiApi; }
+});
+
 Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));

@@ -82,8 +82,24 @@ const document = {
     const m = String(el._html).matchAll(/id="([\w-]+)"/g);
     for (const x of m) this._seenIds.add(x[1]);
   },
-  querySelector() { return null; },
-  querySelectorAll() { return []; },
+  // HER ZAMAN null döndürüyordu: uygulamanın querySelector ile bulduğu
+  // her eleman testte "yok" sayılıyor, o kod yolları hiç çalıştırılmıyordu.
+  // Panelde el() yerine querySelector'a geçince bu körlük ortaya çıktı.
+  // Yazılan HTML'de id/sınıf geçiyorsa kalıcı bir sahte eleman döndür.
+  querySelector(sel, kaynak) {
+    const html = String((kaynak && kaynak._html) || '');
+    const m = String(sel).match(/^[#.]([\w-]+)/);
+    if (!m) return null;
+    const ad = m[1];
+    if (kaynak && !html.includes(ad)) return null;
+    const anahtar = `__qs_${sel}`;
+    if (!this._els.has(anahtar)) this._els.set(anahtar, new FakeEl(ad));
+    return this._els.get(anahtar);
+  },
+  querySelectorAll(sel, kaynak) {
+    const el = this.querySelector(sel, kaynak);
+    return el ? [el] : [];
+  },
   addEventListener() {},
   ensure(id) { const e = new FakeEl(id); this._els.set(id, e); return e; },
 };

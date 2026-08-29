@@ -364,6 +364,24 @@ async function loadProgressionPanel(entityType, entityId) {
       </div>`;
     }).join('');
 
+    // İÇERİĞİ ÖNCE YAZ, olayları SONRA bağla. Bu satır kesme sırasında
+    // düşmüştü: düğmeler henüz var olmayan elemanlara bağlanmaya çalışılıyor,
+    // hata yakalanıyor ama panel "Yükleniyor"da kalıyordu.
+    panel.innerHTML = `
+      <strong style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">KRONOLOJİ / GELİŞİM ÇİZELGESİ</strong>
+      <div style="font-size:11px;color:var(--text-muted);margin:2px 0 6px;">
+        Bu kaydın zaman içindeki değişimi. Bir sahne yazılırken SADECE o ana kadar
+        olan notlar AI'ya gider - sonraki notlar gönderilmez. Süzme SADECE tarihe
+        göre yapılır; tarih yazmazsan not zamansız kabul edilir ve her zaman gider.
+      </div>
+      ${rows || '<div class="empty-state" style="padding:4px 0;">Henüz not yok.</div>'}
+      <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">
+        <input type="text" id="progDate_${entityId}" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:160px;">
+        <input type="text" id="progNote_${entityId}" placeholder="Ne değişti?" style="flex:3;min-width:180px;">
+        <button class="btn btn-sm" id="addProgressionBtn">+ Ekle</button>
+      </div>
+      <div id="progErr_${entityId}" class="error-text" style="font-size:11.5px;"></div>`;
+
     // ▲+ / ▼+ : ekleme alanına odaklan ve tarihi komşudan doldur.
     const tarihAlani = () => document.getElementById(`progDate_${entityId}`);
     const notAlani = () => document.getElementById(`progNote_${entityId}`);
@@ -415,7 +433,10 @@ async function loadProgressionPanel(entityType, entityId) {
 
     // Prompt() yerine ALAN: prompt sırayla iki pencere açıyordu, tarih
     // eklenince üç olacaktı - üstelik yazdığını göremiyordun.
-    el('addProgressionBtn').addEventListener('click', async () => {
+    // el() KULLANMA: o yardımcı başka bir modülde tanımlı ve yükleme
+    // sırasına bağlı olarak burada tanımsız olabiliyor - panel sessizce
+    // "Yükleniyor"da kalıyordu. Panelin kendi içinde sorgula.
+    panel.querySelector('#addProgressionBtn').addEventListener('click', async () => {
       const hata = document.getElementById(`progErr_${entityId}`);
       const tarih = document.getElementById(`progDate_${entityId}`).value.trim();
       const note = document.getElementById(`progNote_${entityId}`).value.trim();
