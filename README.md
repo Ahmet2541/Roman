@@ -1,4 +1,4 @@
-# Roman Yazım Asistanı API
+# Roman Yazım Asistanı API — v1.0
 
 FastAPI + SQLite (kolayca PostgreSQL'e taşınabilir) + Qwen (DashScope) tabanlı
 roman yazım destek uygulaması - backend + frontend.
@@ -496,6 +496,9 @@ Buna dayanan üç denetim:
   gönderilmez; tarihi olmayan not ZAMANSIZDIR ve her sahnede gider.
   Bölüm numarası ölçü olmaktan çıkarıldı - iki ayrı zaman kaynağı,
   çeliştiklerinde hangisinin geçerli olduğu sorusunu doğuruyordu.
+  Her notun yanında **▲+ üste ekle · ▼+ alta ekle · ✎ düzenle · ✕ sil**;
+  ekleme düğmeleri tarih alanını komşu notun tarihiyle doldurur (sıralama
+  tarihe göre olduğu için "araya koymak" = aradaki bir tarihi yazmak).
 
 ### Dışa/içe aktarım
 
@@ -782,7 +785,7 @@ Kurallar:
 
 ## Testler
 
-**298 test** (22 dosya, + 25 arayüz davranış testi) - AI çağrıları `unittest.mock` ile sahte Qwen
+**299 test** (22 dosya, + 26 arayüz davranış testi) - AI çağrıları `unittest.mock` ile sahte Qwen
 yanıtlarıyla çalışır, gerçek bir `DASHSCOPE_API_KEY` gerekmez.
 
 Frontend tarafında iki katman test var:
@@ -864,6 +867,11 @@ progression'da yanlış chapter_number) otomatik yakalar.
   analiz/üretim fonksiyonları; bunları ayırmak testlerin sahte Qwen
   bağlantısını (`patch("app.qwen_client.get_client")`) kırar, o yüzden
   bilinçli olarak ertelendi.
+- **Test DOM taklidi iki kez yanılttı**: `parentElement` her çağrıda yeni
+  boş eleman döndürüyordu, `querySelector` her zaman `null` döndürüyordu.
+  İkisi de "test edilmiş görünüp hiç çalıştırılmamış" kod yolları üretti
+  (autocomplete, beat sayacı, gelişim paneli). İkisi de düzeltildi ama
+  taklit hâlâ gerçek tarayıcı değil - bu sınıf körlükler yine olabilir.
 - Frontend davranış testi VAR ama dar kapsamlı: modüller Node'da minimal
   bir DOM taklidiyle yüklenip kritik fonksiyonlar çalıştırılıyor
   (tanımsız değişken, olmayan elemana yazma, ayrıştırma hataları
