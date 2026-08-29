@@ -603,8 +603,16 @@ class ProgressionBase(BaseModel):
 
 
 class ProgressionCreate(ProgressionBase):
-    pass
     story_date: str = ""
+
+
+class ProgressionUpdate(BaseModel):
+    """Var olan notu düzenlemek için - hepsi isteğe bağlı, verilmeyen alan
+    dokunulmadan kalır."""
+    note: Optional[str] = None
+    story_date: Optional[str] = None
+    chapter_number: Optional[int] = None
+
 
 class ProgressionOut(ProgressionBase):
     model_config = ConfigDict(from_attributes=True)
@@ -616,6 +624,7 @@ class ProgressionOut(ProgressionBase):
     source_novel_id: Optional[int] = None
     source_novel_name: Optional[str] = None
     story_date: str = ""
+
 
 class ProgressionSuggestion(BaseModel):
     """AI'nın bir bölümü tarayıp önerdiği gelişim notu taslağı. Kaydedilmez -

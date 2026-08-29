@@ -338,39 +338,71 @@ async function loadProgressionPanel(entityType, entityId) {
       if (ta !== null && tb !== null) return ta - tb;
       if (ta !== null) return -1;
       if (tb !== null) return 1;
-      const ca = a.chapter_number, cb = b.chapter_number;
-      if (ca != null && cb != null) return ca - cb;
-      if (ca != null) return -1;
-      if (cb != null) return 1;
-      return a.id - b.id;
+      return a.id - b.id;   // ikisi de zamansız: eklenme sırası
     });
 
-    const rows = sirali.map(p => {
+    // Her notun yanında: ▲+ üste ekle · ▼+ alta ekle · ✎ düzenle · ✕ sil.
+    // Ekleme düğmeleri tarih alanını KOMŞU NOTUN tarihiyle doldurur -
+    // sıralama tarihe göre olduğu için "araya koymak" demek, aradaki bir
+    // tarihi yazmak demektir; en zahmetli kısım o tarihi hatırlamaktı.
+    const rows = sirali.map((p, i) => {
       const tarih = (p.story_date || '').trim();
-      const bolum = p.chapter_number ? `Bölüm ${p.chapter_number}` : '';
-      const damga = [tarih, bolum].filter(Boolean).join(' · ') || 'zamansız';
+      const damga = tarih || 'zamansız';
+      const oncekiTarih = i > 0 ? (sirali[i - 1].story_date || '') : '';
       return `
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;font-size:12.5px;padding:5px 0;border-bottom:1px dotted var(--border);">
-        <span style="flex:1;"><strong style="color:var(--gold);">${escapeHtml(damga)}</strong> — ${escapeHtml(p.note)}</span>
-        <button class="btn-icon-sm del-progression-btn" data-id="${p.id}" title="Sil">✕</button>
+      <div class="prog-satir" data-id="${p.id}" style="border-bottom:1px dotted var(--border);padding:5px 0;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;font-size:12.5px;">
+          <span style="flex:1;"><strong style="color:var(--gold);">${escapeHtml(damga)}</strong> — ${escapeHtml(p.note)}</span>
+          <span style="flex:0 0 auto;white-space:nowrap;">
+            <button class="btn-icon-sm prog-ust" data-i="${i}" data-tarih="${escapeHtml(oncekiTarih)}" title="Bunun ÜSTÜNE not ekle">▲+</button>
+            <button class="btn-icon-sm prog-alt" data-i="${i}" data-tarih="${escapeHtml(tarih)}" title="Bunun ALTINA not ekle">▼+</button>
+            <button class="btn-icon-sm prog-duzenle" data-id="${p.id}" data-tarih="${escapeHtml(tarih)}" data-not="${escapeHtml(p.note)}" title="Düzenle">✎</button>
+            <button class="btn-icon-sm del-progression-btn" data-id="${p.id}" title="Sil">✕</button>
+          </span>
+        </div>
+        <div class="prog-duzenle-kutu" style="display:none;gap:4px;margin-top:4px;flex-wrap:wrap;"></div>
       </div>`;
     }).join('');
 
-    panel.innerHTML = `
-      <strong style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">KRONOLOJİ / GELİŞİM ÇİZELGESİ</strong>
-      <div style="font-size:11px;color:var(--text-muted);margin:2px 0 6px;">
-        Bu kaydın zaman içindeki değişimi. Bir sahne yazılırken SADECE o ana kadar
-        olan notlar AI'ya gider - sonraki notlar gönderilmez. Tarih yazarsan süzme
-        tarihe göre, yazmazsan bölüm numarasına göre yapılır.
-      </div>
-      ${rows || '<div class="empty-state" style="padding:4px 0;">Henüz not yok.</div>'}
-      <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">
-        <input type="text" id="progDate_${entityId}" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:150px;">
-        <input type="text" id="progChapter_${entityId}" placeholder="Bölüm no" style="flex:0 0 80px;">
-        <input type="text" id="progNote_${entityId}" placeholder="Ne değişti?" style="flex:3;min-width:170px;">
-        <button class="btn btn-sm" id="addProgressionBtn">+ Ekle</button>
-      </div>
-      <div id="progErr_${entityId}" class="error-text" style="font-size:11.5px;"></div>`;
+    // ▲+ / ▼+ : ekleme alanına odaklan ve tarihi komşudan doldur.
+    const tarihAlani = () => document.getElementById(`progDate_${entityId}`);
+    const notAlani = () => document.getElementById(`progNote_${entityId}`);
+    panel.querySelectorAll('.prog-ust, .prog-alt').forEach(btn => {
+      btn.addEventListener('click', () => {
+        tarihAlani().value = btn.dataset.tarih || '';
+        notAlani().value = '';
+        tarihAlani().focus();
+        tarihAlani().select();
+      });
+    });
+
+    // ✎ : satırın altında yerinde düzenleme. Ayrı bir ekran açmak yerine
+    // burada, çünkü düzeltilen şey çoğunlukla tek bir tarih ya da kelime.
+    panel.querySelectorAll('.prog-duzenle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const satir = btn.closest('.prog-satir');
+        const kutu = satir.querySelector('.prog-duzenle-kutu');
+        if (kutu.style.display !== 'none') { kutu.style.display = 'none'; return; }
+        kutu.style.display = 'flex';
+        kutu.innerHTML = `
+          <input type="text" class="pd-tarih" value="${escapeHtml(btn.dataset.tarih)}" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:150px;">
+          <input type="text" class="pd-not" value="${escapeHtml(btn.dataset.not)}" style="flex:3;min-width:180px;">
+          <button class="btn btn-sm pd-kaydet">Kaydet</button>
+          <button class="btn btn-sm pd-vazgec">Vazgeç</button>`;
+        kutu.querySelector('.pd-vazgec').addEventListener('click', () => { kutu.style.display = 'none'; });
+        kutu.querySelector('.pd-kaydet').addEventListener('click', async () => {
+          const t = kutu.querySelector('.pd-tarih').value.trim();
+          const n = kutu.querySelector('.pd-not').value.trim();
+          if (!n) { alert('Not boş olamaz.'); return; }
+          try {
+            await api.put(`/progressions/${btn.dataset.id}`, {
+              story_date: normalizeTarih ? normalizeTarih(t) : t, note: n,
+            });
+            loadProgressionPanel(entityType, entityId);
+          } catch (err) { alert(err.message); }
+        });
+      });
+    });
 
     panel.querySelectorAll('.del-progression-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -386,18 +418,14 @@ async function loadProgressionPanel(entityType, entityId) {
     el('addProgressionBtn').addEventListener('click', async () => {
       const hata = document.getElementById(`progErr_${entityId}`);
       const tarih = document.getElementById(`progDate_${entityId}`).value.trim();
-      const bolumHam = document.getElementById(`progChapter_${entityId}`).value.trim();
       const note = document.getElementById(`progNote_${entityId}`).value.trim();
       hata.textContent = '';
       if (!note) { hata.textContent = 'Ne değiştiğini yaz.'; return; }
-      if (bolumHam && Number.isNaN(parseInt(bolumHam, 10))) {
-        hata.textContent = `"${bolumHam}" bir sayı değil - bölüm numarasını rakamla yaz ya da boş bırak.`;
-        return;
-      }
       try {
         await api.post('/progressions/', {
           entity_type: entityType, entity_id: parseInt(entityId, 10),
-          chapter_number: bolumHam ? parseInt(bolumHam, 10) : null,
+          // BÖLÜM NO KALDIRILDI: iki ayrı zaman ölçüsü tutmak, hangisinin
+          // geçerli olduğu sorusunu doğuruyordu. Tek ölçü TARİH.
           story_date: normalizeTarih ? normalizeTarih(tarih) : tarih,
           note,
         });

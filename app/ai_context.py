@@ -572,12 +572,14 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
         # Bölüm 2'den önce geçebilir. İkisi de yoksa not zamansızdır ve
         # her zaman gider.
         def _gelecekte_mi(pr):
+            # TEK ÖLÇÜ TARİH. Bölüm numarası ölçü olarak kaldırıldı: iki
+            # ayrı zaman kaynağı tutmak, çeliştiklerinde hangisinin geçerli
+            # olduğu sorusunu doğuruyordu. Tarihi olmayan not ZAMANSIZDIR
+            # ve her sahnede gider.
             pd = story_time.parse_tarih(getattr(pr, "story_date", "") or "")
-            if pd is not None and sahne_zamani is not None:
-                return pd > sahne_zamani
-            if pr.chapter_number is not None and su_anki_bolum is not None:
-                return pr.chapter_number > su_anki_bolum
-            return False
+            if pd is None or sahne_zamani is None:
+                return False
+            return pd > sahne_zamani
 
         once = len(progressions)
         progressions = [p for p in progressions if not _gelecekte_mi(p)]
@@ -589,11 +591,7 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
             # yeri görsün diye sıralama tutarlı olmalı.
             def _sira(pr):
                 pd = story_time.parse_tarih(getattr(pr, "story_date", "") or "")
-                if pd is not None:
-                    return (0, pd, pr.id)
-                if pr.chapter_number is not None:
-                    return (1, pr.chapter_number, pr.id)
-                return (2, 0, pr.id)
+                return (0, pd, pr.id) if pd is not None else (1, 0, pr.id)
             progressions.sort(key=_sira)
             blocks.append("Zaman içindeki gelişimi (kronolojik sırayla, EN GÜNCEL EN ALTTA):")
             # Devasa bir seride (yüzlerce bölüm) bir karakterin gelişim
@@ -614,15 +612,7 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
                 blocks.append(f"  - [ESKİ NOTLARIN ÖZETİ] {older_preview}{extra}")
                 progressions = recent
             for prog in progressions:
-                _tarih = (getattr(prog, "story_date", "") or "").strip()
-                if _tarih and prog.chapter_number:
-                    chapter_part = f"{_tarih} · Bölüm {prog.chapter_number}"
-                elif _tarih:
-                    chapter_part = _tarih
-                elif prog.chapter_number:
-                    chapter_part = f"Bölüm {prog.chapter_number}"
-                else:
-                    chapter_part = "zamansız"
+                chapter_part = (getattr(prog, "story_date", "") or "").strip() or "zamansız"
                 blocks.append(f"  - ({chapter_part}) {prog.note}")
             if gelecek_not:
                 blocks.append(

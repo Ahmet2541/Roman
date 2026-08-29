@@ -1528,10 +1528,11 @@ def test_text_questions_still_get_the_chapter(client, headers):
 
 # --- Gelişim çizelgesi: kronolojik süzme -----------------------------------
 
-def _ilerleme(client, headers, entity_id, bolum, not_metni):
+def _ilerleme(client, headers, entity_id, tarih, not_metni):
+    """Gelişim notu TARİHLE eklenir - bölüm numarası ölçü olmaktan çıktı."""
     return client.post("/progressions/", json={
         "entity_type": "character", "entity_id": entity_id,
-        "chapter_number": bolum, "note": not_metni}, headers=headers)
+        "story_date": tarih or "", "note": not_metni}, headers=headers)
 
 
 def test_future_progressions_are_filtered(client, headers):
@@ -1540,9 +1541,9 @@ def test_future_progressions_are_filtered(client, headers):
     "ileride suçluluk duyacak" sorunu ilerlemede tekrarlanır."""
     k = client.post("/characters/", json={"name": "Vicdan", "description": "Bilinç."},
                     headers=headers).json()
-    client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers)
-    _ilerleme(client, headers, k["id"], 1, "Uyanır, hiçbir şey bilmiyor.")
-    _ilerleme(client, headers, k["id"], 12, "Sekiz sanığı yargılamaya başlar.")
+    _zamanli_bolum(client, headers, "29 Haziran 2030", "10:00")
+    _ilerleme(client, headers, k["id"], "28 Haziran 2030", "Uyanır, hiçbir şey bilmiyor.")
+    _ilerleme(client, headers, k["id"], "7 Temmuz 2030", "Sekiz sanığı yargılamaya başlar.")
 
     ctx = client.post("/ai/context-preview", json={
         "selected_entities": [{"entity_type": "character", "entity_id": k["id"]}],
@@ -1556,15 +1557,14 @@ def test_past_progressions_still_reach_context(client, headers):
     """Süzme sadece GELECEĞİ keser - geçmiş gelişim yerinde kalmalı."""
     k = client.post("/characters/", json={"name": "Vicdan", "description": "Bilinç."},
                     headers=headers).json()
-    for n in (1, 2, 3):
-        client.post("/chapters/", json={"number": n, "title": f"B{n}"}, headers=headers)
-    _ilerleme(client, headers, k["id"], 1, "Uyanır.")
-    _ilerleme(client, headers, k["id"], 2, "Babasının ölümünü öğrenir.")
-    _ilerleme(client, headers, k["id"], 9, "Yargılar.")
+    _zamanli_bolum(client, headers, "30 Haziran 2030", "10:00")
+    _ilerleme(client, headers, k["id"], "28 Haziran 2030", "Uyanır.")
+    _ilerleme(client, headers, k["id"], "29 Haziran 2030", "Babasının ölümünü öğrenir.")
+    _ilerleme(client, headers, k["id"], "7 Temmuz 2030", "Yargılar.")
 
     ctx = client.post("/ai/context-preview", json={
         "selected_entities": [{"entity_type": "character", "entity_id": k["id"]}],
-        "chapter_number": 3}, headers=headers).json()["context"]
+        "chapter_number": 1}, headers=headers).json()["context"]
     assert "Uyanır." in ctx and "Babasının ölümünü öğrenir." in ctx
     assert "Yargılar." not in ctx
 
@@ -1573,9 +1573,9 @@ def test_undated_progressions_always_pass(client, headers):
     """Bölümü belirtilmemiş not = zamansız genel bilgi, her zaman kalır."""
     k = client.post("/characters/", json={"name": "Vicdan", "description": "Bilinç."},
                     headers=headers).json()
-    client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers)
+    _zamanli_bolum(client, headers, "29 Haziran 2030", "10:00")
     _ilerleme(client, headers, k["id"], None, "Her zaman tane tane konuşur.")
-    _ilerleme(client, headers, k["id"], 12, "Yargılar.")
+    _ilerleme(client, headers, k["id"], "7 Temmuz 2030", "Yargılar.")
 
     ctx = client.post("/ai/context-preview", json={
         "selected_entities": [{"entity_type": "character", "entity_id": k["id"]}],
@@ -1605,16 +1605,44 @@ def test_progression_story_date_drives_filtering(client, headers):
     assert "28 Haziran 2030 21:00" in ctx, "tarih damgası gösterilmedi"
 
 
-def test_progression_date_beats_chapter_number(client, headers):
-    """Tarih ve bölüm numarası ÇELİŞİRSE tarih kazanmalı."""
+def test_progression_without_date_is_timeless(client, headers):
+    """Bölüm numarası ölçü olmaktan ÇIKARILDI: iki ayrı zaman kaynağı,
+    çeliştiklerinde hangisinin geçerli olduğu sorusunu doğuruyordu.
+    Tarihi olmayan not zamansızdır ve her sahnede gider."""
     k = client.post("/characters/", json={"name": "Vicdan", "description": "x"},
                     headers=headers).json()
-    # Bölüm numarası küçük (geçmiş gibi) ama tarihi GELECEK
-    client.post("/progressions/", json={
-        "entity_type": "character", "entity_id": k["id"], "chapter_number": 1,
-        "story_date": "7 Temmuz 2030", "note": "Gelecek olay."}, headers=headers)
     _zamanli_bolum(client, headers, "29 Haziran 2030", "10:00")
+    client.post("/progressions/", json={
+        "entity_type": "character", "entity_id": k["id"], "chapter_number": 99,
+        "note": "Zamansız not."}, headers=headers)
     ctx = client.post("/ai/context-preview", json={
         "selected_entities": [{"entity_type": "character", "entity_id": k["id"]}],
         "chapter_number": 1}, headers=headers).json()["context"]
-    assert "Gelecek olay." not in ctx, "bölüm numarası tarihi ezdi"
+    assert "Zamansız not." in ctx, "bölüm numarası hâlâ süzme ölçüsü olarak kullanılıyor"
+
+
+
+def test_progression_can_be_edited(client, headers):
+    """Güncelleme ucu YOKTU: bir notun tarihini düzeltmek için silip
+    yeniden yazmak gerekiyordu. Tarih yanlış girilince bütün kronoloji
+    kayıyor, düzeltmesi de zahmetli oluyordu."""
+    k = client.post("/characters/", json={"name": "V"}, headers=headers).json()
+    p = client.post("/progressions/", json={
+        "entity_type": "character", "entity_id": k["id"],
+        "story_date": "28 Haziran 2020", "note": "Uyandı."}, headers=headers).json()
+
+    r = client.put(f"/progressions/{p['id']}", json={
+        "story_date": "28 Haziran 2030 21:00", "note": "Bodrumda uyandı."}, headers=headers)
+    assert r.status_code == 200
+    assert r.json()["story_date"] == "28 Haziran 2030 21:00"
+    assert r.json()["note"] == "Bodrumda uyandı."
+
+    # Verilmeyen alan dokunulmadan kalmalı
+    r2 = client.put(f"/progressions/{p['id']}", json={"note": "Sadece not değişti."},
+                    headers=headers)
+    assert r2.json()["story_date"] == "28 Haziran 2030 21:00"
+
+    assert client.put(f"/progressions/{p['id']}", json={"note": "  "},
+                      headers=headers).status_code == 400
+    assert client.put("/progressions/99999", json={"note": "x"},
+                      headers=headers).status_code == 404

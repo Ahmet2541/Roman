@@ -438,6 +438,86 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   Tab'layınca) genişleyen bir "kitap sırtı" - masaüstünde varsayılan
   davranış, mobilde klasik açılır/kapanır çekmece
 
+### Yapı Kilidi — plan matrisi hücre şeması (v1.2)
+
+Bir hücre serbest metin değil, sabit bir sahne şemasıdır (`app/plan_schema.py`).
+Üç katman ayrıdır ve bilginin hangisinde durduğu tasarımın özüdür:
+
+- **MİRAS** hücrede yazılmaz, bir kez tanımlanır. TUR mirası kolonda
+  (konu, suç, misafir, güven kelimesi, matematik çifti, damga, koltuğun
+  altı, övgü), PARÇA mirası satırda (no, süre) + Talimat Kasası
+  (`instructions`). Bağlam katmanında her sahneye CANLI eklenir - damga
+  kelimesini değiştirince 56 hücrenin metni bayatlamaz.
+- **SAHNE** hücrenin kendisi: OLAY · ZAMAN (tarih+saat+tip: NOKTA/ATLAMA/
+  SAYAÇ) · MEKAN · ORTAM (mekânın hâli, yay) · KİŞİLER (her biri KENDİ
+  duygu yayıyla) · NESNELER · ODAK · HEDEF UZUNLUK · GİRİŞ/GELİŞME/SONUÇ
+  (her aşamada birden çok beat) · BAĞLANTI (MP kodu + ayna/ileri/geri).
+- **VARLIK** kopyalanmaz; kişi/mekan/nesne kayıtlarına ID ile bağlanır.
+  "Aynı varlık = aynı ID" kuralı veri düzeyinde kilitlenir.
+
+Yapılandırılmış veri `MatrixCell.data`'da (şifreli JSON) durur ve
+kaydederken düz metne dökülüp `content`'e yazılır - bağlam katmanı, MP
+referansları, "Plandan Taslak" ve tutarlılık taraması hiç değişmeden
+çalışmaya devam eder.
+
+**Alanlar kısıt olarak gider, ipucu olarak değil:** ODAK "betimleme SADECE
+bunun üzerinde kalacak" der; saat verilmişse "sahne BU AN'da geçer,
+günün saatiyle çelişen ifade kullanma" der; her planın sonuna SINIRLAR
+bloğu eklenir (plan dışı kişi/olay/nesne yasağı, gelecek yasağı, "hedef
+uzunluğa ulaşmak için olay uydurma").
+
+**Denetim engellemez, işaretler:** eksik alan, damga kelimesinin SONUÇ'ta
+geçmemesi (kelime sınırıyla - alt dize araması "çözünürlüğü" içinde
+"ÇÖZÜN" buluyordu), beat şişmesi (160 karakteri aşan beat "olay dizisi"
+sayılır), paralel matriste çok kişi/çok beat, ODAK seçilmemesi, bağlantının
+eylem söylememesi. Hiçbiri kaydı engellemez.
+
+### Kronoloji — hikâye zamanı, bölüm numarası değil
+
+Bölüm NUMARASI hikâye sırası DEĞİLDİR: kronolojik olarak geriye giden bir
+romanda Bölüm 21, Bölüm 2'den önce geçebilir. `app/story_time.py` tarihleri
+sıralanabilir bir sayıya çevirir (`28 Haziran 2030 13:30` → `203006281330`);
+çözülemeyen göreli ifadeler (`yedi yıl önce`) süzmenin DIŞINDA kalır -
+uydurma tarihle yanlış sıralamak, sıralamamaktan kötüdür.
+
+Buna dayanan üç denetim:
+
+- **Fihrist süzme**: yazılan sahneden SONRA geçen bölümlerin özeti hiç
+  gönderilmez. Ayrıca yakınlık kuralı (komşu bölümler tam, uzaklar tek
+  satır) ve boş özetlerin atılması - 20 bölümde fihrist katmanı bağlamın
+  %79'unu yiyordu, %10'un altına indi.
+- **Varoluş aralığı**: kişi/mekan/nesnede `var_olus` / `yok_olus`. Sahne
+  bu aralığın dışındaysa profil "⚠ BU SAHNEDE HENÜZ YOK - adı anılamaz"
+  uyarısıyla gider. Ayrıca BAŞKA bir kaydın profil metninde henüz var
+  olmayan bir varlığın adı geçiyorsa ("Vicdan'ın fısıltılarını duyuyor")
+  ayrı bir uyarı eklenir.
+- **Gelişim çizelgesi**: kişi/mekan/nesne düzenleme ekranına gömülü,
+  tarihe göre sıralı. Her not tarih + ne değişti. Sahneden SONRAKİ notlar
+  gönderilmez; tarihi olmayan not ZAMANSIZDIR ve her sahnede gider.
+  Bölüm numarası ölçü olmaktan çıkarıldı - iki ayrı zaman kaynağı,
+  çeliştiklerinde hangisinin geçerli olduğu sorusunu doğuruyordu.
+
+### Dışa/içe aktarım
+
+- **El yazması** (`GET /novels/{id}/manuscript?format=docx|md|txt`):
+  romanın OKUNUR hâli - fihrist hiyerarşisi korunur, başlıklar gerçek Word
+  başlığıdır. JSON yedeğinden farkı: o veri yedeğidir, bu okumak/basmak
+  içindir.
+- **Plan matrisleri** (`GET /matrix/export?format=json|md|docx`): JSON tam
+  veri (miras alanları, yapılandırılmış hücre, bölüm bağları, uyarılar);
+  md/docx okunur döküm - AI'ya yönelik yönergeler (SINIRLAR bloğu, kısıt
+  kuyrukları) basılı çıktıdan temizlenir.
+- **Matris içe aktarım** (`POST /matrix/import`): mevcut matrislerin
+  üzerine YAZMAZ, yeni matris ekler. Varlık ID'leri kaynak evrene ait
+  olduğu için hedef evrende ADLA yeniden çözülür; bulunamayan ad serbest
+  metin kalır. Bölüm bağı numaraya göre kurulur, o numarada bölüm yoksa
+  hücre bağsız bırakılır ve raporlanır.
+- **Denetim promptu** (`GET /matrix/{id}/audit-prompt`): planı dışarıdan
+  denetletmek için hazır metin. Sayılabilir kusurlar (bağsız plan, kayıp
+  MP referansı, çift bağ, damgasız tur, paralellik deliği, uzunluk
+  uyuşmazlığı) DETERMİNİSTİK olarak bulunup metnin başına konur - bunları
+  bir modele sormak hem para yakar hem yanıltır.
+
 ## Kurulum
 
 ```bash
@@ -500,8 +580,24 @@ app/
   outline.py          - fihrist hiyerarşisi (sunucu tarafı): hangi girdi kimin
                         altında, hiyerarşik numaralar (1, 1-1, 1-2-3).
                         Frontend'deki buildChapterHierarchy ile aynı kurallar
+  plan_schema.py      - YAPI KİLİDİ: plan matrisi hücre şeması (miras/sahne/varlık
+                        katmanları), düz metne dökme, denetim uyarıları
+  plan_audit.py       - denetim promptu (deterministik yapı kusurları + sorular)
+                        ve matris dışa aktarımı (json/md/docx)
+  plan_import.py      - matris içe aktarım: varlık ID'leri hedef evrende ADLA
+                        yeniden çözülür, mevcut matrislerin üzerine yazılmaz
+  story_time.py       - hikâye zamanı: serbest metin tarihi sıralanabilir sayıya
+                        çevirir; bölüm numarası hikâye sırası DEĞİLDİR
+  matrix_links.py     - kopuk uç temizliği: bölüm/kişi/varlık silinince matris
+                        bağları ölü ID'de kalmasın
+  manuscript.py       - el yazması dışa aktarımı (docx/md/txt), fihrist
+                        hiyerarşisini koruyarak
   style_scan.py       - üslup taraması motoru: yapısal kalıp sayımı, çift eşik,
                         önbellek ve AI context'ine giren "bütçeli kaçın" uyarıları
+  ai_context.py       - context katmanlarının tamamı (fihrist, plan, profiller,
+                        matris haritası, paralel turlar, ileri bakış...) ve
+                        kronolojik süzme
+  prompts.py          - sistem yönergesi ve AI yönergeleri (SYSTEM_PROMPT dahil)
   qwen_client.py      - DashScope bağlantısı + TÜM context katmanları:
                         fixed (kurallar) / index (fihrist özetleri) /
                         outline (fihrist haritası + atıf numaraları) /
@@ -686,7 +782,7 @@ Kurallar:
 
 ## Testler
 
-**192 test** (20 dosya, + 16 arayüz davranış testi) - AI çağrıları `unittest.mock` ile sahte Qwen
+**298 test** (22 dosya, + 25 arayüz davranış testi) - AI çağrıları `unittest.mock` ile sahte Qwen
 yanıtlarıyla çalışır, gerçek bir `DASHSCOPE_API_KEY` gerekmez.
 
 Frontend tarafında iki katman test var:
@@ -733,10 +829,6 @@ progression'da yanlış chapter_number) otomatik yakalar.
 
 **Yapılmamış olanlar (bilinçli sırada bekliyor):**
 
-- **El yazması dışa aktarımı**: romanı okunabilir tek belge (docx/markdown)
-  olarak dışarı verecek bir uç YOK. `/admin/export` bir VERİ dökümüdür
-  (JSON), el yazması değil. Bir roman aracının en temel çıktısı bu -
-  listenin başında.
 - **Cümle Kasası**: aklına gelen ama henüz yeri olmayan replikleri
   ("koca bir şehri süslü tabut olarak sundun") sahibiyle birlikte saklayan
   kutu; sahibi sahnedeyken kullanılmamış replikler context'e "uygun ana
@@ -749,7 +841,16 @@ progression'da yanlış chapter_number) otomatik yakalar.
   çalışıyorsan puanlar ve kararlar ayrışır.
 - **Anlatıcı / odak katmanı**: kimin gözünden, hangi mesafeden anlatıldığı
   denetlenmiyor. Bakış açısı kayması (aynı sahnede iki karakterin içine
-  girme) yakalanmıyor.
+  girme) yakalanmıyor. Ses/anlatıcı katmanı VAR ama beslenmiyor.
+- **Talimat kasası ile hücre içeriği arasında anlamsal çelişki denetimi
+  yok**: satır "sanık tek cümle konuşur" derken hücrenin GELİŞME'si onu
+  konuşturuyorsa sistem bunu yakalayamaz - anlam gerektirir. Beat sayacı
+  bu çelişkilerin çoğunu baştan engelliyor (dizi yazmazsan kısıtla çakışma
+  ihtimali düşüyor), gerçekten gerekirse tek bir ucuz AI çağrısıyla
+  "bu ikisi aynı anda uygulanabilir mi" sorulabilir.
+- **Uzun AI uçları Railway proxy'sinde 502 veriyor**: `/ai/paragraph-roles`
+  162 sn sürüp kesilmişti. Çözüm timeout artırmak DEĞİL (proxy zaten
+  kesiyor) - paragrafları gruplara bölüp parça parça çalıştırmak.
 - **Duygusal eğri**: özetlerdeki KAPANIŞ TONU satırları toplanıp bölümler
   arası duygusal seyir çıkarılmıyor (ham veri var, birleştirilmiyor).
 - **Grup adları mention taramasında yok**: "İçişleri Bakanlığı" metinde

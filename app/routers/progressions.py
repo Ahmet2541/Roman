@@ -27,6 +27,10 @@ def _to_out(db: Session, item: models.Progression) -> schemas.ProgressionOut:
     return schemas.ProgressionOut(
         id=item.id, entity_type=item.entity_type, entity_id=item.entity_id,
         chapter_number=item.chapter_number, note=item.note, created_at=item.created_at,
+        # story_date BURADA UNUTULMUŞTU: kayıt doğru yapılıyordu ama yanıt
+        # onu taşımadığı için arayüzde hep boş görünüyor, sıralama ve
+        # süzme çalışmıyordu.
+        story_date=item.story_date or "",
         source_novel_id=item.source_novel_id, source_novel_name=novel.name if novel else None,
     )
 
@@ -45,9 +49,17 @@ def list_progressions(
     if entity_id is not None:
         query = query.filter(models.Progression.entity_id == entity_id)
     items = query.all()
-    # Kronolojik sırala: chapter_number'ı olmayanlar (henüz bölüme
-    # bağlanmamış notlar) en sona düşer.
-    items.sort(key=lambda p: (p.chapter_number is None, p.chapter_number or 0, p.id))
+    # KRONOLOJİK SIRA: ölçü TARİHTİR. Bölüm numarası hikâye sırası değil -
+    # geriye giden bir romanda Bölüm 21, Bölüm 2'den önce geçebilir.
+    # Tarihi olmayanlar sona düşer (zamansız notlar).
+    from .. import story_time as _st
+
+    def _sira(p):
+        z = _st.parse_tarih(getattr(p, "story_date", "") or "")
+        return (0, z, p.id) if z is not None else (1, 0, p.id)
+
+    items.sort(key=_sira)
+
     return [_to_out(db, p) for p in items]
 
 
@@ -77,6 +89,37 @@ def create_progression(
         note=payload.note,
     )
     db.add(item)
+    db.commit()
+    db.refresh(item)
+    return _to_out(db, item)
+
+
+@router.put("/{progression_id}", response_model=schemas.ProgressionOut)
+def update_progression(
+    progression_id: int, payload: schemas.ProgressionUpdate,
+    db: Session = Depends(get_db), _user=Depends(get_current_user),
+    universe_id: int = Depends(get_universe_id),
+):
+    """Var olan bir gelişim notunu düzenler.
+
+    Bu uç YOKTU: bir notun tarihini ya da metnini düzeltmek için silip
+    yeniden yazmak gerekiyordu. Tarih yanlış girildiğinde bütün kronoloji
+    kayıyor, düzeltmesi de zahmetli oluyordu.
+    """
+    item = (db.query(models.Progression)
+            .filter(models.Progression.id == progression_id,
+                    models.Progression.universe_id == universe_id).first())
+    if not item:
+        raise HTTPException(404, "Gelişim notu bulunamadı")
+    if payload.note is not None:
+        yeni = payload.note.strip()
+        if not yeni:
+            raise HTTPException(400, "Not boş olamaz")
+        item.note = yeni
+    if payload.story_date is not None:
+        item.story_date = payload.story_date.strip()
+    if payload.chapter_number is not None:
+        item.chapter_number = payload.chapter_number
     db.commit()
     db.refresh(item)
     return _to_out(db, item)
