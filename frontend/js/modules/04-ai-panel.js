@@ -151,7 +151,7 @@ async function renderAiPanel(chapter) {
       <div id="contextPreviewContainer"></div>`;
 
     const draftBtn = document.getElementById('draftFromPlanBtn');
-    if (draftBtn) draftBtn.addEventListener('click', () => runPlanDraft(chapter));
+    if (draftBtn) draftBtn.addEventListener('click', () => runPlanDraft(chapter, planCells));
     const editPlanBtn = document.getElementById('editPlanBtn');
     if (editPlanBtn) {
       editPlanBtn.addEventListener('click', () => {
@@ -867,7 +867,7 @@ function renderProgressionSuggestionsInto(container, suggestions) {
       ${suggestions.map((s, i) => `
         <label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
           <input type="checkbox" class="progression-suggestion-check" data-idx="${i}" checked style="margin-top:3px;">
-          <span><strong>${escapeHtml(s.entity_name)}</strong>${s.story_date ? ` (${escapeHtml(s.story_date)})` : ''}: ${escapeHtml(s.note)}</span>
+          <span><strong>${escapeHtml(s.entity_name)}</strong> (Bölüm ${s.chapter_number}): ${escapeHtml(s.note)}</span>
         </label>`).join('')}
       <button class="btn btn-primary btn-sm" id="approveProgressionsBtn" style="margin-top:8px;">Seçilenleri Haritaya Ekle</button>
     </div>`;
@@ -881,7 +881,7 @@ function renderProgressionSuggestionsInto(container, suggestions) {
       for (const s of chosen) {
         await api.post('/progressions/', {
           entity_type: s.entity_type, entity_id: s.entity_id,
-          story_date: s.story_date || '', note: s.note,
+          chapter_number: s.chapter_number, note: s.note,
         });
       }
       container.innerHTML = `<div class="success-text">${chosen.length} gelişim notu haritaya eklendi.</div>`;

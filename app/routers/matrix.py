@@ -31,6 +31,7 @@ from ..outline import build_hierarchy, children_of
 from .. import plan_schema
 from .. import plan_audit
 from .. import plan_import
+from .. import story_time
 
 logger = logging.getLogger("roman_api.matrix")
 
@@ -707,10 +708,17 @@ def plan_for_chapter(
         matrix = db.query(models.PlanMatrix).filter(models.PlanMatrix.id == cell.matrix_id).first()
         col = db.query(models.MatrixColumn).filter(models.MatrixColumn.id == cell.column_id).first()
         row = db.query(models.MatrixRow).filter(models.MatrixRow.id == cell.row_id).first()
+        # ZAMAN'ı hücrenin YAPISAL verisinden (data) oku, render edilmiş
+        # content'i regex'le didiklemek yerine - tek gerçek kaynak content
+        # üretiminde de zaten bu.
+        zaman = plan_schema.normalize_cell(cell.data)["zaman"]
         out.append(schemas.ChapterPlanCell(
             code=cell.code, matrix_name=matrix.name if matrix else "",
             column_label=col.label if col else "", row_label=row.label if row else "",
             content=cell.content,
+            zaman_tarih=zaman["tarih"] or None,
+            zaman_saat=zaman["saat"] or None,
+            zaman_sira=story_time.hucreden_zaman(cell.data),
         ))
     return out
 

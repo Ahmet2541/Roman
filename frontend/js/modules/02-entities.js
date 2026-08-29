@@ -330,79 +330,46 @@ async function loadProgressionPanel(entityType, entityId) {
   try {
     const items = await api.get(`/progressions/?entity_type=${entityType}&entity_id=${entityId}`);
 
-    // KRONOLOJİK SIRA: TEK ölçü hikâye tarihi, en sonda zamansız notlar.
-    // Yazar araya not eklerken doğru yeri görmeli - "üstüne mi altına mı"
-    // sorusu ancak sıralı listede cevaplanır.
+    // KRONOLOJİK SIRA: önce hikâye tarihi, sonra bölüm numarası, en sonda
+    // zamansız notlar. Yazar araya not eklerken doğru yeri görmeli -
+    // "üstüne mi altına mı" sorusu ancak sıralı listede cevaplanır.
     const sirali = items.slice().sort((a, b) => {
       const ta = normalizeTarihSirasi(a.story_date), tb = normalizeTarihSirasi(b.story_date);
       if (ta !== null && tb !== null) return ta - tb;
       if (ta !== null) return -1;
       if (tb !== null) return 1;
+      const ca = a.chapter_number, cb = b.chapter_number;
+      if (ca != null && cb != null) return ca - cb;
+      if (ca != null) return -1;
+      if (cb != null) return 1;
       return a.id - b.id;
     });
 
-    // Her satırın SONUNDA iki belirgin ikon buton var: ▲+ (bu notun
-    // ÜSTÜNE ekle) ve ▼+ (bu notun ALTINA ekle). İkisi de aynı gizli
-    // "slot" formunu açar (satır i=0..N-1'in üstü = slot i, altı = slot
-    // i+1) - komşu iki satırın "üstüne" ve "altına" butonları aynı slot'a
-    // işaret eder. Konum sadece görsel ipucu - gerçek sıra HER ZAMAN
-    // tarihe göre yeniden hesaplanır, slot'a tıklamak "buraya zorla" değil
-    // "buraya yakın bir tarih gireceğim, komşu tarihleri görmek istiyorum"
-    // demek.
-    const slotForm = (i) => {
-      const onceki = sirali[i - 1], sonraki = sirali[i];
-      const ipucu = onceki && sonraki
-        ? `${(onceki.story_date || 'zamansız')} ile ${(sonraki.story_date || 'zamansız')} arası`
-        : onceki ? `${(onceki.story_date || 'zamansız')} sonrası`
-        : sonraki ? `${(sonraki.story_date || 'zamansız')} öncesi`
-        : 'ilk not';
-      return `
-      <div class="slot-form" data-slot="${i}" style="display:none;gap:4px;flex-wrap:wrap;margin:4px 0;padding:6px;border:1px dashed var(--border);border-radius:4px;">
-        <div style="width:100%;font-size:10.5px;color:var(--text-muted);">${escapeHtml(ipucu)}</div>
-        <input type="text" class="slot-date" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:150px;">
-        <input type="text" class="slot-note" placeholder="Ne değişti?" style="flex:3;min-width:170px;">
-        <button class="btn btn-sm slot-save-btn" data-slot="${i}">Kaydet</button>
-      </div>`;
-    };
-
-    // Düzenleme formu: silip yeniden eklemek yerine var olan notun
-    // tarih/metnini yerinde günceller (PUT /progressions/{id}).
-    const editForm = (p) => `
-      <div class="edit-form" data-edit-id="${p.id}" style="display:none;gap:4px;flex-wrap:wrap;margin:4px 0;padding:6px;border:1px dashed var(--gold);border-radius:4px;">
-        <input type="text" class="edit-date" value="${escapeHtml(p.story_date || '')}" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:150px;">
-        <input type="text" class="edit-note" value="${escapeHtml(p.note)}" placeholder="Ne değişti?" style="flex:3;min-width:170px;">
-        <button class="btn btn-sm edit-save-btn" data-edit-id="${p.id}">Kaydet</button>
-      </div>`;
-
-    const rows = sirali.map((p, i) => {
-      const damga = (p.story_date || '').trim() || 'zamansız';
+    const rows = sirali.map(p => {
+      const tarih = (p.story_date || '').trim();
+      const bolum = p.chapter_number ? `Bölüm ${p.chapter_number}` : '';
+      const damga = [tarih, bolum].filter(Boolean).join(' · ') || 'zamansız';
       return `
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;font-size:12.5px;padding:5px 0;border-bottom:1px dotted var(--border);">
         <span style="flex:1;"><strong style="color:var(--gold);">${escapeHtml(damga)}</strong> — ${escapeHtml(p.note)}</span>
-        <div style="display:flex;gap:2px;flex-shrink:0;">
-          <button class="btn-icon-sm add-slot-btn" data-slot="${i}" title="Bu notun ÜSTÜNE ekle">▲+</button>
-          <button class="btn-icon-sm add-slot-btn" data-slot="${i + 1}" title="Bu notun ALTINA ekle">▼+</button>
-          <button class="btn-icon-sm edit-toggle-btn" data-edit-id="${p.id}" title="Düzenle">✎</button>
-          <button class="btn-icon-sm del-progression-btn" data-id="${p.id}" title="Sil">✕</button>
-        </div>
-      </div>
-      ${editForm(p)}
-      ${slotForm(i + 1)}`;
+        <button class="btn-icon-sm del-progression-btn" data-id="${p.id}" title="Sil">✕</button>
+      </div>`;
     }).join('');
 
     panel.innerHTML = `
       <strong style="font-size:10.5px;color:var(--text-muted);letter-spacing:0.4px;">KRONOLOJİ / GELİŞİM ÇİZELGESİ</strong>
       <div style="font-size:11px;color:var(--text-muted);margin:2px 0 6px;">
         Bu kaydın zaman içindeki değişimi. Bir sahne yazılırken SADECE o ana kadar
-        olan notlar AI'ya gider - sonraki notlar gönderilmez. Süzme SADECE tarihe
-        göre yapılır; tarih yazmazsan not zamansız kabul edilir ve her zaman gider.
+        olan notlar AI'ya gider - sonraki notlar gönderilmez. Tarih yazarsan süzme
+        tarihe göre, yazmazsan bölüm numarasına göre yapılır.
       </div>
-      ${sirali.length ? slotForm(0) + rows : `
-        <div class="empty-state" style="padding:4px 0;display:flex;justify-content:space-between;align-items:center;">
-          <span>Henüz not yok.</span>
-          <button class="btn btn-sm add-slot-btn" data-slot="0">+ Ekle</button>
-        </div>
-        ${slotForm(0)}`}
+      ${rows || '<div class="empty-state" style="padding:4px 0;">Henüz not yok.</div>'}
+      <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">
+        <input type="text" id="progDate_${entityId}" placeholder="28 Haziran 2030 21:00" style="flex:2;min-width:150px;">
+        <input type="text" id="progChapter_${entityId}" placeholder="Bölüm no" style="flex:0 0 80px;">
+        <input type="text" id="progNote_${entityId}" placeholder="Ne değişti?" style="flex:3;min-width:170px;">
+        <button class="btn btn-sm" id="addProgressionBtn">+ Ekle</button>
+      </div>
       <div id="progErr_${entityId}" class="error-text" style="font-size:11.5px;"></div>`;
 
     panel.querySelectorAll('.del-progression-btn').forEach(btn => {
@@ -414,69 +381,28 @@ async function loadProgressionPanel(entityType, entityId) {
       });
     });
 
-    // Tüm ekle/düzenle formlarını kapatır - aynı anda sadece bir tanesi
-    // açık kalsın diye her yeni form açılışından önce çağrılır.
-    const kapatHepsini = () => {
-      panel.querySelectorAll('.slot-form, .edit-form').forEach(f => { f.style.display = 'none'; });
-    };
-
-    panel.querySelectorAll('.add-slot-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const form = panel.querySelector(`.slot-form[data-slot="${btn.dataset.slot}"]`);
-        const acikMi = form.style.display === 'flex';
-        kapatHepsini();
-        if (!acikMi) { form.style.display = 'flex'; form.querySelector('.slot-date').focus(); }
-      });
-    });
-
-    // ✎ Düzenle: satırın altında var olan tarih/metinle önceden dolu bir
-    // form açar - silip yeniden girmek yerine yerinde günceller.
-    panel.querySelectorAll('.edit-toggle-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const form = panel.querySelector(`.edit-form[data-edit-id="${btn.dataset.editId}"]`);
-        const acikMi = form.style.display === 'flex';
-        kapatHepsini();
-        if (!acikMi) { form.style.display = 'flex'; form.querySelector('.edit-date').focus(); }
-      });
-    });
-
-    panel.querySelectorAll('.edit-save-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const hata = document.getElementById(`progErr_${entityId}`);
-        const form = panel.querySelector(`.edit-form[data-edit-id="${btn.dataset.editId}"]`);
-        const tarih = form.querySelector('.edit-date').value.trim();
-        const note = form.querySelector('.edit-note').value.trim();
-        hata.textContent = '';
-        if (!note) { hata.textContent = 'Ne değiştiğini yaz.'; return; }
-        try {
-          await api.put(`/progressions/${btn.dataset.editId}`, {
-            story_date: normalizeTarih ? normalizeTarih(tarih) : tarih,
-            note,
-          });
-          loadProgressionPanel(entityType, entityId);
-        } catch (err) { hata.textContent = err.message; }
-      });
-    });
-
     // Prompt() yerine ALAN: prompt sırayla iki pencere açıyordu, tarih
     // eklenince üç olacaktı - üstelik yazdığını göremiyordun.
-    panel.querySelectorAll('.slot-save-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const hata = document.getElementById(`progErr_${entityId}`);
-        const form = panel.querySelector(`.slot-form[data-slot="${btn.dataset.slot}"]`);
-        const tarih = form.querySelector('.slot-date').value.trim();
-        const note = form.querySelector('.slot-note').value.trim();
-        hata.textContent = '';
-        if (!note) { hata.textContent = 'Ne değiştiğini yaz.'; return; }
-        try {
-          await api.post('/progressions/', {
-            entity_type: entityType, entity_id: parseInt(entityId, 10),
-            story_date: normalizeTarih ? normalizeTarih(tarih) : tarih,
-            note,
-          });
-          loadProgressionPanel(entityType, entityId);
-        } catch (err) { hata.textContent = err.message; }
-      });
+    el('addProgressionBtn').addEventListener('click', async () => {
+      const hata = document.getElementById(`progErr_${entityId}`);
+      const tarih = document.getElementById(`progDate_${entityId}`).value.trim();
+      const bolumHam = document.getElementById(`progChapter_${entityId}`).value.trim();
+      const note = document.getElementById(`progNote_${entityId}`).value.trim();
+      hata.textContent = '';
+      if (!note) { hata.textContent = 'Ne değiştiğini yaz.'; return; }
+      if (bolumHam && Number.isNaN(parseInt(bolumHam, 10))) {
+        hata.textContent = `"${bolumHam}" bir sayı değil - bölüm numarasını rakamla yaz ya da boş bırak.`;
+        return;
+      }
+      try {
+        await api.post('/progressions/', {
+          entity_type: entityType, entity_id: parseInt(entityId, 10),
+          chapter_number: bolumHam ? parseInt(bolumHam, 10) : null,
+          story_date: normalizeTarih ? normalizeTarih(tarih) : tarih,
+          note,
+        });
+        loadProgressionPanel(entityType, entityId);
+      } catch (err) { hata.textContent = err.message; }
     });
   } catch (err) {
     panel.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;

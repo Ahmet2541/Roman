@@ -598,19 +598,13 @@ class ContextLayerSize(BaseModel):
 class ProgressionBase(BaseModel):
     entity_type: str
     entity_id: int
+    chapter_number: Optional[int] = None
     note: str
 
 
 class ProgressionCreate(ProgressionBase):
     pass
     story_date: str = ""
-
-
-class ProgressionUpdate(BaseModel):
-    """Var olan bir gelişim notunu düzenler - entity_type/entity_id
-    değişmez (yanlış kayda taşınmasın), sadece tarih/not güncellenir."""
-    story_date: str = ""
-    note: str
 
 class ProgressionOut(ProgressionBase):
     model_config = ConfigDict(from_attributes=True)
@@ -625,13 +619,11 @@ class ProgressionOut(ProgressionBase):
 
 class ProgressionSuggestion(BaseModel):
     """AI'nın bir bölümü tarayıp önerdiği gelişim notu taslağı. Kaydedilmez -
-    kullanıcı onaylarsa mevcut POST /progressions/ ile kaydedilir.
-    story_date: metinde AÇIKÇA geçen bir tarih varsa onu taşır; yoksa boş
-    kalır ve not zamansız olarak kaydedilir (bölüm numarasına düşülmez)."""
+    kullanıcı onaylarsa mevcut POST /progressions/ ile kaydedilir."""
     entity_type: str
     entity_id: int
     entity_name: str
-    story_date: str = ""
+    chapter_number: int
     note: str
 
 
@@ -923,6 +915,16 @@ class ChapterPlanCell(BaseModel):
     column_label: str
     row_label: str
     content: str
+    # HÜCRENİN ZAMANI - hücrenin ZAMAN alanından AYNEN, çözülmemiş biçimde.
+    # "Plandan Bölüm Taslağı Oluştur" bunu AI'DAN BAĞIMSIZ, taslağın başına
+    # sabit bir tarih satırı olarak ekleyebilsin diye: AI'ya güvenmek yerine
+    # kod kendi elindeki veriden yazar - unutmaz, biçimi bozmaz.
+    zaman_tarih: Optional[str] = None
+    zaman_saat: Optional[str] = None
+    # Sıralanabilir hâli (story_time.parse_tarih) - birden çok hücre varsa
+    # EN ERKEN zamanı bulmak için (bkz. story_time.bolum_zamanlari ile aynı
+    # mantık - bölüm o andan başlar).
+    zaman_sira: Optional[int] = None
 
 
 # ---- Okur Testi -------------------------------------------------------------

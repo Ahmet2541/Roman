@@ -364,7 +364,7 @@ def _gelecek_uyarisi(metin: str, gelecek_adlar: list) -> str:
               "adsız da olsa sezdirme.")
 
 
-def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3, instruction_text: str = "", include_hidden: bool = False, sahne_zamani: int | None = None, plan_kaynakli: set | None = None) -> str:
+def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3, instruction_text: str = "", include_hidden: bool = False, sahne_zamani: int | None = None, plan_kaynakli: set | None = None, su_anki_bolum: int | None = None) -> str:
     if not selected_entities:
         return ""
 
@@ -562,17 +562,21 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
             )
             .all()
         )
-        # KRONOLOJİK SÜZME: gelişim notları "şu tarihten itibaren şu
-        # geçerli" demek. Sahne zamanından SONRAKİ bir not GELECEKTİR -
+        # KRONOLOJİK SÜZME: gelişim notları "Bölüm X'ten itibaren şu
+        # geçerli" demek. Bölüm 1 yazılırken Bölüm 12'nin notu GELECEKTİR -
         # gönderilirse profildeki "ileride suçluluk duyacak" sorununun
-        # aynısı ilerlemede tekrarlanır. Tarihi olmayan/çözülemeyen notlar
-        # (zamansız genel bilgi) her zaman kalır. TEK ölçü story_date -
-        # bölüm numarası kronoloji anchor'ı DEĞİL (roman yeniden
-        # bölümlenirse/kısımlar taşınırsa numara anlamını yitirir).
+        # aynısı ilerlemede tekrarlanır. Bölümü belirtilmemiş notlar
+        # (zamansız genel bilgi) her zaman kalır.
+        # Süzme ölçüsü: ÖNCE tarih, sonra bölüm numarası. Bölüm numarası
+        # hikâye sırası değildir - geriye giden bir romanda Bölüm 21,
+        # Bölüm 2'den önce geçebilir. İkisi de yoksa not zamansızdır ve
+        # her zaman gider.
         def _gelecekte_mi(pr):
             pd = story_time.parse_tarih(getattr(pr, "story_date", "") or "")
             if pd is not None and sahne_zamani is not None:
                 return pd > sahne_zamani
+            if pr.chapter_number is not None and su_anki_bolum is not None:
+                return pr.chapter_number > su_anki_bolum
             return False
 
         once = len(progressions)
@@ -580,14 +584,16 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
         gelecek_not = once - len(progressions)
 
         if progressions or gelecek_not:
-            # Kronolojik sıra: tarihi olan tarihe göre, tarihi olmayan
-            # (zamansız) en sona. Yazar notu araya eklerken doğru yeri
-            # görsün diye sıralama tutarlı olmalı.
+            # Kronolojik sıra: tarihi olan önce tarihe, olmayan bölüm
+            # numarasına göre dizilir. Yazar notu araya eklerken doğru
+            # yeri görsün diye sıralama tutarlı olmalı.
             def _sira(pr):
                 pd = story_time.parse_tarih(getattr(pr, "story_date", "") or "")
                 if pd is not None:
                     return (0, pd, pr.id)
-                return (1, 0, pr.id)
+                if pr.chapter_number is not None:
+                    return (1, pr.chapter_number, pr.id)
+                return (2, 0, pr.id)
             progressions.sort(key=_sira)
             blocks.append("Zaman içindeki gelişimi (kronolojik sırayla, EN GÜNCEL EN ALTTA):")
             # Devasa bir seride (yüzlerce bölüm) bir karakterin gelişim
@@ -609,11 +615,18 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
                 progressions = recent
             for prog in progressions:
                 _tarih = (getattr(prog, "story_date", "") or "").strip()
-                damga = _tarih if _tarih else "zamansız"
-                blocks.append(f"  - ({damga}) {prog.note}")
+                if _tarih and prog.chapter_number:
+                    chapter_part = f"{_tarih} · Bölüm {prog.chapter_number}"
+                elif _tarih:
+                    chapter_part = _tarih
+                elif prog.chapter_number:
+                    chapter_part = f"Bölüm {prog.chapter_number}"
+                else:
+                    chapter_part = "zamansız"
+                blocks.append(f"  - ({chapter_part}) {prog.note}")
             if gelecek_not:
                 blocks.append(
-                    f"  - ({gelecek_not} gelişim notu bu sahnenin tarihinden SONRAYA ait olduğu için "
+                    f"  - ({gelecek_not} gelişim notu bu bölümden SONRAYA ait olduğu için "
                     f"çıkarıldı - o gelişmeler bu anda henüz OLMAMIŞTIR.)")
 
         mentions = (
@@ -1015,7 +1028,7 @@ def build_context(
         logger.exception("Sahne zamanı okunamadı, varlık denetimi atlanıyor")
         sahne_zamani = None
     plan_kaynakli = {(r.entity_type, r.entity_id) for r in plan_refs}
-    dynamic = build_dynamic_layer(db, universe_id, birlesik, instruction_text=instruction_text, include_hidden=include_hidden, sahne_zamani=sahne_zamani, plan_kaynakli=plan_kaynakli)
+    dynamic = build_dynamic_layer(db, universe_id, birlesik, instruction_text=instruction_text, include_hidden=include_hidden, sahne_zamani=sahne_zamani, plan_kaynakli=plan_kaynakli, su_anki_bolum=chapter_number)
     # KATMAN SIRASI - plan EN SONA alındı.
     # Plan, modelin en çok uyması gereken katman ama on beşin sekizincisi
     # olarak yığının ortasında kalıyordu; fihrist ise ikinci sıradaydı.

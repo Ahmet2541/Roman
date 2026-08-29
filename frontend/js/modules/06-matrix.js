@@ -1374,13 +1374,37 @@ function renderAiFillReview(m, result) {
 // dersen boş satırlardan paragraflara bölünüp bölüme eklenir - sonrasında
 // her paragraf normal araçlarla (Kaydet/Geçmiş/AI) tek tek işlenir.
 // ---------------------------------------------------------------------------
-async function runPlanDraft(chapter) {
+// TASLAK BAŞLIĞI: hücrenin ZAMAN alanından, AI'DAN BAĞIMSIZ tek satır.
+// AI'ya "taslağın başına tarihi yaz" dedirtmek güvenilmez değildi ama
+// tutarsızdı - bazen unutur, bazen biçimi bozar, bazen tarihi kendi
+// üslubuyla yeniden yazar. Bunun yerine kod, hücrenin ZATEN sakladığı
+// tarih/saati (plan-for-chapter'dan gelen zaman_tarih/zaman_saat) hiç
+// AI'ya sormadan taslağın başına ekler - hep aynı biçim, hiç unutmaz.
+function _planDraftZamanBasligi(planCells) {
+  const adaylar = (planCells || []).filter(c => c && c.zaman_tarih);
+  if (!adaylar.length) return null;
+  // Bölüme birden çok hücre bağlıysa EN ERKEN zaman alınır - bölüm o anda
+  // başlıyor demektir (bkz. backend story_time.bolum_zamanlari, aynı kural).
+  // Sıralanabilir değeri olmayanlar (göreli tarih, "üçüncü gün" gibi) sona
+  // atılır ama yine de aday kalır - hiç göstermemekten iyidir.
+  adaylar.sort((a, b) => {
+    if (a.zaman_sira == null && b.zaman_sira == null) return 0;
+    if (a.zaman_sira == null) return 1;
+    if (b.zaman_sira == null) return -1;
+    return a.zaman_sira - b.zaman_sira;
+  });
+  const c = adaylar[0];
+  return c.zaman_saat ? `${c.zaman_tarih}, ${c.zaman_saat}` : c.zaman_tarih;
+}
+
+async function runPlanDraft(chapter, planCells) {
   const box = document.getElementById('planDraftResult');
   const hasParagraphs = (chapter.paragraphs || []).length > 0;
   if (hasParagraphs && !confirm('Bu bölümde zaten paragraf var - taslak, mevcut metnin SONUNA eklenecek. Devam?')) return;
   const selected = Array.from(document.querySelectorAll('.entity-check:checked')).map(cb => ({
     entity_type: cb.dataset.type, entity_id: parseInt(cb.dataset.id, 10),
   }));
+  const zamanBasligi = _planDraftZamanBasligi(planCells);
   box.innerHTML = '<div class="empty-state">Plan işleniyor, taslak yazılıyor…</div>';
   try {
     const result = await api.post('/ai/assist', {
@@ -1393,9 +1417,15 @@ async function runPlanDraft(chapter) {
     });
     const paras = (result.generated_text || '').split(/\n\s*\n/).map(t => t.trim()).filter(Boolean);
     if (!paras.length) { box.innerHTML = '<div class="error-text">Taslak boş döndü.</div>'; return; }
+    // Başlık paragrafı listenin en başına eklenir - kaydedilince Paragraf 1
+    // olur, "en üstte" tam olarak burası. AI'nın ürettiği metne KARIŞMAZ,
+    // ayrı bir paragraf olarak eklenir; istenirse sonradan tek başına
+    // düzenlenebilir ya da silinebilir.
+    const kaydedilecekParagraflar = zamanBasligi ? [`— ${zamanBasligi} —`, ...paras] : paras;
     box.innerHTML = `
       <div class="panel" style="margin-top:8px;border-color:var(--gold);">
         <strong style="font-size:11px;color:var(--text-muted);">TASLAK (${paras.length} paragraf) - onaylamadan kaydedilmez</strong>
+        ${zamanBasligi ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">🕐 Başa eklenecek tarih satırı: <strong>${escapeHtml(zamanBasligi)}</strong></div>` : ''}
         <div style="white-space:pre-wrap;font-size:12.5px;max-height:260px;overflow-y:auto;margin:6px 0;">${escapeHtml(result.generated_text)}</div>
         ${result.consistency_notes && result.consistency_notes.length
           ? `<div style="font-size:12px;color:var(--danger);">⚠ ${result.consistency_notes.map(escapeHtml).join(' · ')}</div>` : ''}
@@ -1410,7 +1440,7 @@ async function runPlanDraft(chapter) {
       btn.disabled = true; btn.textContent = 'Ekleniyor…';
       try {
         let nextNumber = Math.max(0, ...(chapter.paragraphs || []).map(p => p.number)) + 1;
-        for (const text of paras) {
+        for (const text of kaydedilecekParagraflar) {
           await api.put(`/chapters/${chapter.id}/paragraphs/${nextNumber}`, { number: nextNumber, text });
           nextNumber++;
         }

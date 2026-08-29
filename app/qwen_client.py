@@ -300,13 +300,13 @@ def suggest_progressions_for_chapter(db: Session, chapter: "models.Chapter") -> 
 def suggest_progressions_for_chapters(db: Session, chapters: list) -> list[dict]:
     """suggest_progressions_for_chapter'ın TOPLU hali - bkz.
     suggest_entities_for_chapters ile aynı mantık. Birden fazla bölüm tek
-    istekte taranır; her not, metinde AÇIKÇA geçen bir tarih varsa onunla,
-    yoksa zamansız (story_date boş) döner - bölüm numarası kronoloji
-    anchor'ı olarak KULLANILMAZ."""
+    istekte taranır, her not kendi chapter_number'ıyla (AI'nın belirttiği,
+    geçersizse en son bölüme düşen) döner."""
     if not chapters:
         return []
     chapters = sorted(chapters, key=lambda c: c.number)
     chapter_ids = [c.id for c in chapters]
+    valid_chapter_numbers = {c.number for c in chapters}
 
     mentions = (
         db.query(models.Mention)
@@ -375,9 +375,15 @@ def suggest_progressions_for_chapters(db: Session, chapters: list) -> list[dict]
         note = (u.get("note") or "").strip()
         if not note:
             continue
+        chapter_number = u.get("chapter_number")
+        if chapter_number not in valid_chapter_numbers:
+            # AI bölüm numarasını atlamış ya da yanlış verdiyse, taranan
+            # aralığın SON bölümüne düşürüyoruz - sessizce kaybetmek yerine
+            # en azından kronolojik olarak makul bir yere koyuyoruz.
+            chapter_number = chapters[-1].number
         filtered.append({
             "entity_type": key[0], "entity_id": key[1], "entity_name": entity_lookup[key],
-            "story_date": (u.get("story_date") or "").strip(), "note": note,
+            "chapter_number": chapter_number, "note": note,
         })
     return filtered
 
