@@ -798,6 +798,19 @@ def build_plan_layer(db: Session, novel_id: int, chapter_number: int | None, ins
         )
         if chapter:
             cells = db.query(models.MatrixCell).filter(models.MatrixCell.chapter_id == chapter.id).all()
+            # SIRALAMA: .all() veritabanı sırasını (genelde ekleme sırasını)
+            # verir, satırın hikâyedeki gerçek YERİNİ değil - bir bölüme
+            # birden fazla hücre bağlıysa AI'ya YANLIŞ sırayla gidebiliyordu
+            # (ör. "kapının önünde durdular" sahnesi "panelvandan indiler"
+            # sahnesinden ÖNCE gösteriliyordu). Kolon/satır'ın kendi
+            # position alanına göre diz - matris ekranındaki okuma sırasıyla
+            # aynı sıra.
+            if len(cells) > 1:
+                col_pos = {c.id: c.position for c in db.query(models.MatrixColumn.id, models.MatrixColumn.position)
+                           .filter(models.MatrixColumn.id.in_({c.column_id for c in cells}))}
+                row_pos = {r.id: r.position for r in db.query(models.MatrixRow.id, models.MatrixRow.position)
+                           .filter(models.MatrixRow.id.in_({c.row_id for c in cells}))}
+                cells = sorted(cells, key=lambda c: (c.matrix_id, col_pos.get(c.column_id, 0), row_pos.get(c.row_id, 0)))
             own_cell_ids = {c.id for c in cells}
             blocks = [b for b in (_cell_block(c) for c in cells) if b]
 
@@ -1383,6 +1396,13 @@ def build_parallel_layer(db: Session, novel_id: int, chapter_number: int | None,
     cells = db.query(models.MatrixCell).filter(models.MatrixCell.chapter_id == chapter.id).all()
     if not cells:
         return ""
+    # Aynı sıralama tutarlılığı: bkz. build_plan_layer'daki not.
+    if len(cells) > 1:
+        col_pos = {c.id: c.position for c in db.query(models.MatrixColumn.id, models.MatrixColumn.position)
+                   .filter(models.MatrixColumn.id.in_({c.column_id for c in cells}))}
+        row_pos = {r.id: r.position for r in db.query(models.MatrixRow.id, models.MatrixRow.position)
+                   .filter(models.MatrixRow.id.in_({c.row_id for c in cells}))}
+        cells = sorted(cells, key=lambda c: (c.matrix_id, col_pos.get(c.column_id, 0), row_pos.get(c.row_id, 0)))
 
     bloklar, used = [], 0
     for cell in cells:

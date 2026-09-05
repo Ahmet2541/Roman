@@ -652,77 +652,82 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     </div>`;
 
   editor.innerHTML = `
-    <div class="panel">
+    <div class="panel matrix-cell-editor">
       <b>${escapeHtml(col.label)} × ${escapeHtml(row.label)}</b>
       ${cell && cell.code ? `<span style="margin-left:8px;font-size:12px;color:var(--text-muted);">Kod: <b>${cell.code}</b></span>` : ''}
       ${mirasSatiri ? `<div style="margin-top:6px;font-size:11.5px;color:var(--text-muted);background:var(--paper-dim);border:1px solid var(--border);border-radius:4px;padding:4px 8px;">TUR MİRASI — ${mirasSatiri}</div>` : ''}
 
-      <div style="margin-top:10px;font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">ÜST — SAHNE KİMLİĞİ</div>
-      ${alan('mcOlay', 'OLAY' + yardim(YARDIM.olay, 'sol'), d.olay, '', 44)}
-      <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        <div class="field" style="flex:1;min-width:110px;"><label>Tarih${yardim(YARDIM.tarih, 'sol')}</label>
-          <input type="text" id="mcTarih" value="${escapeHtml(zaman.tarih || '')}" placeholder="03,05,27 → 03 Mayıs 2027" title="03,05,27 yazarsan 03 Mayıs 2027 olur. Nokta, eğik çizgi, tire de olur. 'üçüncü gün' gibi serbest metin de yazabilirsin - dokunulmaz."></div>
-        <div class="field" style="flex:1;min-width:90px;"><label>Saat${yardim(YARDIM.saat)}</label>
-          <input type="text" id="mcSaat" value="${escapeHtml(zaman.saat || '')}" placeholder="21:40"></div>
-        <div class="field" style="flex:1;min-width:110px;"><label>Tip${yardim(YARDIM.zamanTip, 'sag')}</label>
-          <select id="mcZamanTip">
-            <option value="">(seç)</option>
-            ${ZAMAN_TIPLERI.map(([k, e]) => `<option value="${k}" ${zaman.tip === k ? 'selected' : ''}>${e}</option>`).join('')}
-          </select></div>
-      </div>
-      <div class="field" id="mcSayacKutu"><label id="mcSayacEtiket">Neyin sayacı / atlaması</label>${yardim(YARDIM.sayac, 'sol')}
-        <input type="text" id="mcSayac" value="${escapeHtml(zaman.sayac || '')}" placeholder="ambulans bekleme süresi"></div>
-      <div class="field"><label>MEKAN${yardim(YARDIM.mekan, 'sol')}</label>
-        <input type="text" id="mcMekan" list="mcMekanList" value="${escapeHtml(d.mekan || '')}" placeholder="VIP Salonu">
-        <datalist id="mcMekanList">${_datalistSecenekleri(varliklar.mekanlar)}</datalist></div>
-      <datalist id="mcDuyguList">${DUYGU_LISTESI.map(x => `<option value="${escapeHtml(x)}"></option>`).join('')}</datalist>
-      <div style="display:flex;gap:6px;">
-        <div class="field" style="flex:1;"><label>ORTAM <span style="font-weight:400;color:var(--text-muted);">(odanın hâli)</span>${yardim(YARDIM.ortam, 'sol')}</label>
-          <div style="display:flex;gap:2px;">
-            <input type="text" id="mcOrtamA" list="mcDuyguList" value="${escapeHtml(ortam.baslangic || '')}" placeholder="endişe" autocomplete="off" style="flex:1;min-width:0;">
-            <button type="button" class="duygu-sec" data-hedef="mcOrtamA" title="Duygu listesinden seç">▾</button>
-          </div></div>
-        <div class="field" style="flex:1;"><label>→ (dönüyorsa)</label>
-          <div style="display:flex;gap:2px;">
-            <input type="text" id="mcOrtamB" list="mcDuyguList" value="${escapeHtml(ortam.bitis || '')}" placeholder="korku" autocomplete="off" style="flex:1;min-width:0;">
-            <button type="button" class="duygu-sec" data-hedef="mcOrtamB" title="Duygu listesinden seç">▾</button>
-          </div></div>
-      </div>
-      <div style="font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">KİŞİLER${yardim(YARDIM.kisiler, 'sol')}</div>
-      <div id="mcKisiListe"></div>
-      <button class="btn btn-sm" id="mcKisiEkle" style="margin-top:4px;">+ Kişi</button>
-      <datalist id="mcKisiList">${_datalistSecenekleri(varliklar.kisiler)}</datalist>
-      <div class="field"><label>NESNELER <span style="font-weight:400;color:var(--text-muted);">(virgülle)</span>${yardim(YARDIM.nesneler, 'sol')}</label>
-        <input type="text" id="mcNesneler" value="${escapeHtml(_adListesi(d.nesneler))}" placeholder="mendil, şişe" autocomplete="off">
-        <datalist id="mcNesneList">${_datalistSecenekleri(varliklar.nesneler)}</datalist></div>
-      <div class="field"><label>ODAK${yardim(YARDIM.odak, 'sol')}</label>
-        <input type="text" id="mcOdak" list="mcOdakList" value="${escapeHtml(d.odak || '')}" placeholder="Tetraoksin-7 şişesi" autocomplete="off">
-        <datalist id="mcOdakList"></datalist></div>
+      <div class="mce-grid">
+        <div class="mce-col">
+          <div class="mce-section-title">ÜST — SAHNE KİMLİĞİ</div>
+          ${alan('mcOlay', 'OLAY' + yardim(YARDIM.olay, 'sol'), d.olay, '', 44)}
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <div class="field" style="flex:1;min-width:110px;"><label>Tarih${yardim(YARDIM.tarih, 'sol')}</label>
+              <input type="text" id="mcTarih" value="${escapeHtml(zaman.tarih || '')}" placeholder="03,05,27 → 03 Mayıs 2027" title="03,05,27 yazarsan 03 Mayıs 2027 olur. Nokta, eğik çizgi, tire de olur. 'üçüncü gün' gibi serbest metin de yazabilirsin - dokunulmaz."></div>
+            <div class="field" style="flex:1;min-width:90px;"><label>Saat${yardim(YARDIM.saat)}</label>
+              <input type="text" id="mcSaat" value="${escapeHtml(zaman.saat || '')}" placeholder="21:40"></div>
+            <div class="field" style="flex:1;min-width:110px;"><label>Tip${yardim(YARDIM.zamanTip, 'sag')}</label>
+              <select id="mcZamanTip">
+                <option value="">(seç)</option>
+                ${ZAMAN_TIPLERI.map(([k, e]) => `<option value="${k}" ${zaman.tip === k ? 'selected' : ''}>${e}</option>`).join('')}
+              </select></div>
+          </div>
+          <div class="field" id="mcSayacKutu"><label id="mcSayacEtiket">Neyin sayacı / atlaması</label>${yardim(YARDIM.sayac, 'sol')}
+            <input type="text" id="mcSayac" value="${escapeHtml(zaman.sayac || '')}" placeholder="ambulans bekleme süresi"></div>
+          <div class="field"><label>MEKAN${yardim(YARDIM.mekan, 'sol')}</label>
+            <input type="text" id="mcMekan" list="mcMekanList" value="${escapeHtml(d.mekan || '')}" placeholder="VIP Salonu">
+            <datalist id="mcMekanList">${_datalistSecenekleri(varliklar.mekanlar)}</datalist></div>
+          <datalist id="mcDuyguList">${DUYGU_LISTESI.map(x => `<option value="${escapeHtml(x)}"></option>`).join('')}</datalist>
+          <div style="display:flex;gap:6px;">
+            <div class="field" style="flex:1;"><label>ORTAM <span style="font-weight:400;color:var(--text-muted);">(odanın hâli)</span>${yardim(YARDIM.ortam, 'sol')}</label>
+              <div style="display:flex;gap:2px;">
+                <input type="text" id="mcOrtamA" list="mcDuyguList" value="${escapeHtml(ortam.baslangic || '')}" placeholder="endişe" autocomplete="off" style="flex:1;min-width:0;">
+                <button type="button" class="duygu-sec" data-hedef="mcOrtamA" title="Duygu listesinden seç">▾</button>
+              </div></div>
+            <div class="field" style="flex:1;"><label>→ (dönüyorsa)</label>
+              <div style="display:flex;gap:2px;">
+                <input type="text" id="mcOrtamB" list="mcDuyguList" value="${escapeHtml(ortam.bitis || '')}" placeholder="korku" autocomplete="off" style="flex:1;min-width:0;">
+                <button type="button" class="duygu-sec" data-hedef="mcOrtamB" title="Duygu listesinden seç">▾</button>
+              </div></div>
+          </div>
+          <div class="mce-section-title">KİŞİLER${yardim(YARDIM.kisiler, 'sol')}</div>
+          <div id="mcKisiListe"></div>
+          <button class="btn btn-sm" id="mcKisiEkle" style="margin-top:4px;">+ Kişi</button>
+          <datalist id="mcKisiList">${_datalistSecenekleri(varliklar.kisiler)}</datalist>
+          <div class="field"><label>NESNELER <span style="font-weight:400;color:var(--text-muted);">(virgülle)</span>${yardim(YARDIM.nesneler, 'sol')}</label>
+            <input type="text" id="mcNesneler" value="${escapeHtml(_adListesi(d.nesneler))}" placeholder="mendil, şişe" autocomplete="off">
+            <datalist id="mcNesneList">${_datalistSecenekleri(varliklar.nesneler)}</datalist></div>
+          <div class="field"><label>ODAK${yardim(YARDIM.odak, 'sol')}</label>
+            <input type="text" id="mcOdak" list="mcOdakList" value="${escapeHtml(d.odak || '')}" placeholder="Tetraoksin-7 şişesi" autocomplete="off">
+            <datalist id="mcOdakList"></datalist></div>
+          <div class="field" style="margin-top:12px;">
+            <label>HEDEF UZUNLUK${yardim(YARDIM.uzunluk, 'sol')}</label>
+            <select id="mcUzunluk">
+              ${UZUNLUK_SEVIYELERI.map(([k, e, a]) => `<option value="${k}" ${(d.uzunluk || 'normal') === k ? 'selected' : ''}>${e} — ${a}</option>`).join('')}
+            </select>
+          </div>
+        </div>
 
-      <div class="field" style="margin-top:12px;">
-        <label>HEDEF UZUNLUK${yardim(YARDIM.uzunluk, 'sol')}</label>
-        <select id="mcUzunluk">
-          ${UZUNLUK_SEVIYELERI.map(([k, e, a]) => `<option value="${k}" ${(d.uzunluk || 'normal') === k ? 'selected' : ''}>${e} — ${a}</option>`).join('')}
-        </select>
-      </div>
+        <div class="mce-col">
+          <div class="mce-section-title">ALT — YAY</div>
+          <div id="mcYay"></div>
 
-      <div style="margin-top:12px;font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">ALT — YAY</div>
-      <div id="mcYay"></div>
+          <div class="mce-section-title">BAĞLANTI${yardim(YARDIM.baglanti, 'sol')}</div>
+          <div id="mcBagListe"></div>
+          <button class="btn btn-sm" id="mcBagEkle" style="margin-top:4px;">+ Bağlantı</button>
 
-      <div style="margin-top:12px;font-size:11px;letter-spacing:0.4px;color:var(--text-muted);font-weight:700;">BAĞLANTI${yardim(YARDIM.baglanti, 'sol')}</div>
-      <div id="mcBagListe"></div>
-      <button class="btn btn-sm" id="mcBagEkle" style="margin-top:4px;">+ Bağlantı</button>
-
-      <div class="field" style="margin-top:12px;">
-        <label>Bağlı bölüm${yardim(YARDIM.bagliBolum, 'sol')}</label>
-        <select id="mCellChapter">
-          <option value="">(bağlı değil)</option>
-          ${chapters.map(c => {
-            const t = c.kind === 'part' ? 'ÜST' : (c.kind === 'subtitle' ? 'ARA' : 'metin');
-            const par = c.paragraphCount ? `, ${c.paragraphCount} par.` : '';
-            return `<option value="${c.id}" ${cell && cell.chapter_id === c.id ? 'selected' : ''}>#${c.displayNumber} [${t}${par}] ${escapeHtml(stripMarkdownArtifacts(c.title) || '(başlıksız)')}</option>`;
-          }).join('')}
-        </select>
+          <div class="field" style="margin-top:12px;">
+            <label>Bağlı bölüm${yardim(YARDIM.bagliBolum, 'sol')}</label>
+            <select id="mCellChapter">
+              <option value="">(bağlı değil)</option>
+              ${chapters.map(c => {
+                const t = c.kind === 'part' ? 'ÜST' : (c.kind === 'subtitle' ? 'ARA' : 'metin');
+                const par = c.paragraphCount ? `, ${c.paragraphCount} par.` : '';
+                return `<option value="${c.id}" ${cell && cell.chapter_id === c.id ? 'selected' : ''}>#${c.displayNumber} [${t}${par}] ${escapeHtml(stripMarkdownArtifacts(c.title) || '(başlıksız)')}</option>`;
+              }).join('')}
+            </select>
+          </div>
+        </div>
       </div>
 
       <div id="mcUyari"></div>

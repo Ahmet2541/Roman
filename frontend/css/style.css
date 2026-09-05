@@ -231,6 +231,22 @@ button, input, textarea, select { font-family: inherit; font-size: 14px; }
 .field textarea { min-height: 70px; resize: vertical; }
 .form-actions { display: flex; gap: 8px; }
 
+/* ---- Matris hücre düzenleyici: geniş ekranda iki sütun ----
+   .panel'in genel max-width:560px kısıtı burada özellikle gevşetilir -
+   bu form tek başına bir sayfa gibi kullanılıyor, diğer .panel
+   kullanımları (modal, küçük dialog) etkilenmesin diye ayrı sınıf. */
+.matrix-cell-editor { max-width: 1100px; }
+.mce-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 32px; align-items: start; }
+@media (max-width: 860px) {
+  .matrix-cell-editor { max-width: 560px; }
+  .mce-grid { grid-template-columns: 1fr; }
+}
+.mce-section-title {
+  font-size: 11px; letter-spacing: 0.4px; color: var(--text-muted);
+  font-weight: 700; margin-top: 12px;
+}
+.mce-col:first-child .mce-section-title:first-child { margin-top: 10px; }
+
 /* ---- Roman okuma/yazma görünümü ---- */
 .roman-layout { display: grid; grid-template-columns: 220px 1fr 300px; gap: 20px; align-items: start; }
 /* YAPIŞKAN YAN PANELLER: uzun bölümde fihrist ve AI paneli ekranda kalır.

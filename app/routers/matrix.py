@@ -701,13 +701,26 @@ def plan_for_chapter(
     if not chapter:
         raise HTTPException(404, "Bölüm bulunamadı")
     cells = db.query(models.MatrixCell).filter(models.MatrixCell.chapter_id == chapter.id).all()
-    out = []
+    # SIRALAMA: .all() ekleme sırasını verir, satırın hikâyedeki gerçek
+    # YERİNİ değil - bölüme birden fazla hücre bağlıysa yazar paneli
+    # (ve AI context'i - bkz. ai_context.build_plan_layer) sahneleri YANLIŞ
+    # sırayla gösterebiliyordu. Kolon/satır'ın kendi position alanına göre
+    # diz - matris ekranındaki okuma sırasıyla aynı sıra.
+    hucre_bilgisi = []
     for cell in cells:
         if not (cell.content or "").strip():
             continue
         matrix = db.query(models.PlanMatrix).filter(models.PlanMatrix.id == cell.matrix_id).first()
         col = db.query(models.MatrixColumn).filter(models.MatrixColumn.id == cell.column_id).first()
         row = db.query(models.MatrixRow).filter(models.MatrixRow.id == cell.row_id).first()
+        hucre_bilgisi.append((cell, matrix, col, row))
+    hucre_bilgisi.sort(key=lambda t: (
+        t[0].matrix_id,
+        t[2].position if t[2] else 0,
+        t[3].position if t[3] else 0,
+    ))
+    out = []
+    for cell, matrix, col, row in hucre_bilgisi:
         # ZAMAN'ı hücrenin YAPISAL verisinden (data) oku, render edilmiş
         # content'i regex'le didiklemek yerine - tek gerçek kaynak content
         # üretiminde de zaten bu.
