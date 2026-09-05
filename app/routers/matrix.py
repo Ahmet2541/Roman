@@ -792,6 +792,36 @@ def quick_plan(
     return schemas.QuickPlanResponse(code=cell.code, matrix_name=matrix.name, content=cell.content)
 
 
+@router.get("/{matrix_id}/health")
+def matrix_health(
+    matrix_id: int,
+    db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
+):
+    """Matris ekranında CANLI uyarı şeridi. AI çağrısı yapmaz.
+
+    Denetim promptundaki deterministik bulguların aynısı - ama oraya
+    gitmeden, matrisi açar açmaz görünür. Yapısal kusurlar (bağsız plan,
+    kayıp MP referansı, çift bağ, paralellik deliği) fark edilmeden
+    kalmasın diye.
+    """
+    m = _get_matrix(db, matrix_id, novel_id)
+    try:
+        bulgular = plan_audit.yapisal_bulgular(
+            db, m, novel_id, list(m.columns), list(m.rows), list(m.cells))
+    except Exception as exc:
+        logger.exception("Matris sağlık taraması başarısız")
+        return {"bulgular": [], "hata": f"{type(exc).__name__}: {exc}"}
+    # Hücre bazlı uyarıları da say - ayrıntı ızgarada zaten rozet olarak var.
+    cols = {c.id: c for c in m.columns}
+    uyarili = sum(
+        1 for c in m.cells
+        if plan_schema.cell_warnings(c.data,
+                                     getattr(cols.get(c.column_id), "tur_data", None),
+                                     paralel=len(m.columns) > 1))
+    return {"bulgular": bulgular, "uyarili_hucre": uyarili}
+
+
 @router.get("/{matrix_id}/audit-prompt", response_model=schemas.MatrixAuditPrompt)
 def audit_prompt(
     matrix_id: int, column_id: int | None = None,

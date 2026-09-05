@@ -56,6 +56,65 @@ async function renderAiPanel(chapter) {
       </div>`;
     }).join('');
 
+    // Bölüme birden fazla FARKLI Plan Matrisi'nden hücre bağlı olabilir
+    // (ör. "Ana Olay Örgüsü" + "Yan Karakter Turu" aynı bölümde kesişti).
+    // Böyle bir durumda düz liste hangi sahnenin hangi matristen geldiğini
+    // gizliyordu - "Tüm sahneleri yaz" da hepsini matris ayrımı olmadan tek
+    // taslakta birleştiriyordu. Artık matrise göre GRUPLANIYOR: her grup
+    // kendi başlığı ve kendi "Bu plandan taslak oluştur" düğmesiyle ayrı
+    // gösterilir - yanlış matristen yazdırma riski ortadan kalkar.
+    const matrixGroups = [];
+    planCells.forEach((p, i) => {
+      let g = matrixGroups.find(g => g.name === p.matrix_name);
+      if (!g) { g = { name: p.matrix_name, items: [] }; matrixGroups.push(g); }
+      g.items.push({ p, i });
+    });
+    const multiMatrix = matrixGroups.length > 1;
+
+    // Sahne sayısı arttıkça her hücrenin TAM plan metnini panelde düz
+    // basmak listeyi kilometrelerce uzatıyordu. Artık >1 sahne varsa
+    // panelde sadece BAŞLIK + kısa önizleme görünür; tam metin "👁" ile
+    // açılan bir pencerede (modal) gösterilir - liste kısa kalır, tam
+    // metne bir tıklama uzaklığındasın.
+    const truncate = (s, n) => (s.length > n ? s.slice(0, n).trim() + '…' : s);
+
+    // Önizlemede ham metni rastgele bir karakter sayısından kesmek yerine
+    // hücrenin zaten kendi içinde taşıdığı OLAY alanını (plan_schema.
+    // render_cell'de içerik varsa DAİMA ilk satır: "OLAY: <tek cümle>")
+    // kullanıyoruz - bu zaten "kim kime ne yapar" özeti, kelimenin
+    // ortasından kesilmiş anlamsız bir parça değil.
+    const extractOzet = (content) => {
+      const line = content.split('\n').find(l => l.trim().toUpperCase().startsWith('OLAY:'));
+      const ozet = line ? line.trim().slice(line.indexOf(':') + 1).trim() : '';
+      return ozet || truncate(content.replace(/\n/g, ' '), 220);
+    };
+
+    const cellRow = (p, i, n) => {
+      const compact = planCells.length > 1;
+      return `
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px;">
+        <div style="font-size:12px;color:var(--text-muted);">${compact ? escapeHtml(p.row_label) : `${escapeHtml(p.column_label)} × ${escapeHtml(p.row_label)}`}</div>
+        <div style="display:flex;gap:4px;flex-shrink:0;">
+          ${compact ? `<button class="btn btn-sm plan-cell-gor" data-i="${i}" title="Tam plan metnini pencerede gör">👁</button>` : ''}
+          ${planCells.length > 1
+            ? `<button class="btn btn-sm plan-tek-taslak" data-i="${i}" title="SADECE bu sahneyi yazdır - diğerleri ayrıca yazılır, mevcut metnin sonuna eklenir">📝 bu sahne</button>`
+            : ''}
+        </div>
+      </div>
+      <div style="white-space:pre-wrap;${compact ? 'color:var(--text-muted);' : ''}font-size:12.5px;margin:4px 0 8px;">${compact ? `<b>${n}. Özet:</b> ` : ''}${escapeHtml(compact ? extractOzet(p.content) : p.content)}</div>`;
+    };
+
+    const planBodyHtml = multiMatrix
+      ? matrixGroups.map((g, gi) => `
+          <div style="margin-bottom:10px;padding-bottom:8px;${gi < matrixGroups.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+            <div style="font-size:11px;font-weight:600;color:var(--gold);margin-bottom:4px;">📐 ${escapeHtml(g.name)}</div>
+            ${g.items.map(({ p, i }, idx) => cellRow(p, i, idx + 1)).join('')}
+            ${g.items.length > 1
+              ? `<button class="btn btn-sm btn-primary plan-matrix-taslak" data-matrix="${escapeHtml(g.name)}" style="width:100%;margin-top:2px;">📝 Bu plandan taslak oluştur (${g.items.length} sahne)</button>`
+              : ''}
+          </div>`).join('')
+      : planCells.map((p, i) => cellRow(p, i, i + 1)).join('');
+
     const planHtml = planCells.length ? `
       <div class="panel" style="border-left:3px solid var(--gold);margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;align-items:baseline;cursor:pointer;" id="chapterPlanToggle">
@@ -63,14 +122,14 @@ async function renderAiPanel(chapter) {
           <span style="font-size:11px;color:var(--text-muted);">▾</span>
         </div>
         <div id="chapterPlanBody" style="margin-top:6px;">
-          ${planCells.map(p => `
-            <div style="font-size:12px;color:var(--text-muted);">${escapeHtml(p.column_label)} × ${escapeHtml(p.row_label)}</div>
-            <div style="white-space:pre-wrap;font-size:12.5px;margin:4px 0 8px;">${escapeHtml(p.content)}</div>`).join('')}
+          ${multiMatrix ? `<div style="font-size:11px;color:var(--danger);margin-bottom:6px;">⚠ Bu bölüme ${matrixGroups.length} FARKLI plan matrisinden hücre bağlı - hangisini yazdıracağını aşağıdan seç.</div>` : ''}
+          ${planBodyHtml}
           <div style="font-size:11px;color:var(--text-muted);">Bu plan, bu bölümdeki her AI isteğine otomatik gider.</div>
+          ${!multiMatrix ? `
           <div style="display:flex;gap:6px;margin-top:8px;">
-            <button class="btn btn-sm btn-primary" id="draftFromPlanBtn" style="flex:1;">📝 Plandan Bölüm Taslağı Oluştur</button>
+            <button class="btn btn-sm btn-primary" id="draftFromPlanBtn" style="flex:1;">📝 ${planCells.length > 1 ? `Tüm sahneleri yaz (${planCells.length})` : 'Plandan Bölüm Taslağı Oluştur'}</button>
             <button class="btn btn-sm" id="editPlanBtn" title="Planı buradan düzenle - matrise gitmeye gerek yok">✎</button>
-          </div>
+          </div>` : ''}
           <div id="planDraftResult"></div>
         </div>
       </div>` : '';
@@ -152,6 +211,38 @@ async function renderAiPanel(chapter) {
 
     const draftBtn = document.getElementById('draftFromPlanBtn');
     if (draftBtn) draftBtn.addEventListener('click', () => runPlanDraft(chapter, planCells));
+    // TEK SAHNE düğmeleri: bağlama bölümün BÜTÜN planları gider (devamlılık
+    // için gerekli), ama yalnızca seçilen sahne yazılır. Gelen paragraflar
+    // mevcut metnin sonuna eklenir - "olayın devamı" böyle ilerler.
+    panel.querySelectorAll('.plan-tek-taslak').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const p = planCells[parseInt(btn.dataset.i, 10)];
+        if (!p) return;
+        runPlanDraft(chapter, [p], `${p.column_label} × ${p.row_label}`);
+      });
+    });
+    // Matris grubu düğmesi: SADECE tıklanan matrisin sahnelerini yaz -
+    // diğer (farklı) matrislerden gelen sahnelere dokunma. Bağlamda bölümün
+    // TÜM planı yine gider (devamlılık için), ama talimat hangi sahnelerin
+    // YAZILACAĞINI bu matrisin hücreleriyle sınırlar.
+    panel.querySelectorAll('.plan-matrix-taslak').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const groupCells = planCells.filter(p => p.matrix_name === btn.dataset.matrix);
+        if (!groupCells.length) return;
+        const sceneLabels = groupCells.map(p => `${p.column_label} × ${p.row_label}`);
+        runPlanDraft(chapter, groupCells, sceneLabels);
+      });
+    });
+    // 👁 "gör" düğmesi: paneldeki kısaltılmış önizleme yerine hücrenin
+    // TAM plan metnini bir pencerede (modal) gösterir - buradan da
+    // doğrudan "bu sahneyi yaz" yapılabilir, panele geri dönmeye gerek yok.
+    panel.querySelectorAll('.plan-cell-gor').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const p = planCells[parseInt(btn.dataset.i, 10)];
+        if (!p) return;
+        openPlanCellModal(chapter, p);
+      });
+    });
     const editPlanBtn = document.getElementById('editPlanBtn');
     if (editPlanBtn) {
       editPlanBtn.addEventListener('click', () => {
@@ -418,6 +509,30 @@ function wireEntityUpdateProposalButtons() {
       msg.pendingUpdates = msg.pendingUpdates.filter(p => p !== prop);
       renderChatMessages();
     });
+  });
+}
+
+// Bir plan hücresinin TAM metnini bir pencerede (modal) gösterir - panelde
+// artık sadece kısa önizleme var, tam metni burada okuyup buradan doğrudan
+// "bu sahneyi yaz" ile taslak başlatılabilir.
+function openPlanCellModal(chapter, p) {
+  const overlay = ensureModalOverlay();
+  overlay.innerHTML = `
+    <div class="panel" style="max-width:560px;width:92%;max-height:80vh;overflow-y:auto;">
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">📐 ${escapeHtml(p.matrix_name)}${p.code ? ` · ${escapeHtml(p.code)}` : ''}</div>
+      <b>${escapeHtml(p.column_label)} × ${escapeHtml(p.row_label)}</b>
+      <div style="white-space:pre-wrap;font-size:13px;margin:10px 0;">${escapeHtml(p.content)}</div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="pcmDraft">📝 Bu sahneyi yaz</button>
+        <button class="btn" id="pcmClose">Kapat</button>
+      </div>
+    </div>`;
+  overlay.style.display = 'flex';
+  const close = () => { overlay.style.display = 'none'; overlay.innerHTML = ''; };
+  el('pcmClose').addEventListener('click', close);
+  el('pcmDraft').addEventListener('click', () => {
+    close();
+    runPlanDraft(chapter, [p], `${p.column_label} × ${p.row_label}`);
   });
 }
 

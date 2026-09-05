@@ -1646,3 +1646,117 @@ def test_progression_can_be_edited(client, headers):
                       headers=headers).status_code == 400
     assert client.put("/progressions/99999", json={"note": "x"},
                       headers=headers).status_code == 404
+
+
+# --- Taslak denetimi (onay öncesi, AI'sız) ---------------------------------
+
+def _denetim_kur(client, headers):
+    """Sahne: 28 Haziran 13:30, Genç Mühendis + mendil, Vicdan HENÜZ YOK."""
+    client.post("/characters/", json={
+        "name": "Genç Mühendis", "var_olus": "1 Ocak 2004"}, headers=headers)
+    client.post("/characters/", json={
+        "name": "Vicdan", "var_olus": "28 Haziran 2030 21:00"}, headers=headers)
+    client.post("/characters/", json={"name": "Başkomiser"}, headers=headers)
+    ch = client.post("/chapters/", json={"number": 1, "title": "Varış"}, headers=headers).json()
+    m = _matris(client, headers)
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "chapter_id": ch["id"],
+        "data": {"olay": "Varış.", "mekan": "Lümen Vadisi",
+                 "zaman": {"tarih": "28 Haziran 2030", "saat": "13:30", "tip": "NOKTA"},
+                 "kisiler": [{"ad": "Genç Mühendis", "duygu": {"baslangic": "umut"}}],
+                 "giris": ["Panelvandan iner."], "gelisme": ["Mendille alnını siler."],
+                 "sonuc": ["Binaya girer."]}}, headers=headers)
+    return ch
+
+
+def test_draft_check_catches_nonexistent_entity(client, headers):
+    """Vicdan 21:00'de var oluyor, sahne 13:30 - metne girmişse HATA."""
+    ch = _denetim_kur(client, headers)
+    r = client.post("/ai/draft-check", json={
+        "chapter_id": ch["id"],
+        "text": "Panelvandan indiler. Aşağıda Vicdan çoktan uyanmıştı."},
+        headers=headers).json()
+    hatalar = [b for b in r["bulgular"] if b["tur"] == "hata"]
+    assert any("Vicdan" in b["mesaj"] and "HENÜZ YOK" in b["mesaj"] for b in hatalar)
+
+
+def test_draft_check_catches_offplan_entity(client, headers):
+    """Planda olmayan KAYITLI varlık metne girmişse uyarı."""
+    ch = _denetim_kur(client, headers)
+    r = client.post("/ai/draft-check", json={
+        "chapter_id": ch["id"],
+        "text": "Panelvandan indiler. Başkomiser onları kapıda karşıladı."},
+        headers=headers).json()
+    assert any("Başkomiser" in b["mesaj"] and "planda yok" in b["mesaj"]
+               for b in r["bulgular"])
+
+
+def test_draft_check_catches_time_conflict_and_future(client, headers):
+    """13:30'da 'akşam' yazılamaz; 'henüz bilmiyordu ki' geleceği sızdırır."""
+    ch = _denetim_kur(client, headers)
+    r = client.post("/ai/draft-check", json={
+        "chapter_id": ch["id"],
+        "text": "Akşam güneşi camlara vurdu. Henüz bilmiyordu ki her şey değişecekti."},
+        headers=headers).json()
+    mesajlar = " · ".join(b["mesaj"] for b in r["bulgular"])
+    assert "akşam" in mesajlar and "çelişiyor" in mesajlar
+    assert "geleceği sızdıran" in mesajlar
+
+
+def test_draft_check_flags_missing_beat(client, headers):
+    """Planın beat'i metinde karşılık bulmamışsa uyarır."""
+    ch = _denetim_kur(client, headers)
+    r = client.post("/ai/draft-check", json={
+        "chapter_id": ch["id"],
+        "text": "Panelvandan indiler ve binaya girdiler."}, headers=headers).json()
+    assert any("Mendille" in b["mesaj"] for b in r["bulgular"]), \
+        "atlanan beat yakalanmadı"
+
+
+def test_draft_check_clean_text_passes(client, headers):
+    """Temiz metinde gürültü üretilmemeli."""
+    ch = _denetim_kur(client, headers)
+    r = client.post("/ai/draft-check", json={
+        "chapter_id": ch["id"],
+        "text": ("Genç Mühendis panelvandan indi. "
+                 "Mendille alnını sildi, sonra binaya girdi.")}, headers=headers).json()
+    assert not [b for b in r["bulgular"] if b["tur"] == "hata"]
+    assert r["denetim_sayisi"] == 4
+
+
+def test_matrix_health_reports_structural_faults(client, headers):
+    """Yapısal kusurlar denetim promptuna gitmeden, matris açılır açılmaz
+    görünmeli - bağsız plan doldururken fark edilmeli, en sonda değil."""
+    m = client.post("/matrix/", json={
+        "name": "T", "columns": [{"label": "Tur 1"}],
+        "rows": [{"label": "S1"}, {"label": "S2"}]}, headers=headers).json()
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "Bağsız plan.", "baglantilar": [
+            {"kod": "MP404", "tur": "ayna", "not": "yansıt"}]}}, headers=headers)
+
+    r = client.get(f"/matrix/{m['id']}/health", headers=headers).json()
+    metin = " · ".join(r["bulgular"])
+    assert "BAĞSIZ PLAN" in metin
+    assert "KAYIP REFERANS" in metin and "MP404" in metin
+    assert r["uyarili_hucre"] >= 1
+
+
+def test_matrix_health_clean_matrix(client, headers):
+    ch = client.post("/chapters/", json={"number": 1, "title": "B"}, headers=headers).json()
+    m = client.post("/matrix/", json={
+        "name": "T", "columns": [{"label": "Tur 1"}], "rows": [{"label": "S1"}]},
+        headers=headers).json()
+    client.put(f"/matrix/{m['id']}/columns/{m['columns'][0]['id']}", json={
+        "label": "Tur 1", "tur_data": {"damga": "ÇÖZÜN"}}, headers=headers)
+    client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "chapter_id": ch["id"],
+        "data": {"olay": "x", "mekan": "Salon", "zaman": {"tip": "NOKTA"},
+                 "ortam": {"baslangic": "gerilim"},
+                 "kisiler": [{"ad": "A", "duygu": {"baslangic": "umut"}}],
+                 "giris": ["a"], "gelisme": ["b"], "sonuc": ["ÇÖZÜN kalır."]}},
+        headers=headers)
+    r = client.get(f"/matrix/{m['id']}/health", headers=headers).json()
+    assert r["bulgular"] == [] and r["uyarili_hucre"] == 0

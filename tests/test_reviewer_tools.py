@@ -1175,3 +1175,42 @@ def test_verify_checks_dependent_detail_chain(client, headers):
     d = r.json()
     assert d["verdict"] == "duzelt"
     assert "gıcırdamaz" in d["issues"][0]
+
+
+def test_fusion_drops_duplicate_diagnoses(monkeypatch):
+    """Farklı taramalar aynı kusuru bulduğunda ("imge tekrarı: mendil")
+    liste birebir aynı maddeyi iki kez gösteriyordu - kullanıcı aynı şeyi
+    iki ayrı sorun sanıyor."""
+    import json
+    from app import qwen_client
+
+    yanit = {"diagnoses": [
+        {"title": "İmge tekrarı: mendil", "class": "zayif",
+         "evidence": "P2, P9 aynı imgeyi taşıyor", "confidence": 0.8},
+        {"title": "imge tekrarı: mendil", "class": "zayif",       # aynı, farklı harf
+         "evidence": "P2,  P9 aynı imgeyi taşıyor", "confidence": 0.7},
+        {"title": "Ritim kırılması", "class": "zayif",
+         "evidence": "emoji cümleyi kesiyor", "confidence": 0.9},
+    ]}
+
+    class _Msg:
+        content = json.dumps(yanit, ensure_ascii=False)
+
+    class _Ch:
+        message = _Msg()
+
+    class _Resp:
+        choices = [_Ch()]
+
+    class _Client:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kw):
+                    return _Resp()
+
+    monkeypatch.setattr(qwen_client, "get_client", lambda: _Client())
+    sonuc = qwen_client.fuse_diagnoses(None, "metin", [{"source": "x", "title": "y", "detail": "z"}])
+    basliklar = [d["title"] for d in sonuc]
+    assert len(sonuc) == 2, f"tekrar ayıklanmadı: {basliklar}"
+    assert any("Ritim" in b for b in basliklar), "farklı teşhis silinmiş"

@@ -2328,6 +2328,22 @@ def fuse_diagnoses(db: Session, paragraph_text: str, findings: list,
     data = _parse_json_lenient(response.choices[0].message.content) or {}
     gecerli = {"hata", "zayif", "tercih", "belirsiz"}
     out = []
+    # AYNI TEŞHİS İKİ KEZ GELMESİN. Birleştirme modelden geleni olduğu gibi
+    # alıyordu; farklı taramalar aynı kusuru bulduğunda ("imge tekrarı:
+    # mendil") liste birebir aynı maddeyi iki kez gösteriyordu. Kullanıcı
+    # aynı şeyi iki kez okuyup iki ayrı sorun sanıyor.
+    gorulen = set()
+
+    def _kucult(metin):
+        # Türkçe: str.lower() "İ" harfini birleşik noktalı hâle getirip
+        # karşılaştırmayı bozuyor. "İmge" ile "imge" eşleşmeliydi.
+        return " ".join(str(metin).replace("İ", "i").replace("I", "ı").lower().split())
+
+    def _anahtar(baslik, kanit):
+        # Başlık + kanıt birlikte kimliktir: aynı kusur farklı paragrafta
+        # bulunmuşsa ayrı maddedir, aynı yerde bulunmuşsa tekrardır.
+        return (_kucult(baslik)[:80], _kucult(kanit)[:60])
+
     for d in data.get("diagnoses", []):
         if not isinstance(d, dict) or not (d.get("title") or "").strip():
             continue
@@ -2344,6 +2360,10 @@ def fuse_diagnoses(db: Session, paragraph_text: str, findings: list,
         olcut = (d.get("success_criterion") or "").strip()[:300]
         if sinif in ("tercih", "belirsiz"):
             olcut = ""
+        anahtar = _anahtar(d.get("title", ""), d.get("evidence", ""))
+        if anahtar in gorulen:
+            continue
+        gorulen.add(anahtar)
         out.append({
             "title": d["title"].strip()[:200],
             "cls": sinif,

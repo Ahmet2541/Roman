@@ -580,4 +580,27 @@ test('gelisim paneli yukleniyorda kalmiyor', async () => {
   } finally { global.api = eskiApi; }
 });
 
+// --- 26. TEK SAHNE TASLAĞI ---
+// Bir bölüme birden çok plan hücresi bağlıysa (olayın devamı olan sahneler)
+// hepsini tek hamlede yazdırmak yerine tek tek yazdırmak gerekiyor:
+// okuyup onaylayıp devam edebilmek için. Bağlama BÜTÜN planlar gider
+// (devamlılık), talimat YALNIZCA seçileni yazdırır.
+test('tek sahne taslaginda talimat daraltilir', () => {
+  const fs = require('fs');
+  const matris = fs.readFileSync(__dirname + '/../../frontend/js/modules/06-matrix.js', 'utf8');
+  const panel = fs.readFileSync(__dirname + '/../../frontend/js/modules/04-ai-panel.js', 'utf8');
+
+  if (!/async function runPlanDraft\(chapter, planCells, tekSahne\)/.test(matris))
+    throw new Error('runPlanDraft tekSahne parametresi almiyor');
+  if (!/YALNIZCA/.test(matris)) throw new Error('daraltilmis talimat yok');
+  if (!/diğer sahneleri YAZMA/.test(matris)) throw new Error('digerlerini yazma kisiti yok');
+  // Devamlılık kaybolmamalı: öncekiler olmuş, sonrakiler olmamış
+  if (!/öncekiler olmuş, sonrakiler henüz olmamıştır/.test(matris))
+    throw new Error('devamlilik yonergesi yok');
+  // Panelde birden çok plan varsa her birine kendi düğmesi
+  if (!/plan-tek-taslak/.test(panel)) throw new Error('tek sahne dugmesi yok');
+  if (!/planCells\.length > 1/.test(panel))
+    throw new Error('dugme tek plan varken de gosteriliyor');
+});
+
 Promise.all(bekleyenler).then(() => console.log(JSON.stringify(sonuc, null, 1)));

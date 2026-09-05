@@ -94,6 +94,9 @@ async function loadMatrixGrid() {
         <button class="btn btn-sm" id="mAudit" title="Tamamlanmış planı dışarıdan denetletmek için hazır metin - kopyalayıp Qwen'e yapıştır">🧪 Denetim Promptu</button>
         <button class="btn btn-sm" id="mDelMatrix" style="margin-left:auto;">Matrisi Sil</button>
       </div>
+      <div id="matrisSaglik"></div>
+      <div style="display:none;">
+      </div>
       ${boundChaptersStrip(m)}
       <div style="overflow-x:auto;">
         <table style="border-collapse:collapse;width:max-content;">
@@ -177,6 +180,7 @@ async function loadMatrixGrid() {
       </div>`;
 
     el('mExport').addEventListener('click', () => openMatrixExport(m));
+    matrisSagligiGoster(m.id);
     el('mAudit').addEventListener('click', () => openAuditPrompt(m));
     el('mAddCol').addEventListener('click', () => addMatrixColumn(m, null));
     area.querySelectorAll('.m-col-ins').forEach(btn => btn.addEventListener('click', (e) => {
@@ -761,11 +765,20 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
   // "+ ekle" olarak çıkar - tek dokunuşla listeye girer, böylece
   // beat'te adı geçen ama listeye yazılmayı unutulan kişi kaçmaz.
   function tanimaSeridi(hedefEl, metin) {
-    let serit = hedefEl.nextElementSibling;
+    // GİRİŞ/GELİŞME/SONUÇ kutuları yatay (flex) bir satırda (mc-beat-row):
+    // kutu + sıra no + sil düğmesi. Rozet şeridini o satırın İÇİNE
+    // eklersek kutuyla yer paylaşıp kutuyu daraltıyordu (bkz. ekran
+    // görüntüsü). Bu durumda şerit satırın kendisinden SONRAYA, tam
+    // genişlikte bir blok olarak ekleniyor - kutu asla daralmaz. OLAY
+    // alanı gibi düz (block) kapsayıcılarda eskisi gibi hemen altına gider.
+    const satirIcinde = hedefEl.parentElement.classList.contains('mc-beat-row');
+    const kapsayici = satirIcinde ? hedefEl.parentElement.parentElement : hedefEl.parentElement;
+    const capa = satirIcinde ? hedefEl.parentElement : hedefEl;
+    let serit = capa.nextElementSibling;
     if (!serit || !serit.classList || !serit.classList.contains('varlik-serit')) {
       serit = document.createElement('div');
       serit.className = 'varlik-serit eslesme-satiri';
-      hedefEl.parentElement.insertBefore(serit, hedefEl.nextSibling);
+      kapsayici.insertBefore(serit, capa.nextSibling);
     }
     const k = taraVarliklar(metin, varliklar.kisiler);
     const y = taraVarliklar(metin, varliklar.mekanlar);
@@ -895,7 +908,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
         <label style="font-size:12px;font-weight:600;">${etiket}
           <span style="font-weight:400;color:var(--text-muted);">(${escapeHtml(ipucu)})</span>${yardim(yardimMetni, 'sol')}</label>
         ${beatler[k].map((b, i) => `
-          <div style="display:flex;gap:4px;align-items:flex-start;margin-top:3px;">
+          <div class="mc-beat-row" style="display:flex;gap:4px;align-items:flex-start;margin-top:3px;">
             ${beatler[k].length > 1 ? `<span style="font-size:11px;color:var(--text-muted);padding-top:8px;min-width:14px;">${i + 1}</span>` : ''}
             <textarea class="mc-beat" data-k="${k}" data-i="${i}" style="min-height:48px;flex:1;">${escapeHtml(b)}</textarea>
             ${beatler[k].length > 1 ? `<button class="btn-icon-sm mc-beat-sil" data-k="${k}" data-i="${i}" title="Bu beat'i kaldır">✕</button>` : ''}
@@ -1133,6 +1146,27 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       await loadMatrixGrid();
     } catch (err) { el('mCellError').textContent = err.message; }
   });
+}
+
+// MATRİS SAĞLIK ŞERİDİ: yapısal kusurlar matrisi açar açmaz görünsün.
+// Denetim promptuna gitmeden - orası planın TAMAMI bittiğinde kullanılıyor,
+// oysa bağsız plan ya da kayıp MP referansı doldururken fark edilmeli.
+async function matrisSagligiGoster(matrisId) {
+  const kutu = document.getElementById('matrisSaglik');
+  if (!kutu) return;
+  try {
+    const r = await api.get(`/matrix/${matrisId}/health`);
+    const b = r.bulgular || [];
+    if (!b.length && !r.uyarili_hucre) { kutu.innerHTML = ''; return; }
+    const hucreNotu = r.uyarili_hucre
+      ? `<span style="color:var(--text-muted);">· ${r.uyarili_hucre} hücrede eksik alan (⚠ rozetleri)</span>` : '';
+    kutu.innerHTML = b.length
+      ? `<div style="border:1px solid var(--gold);border-radius:6px;padding:6px 10px;margin:6px 0;font-size:11.5px;background:var(--paper-dim);">
+           <b style="color:var(--gold);">⚠ ${b.length} yapısal bulgu</b> ${hucreNotu}
+           ${b.map(x => `<div style="margin-top:2px;">• ${escapeHtml(x)}</div>`).join('')}
+         </div>`
+      : `<div style="font-size:11.5px;color:var(--text-muted);margin:6px 0;">✓ Yapısal kusur yok ${hucreNotu}</div>`;
+  } catch (e) { kutu.innerHTML = ''; }
 }
 
 // ---------------------------------------------------------------------------
@@ -1397,7 +1431,11 @@ function _planDraftZamanBasligi(planCells) {
   return c.zaman_saat ? `${c.zaman_tarih}, ${c.zaman_saat}` : c.zaman_tarih;
 }
 
-async function runPlanDraft(chapter, planCells) {
+// planCells: yazılacak plan hücreleri. Bölümün TAMAMI için hepsi, tek bir
+// sahne için sadece o hücre verilir. Bir bölüme birden çok hücre bağlıysa
+// (olayın devamı olan sahneler) tek tek yazdırmak, hepsini bir hamlede
+// yazdırmaktan daha iyi sonuç veriyor: okuyup onaylayıp devam ediyorsun.
+async function runPlanDraft(chapter, planCells, tekSahne) {
   const box = document.getElementById('planDraftResult');
   const hasParagraphs = (chapter.paragraphs || []).length > 0;
   if (hasParagraphs && !confirm('Bu bölümde zaten paragraf var - taslak, mevcut metnin SONUNA eklenecek. Devam?')) return;
@@ -1409,7 +1447,20 @@ async function runPlanDraft(chapter, planCells) {
   try {
     const result = await api.post('/ai/assist', {
       chapter_number: chapter.number,
-      instruction: 'BÖLÜM PLANI\'ndaki maddelerin TAMAMINI sırasıyla işleyerek bu bölümün tam taslağını yaz. '
+      // Tek sahne YA DA tek bir matrisin birden çok sahnesi yazdırılıyorsa
+      // talimat DARALTILIR: bağlamda bölümün bütün planları var (devamlılık
+      // için gerekli, farklı matrislerden gelenler dahil), ama model
+      // yalnızca seçilenleri yazmalı - yoksa hepsini birden yazmaya kalkıyor.
+      instruction: (Array.isArray(tekSahne)
+        ? `BÖLÜM PLANI'nda birden fazla FARKLI plan matrisinden gelen sahneler var. `
+          + `YALNIZCA şu sahneleri, bu sırayla yaz: ${tekSahne.map(s => `"${s}"`).join(', ')}; `
+          + 'diğer matrislerdeki sahneleri YAZMA, onlar ayrıca yazılacak - ama devamlılık için '
+          + 'onları bilerek yaz (öncekiler olmuş, sonrakiler henüz olmamıştır). '
+        : tekSahne
+        ? `BÖLÜM PLANI'nda birden çok sahne var. YALNIZCA "${tekSahne}" sahnesini yaz; `
+          + 'diğer sahneleri YAZMA, onlar ayrıca yazılacak - ama devamlılık için '
+          + 'onları bilerek yaz (öncekiler olmuş, sonrakiler henüz olmamıştır). '
+        : 'BÖLÜM PLANI\'ndaki maddelerin TAMAMINI sırasıyla işleyerek bu bölümün tam taslağını yaz. ')
         + 'Metni boş satırlarla paragraflara ayır. Plandaki hiçbir maddeyi atlama; planda olmayan büyük olay ya da karakter ekleme. '
         + 'Emin olmadığın özel detayı köşeli parantezle işaretle.',
       selected_entities: selected,
@@ -1429,11 +1480,40 @@ async function runPlanDraft(chapter, planCells) {
         <div style="white-space:pre-wrap;font-size:12.5px;max-height:260px;overflow-y:auto;margin:6px 0;">${escapeHtml(result.generated_text)}</div>
         ${result.consistency_notes && result.consistency_notes.length
           ? `<div style="font-size:12px;color:var(--danger);">⚠ ${result.consistency_notes.map(escapeHtml).join(' · ')}</div>` : ''}
+        <div id="draftCheckBox" style="font-size:12px;margin:6px 0;"></div>
         <div class="form-actions">
           <button class="btn btn-primary btn-sm" id="planDraftAcceptBtn">Paragraflara Böl ve Ekle</button>
           <button class="btn btn-sm" id="planDraftDiscardBtn">Vazgeç</button>
         </div>
       </div>`;
+    // ONAY ÖNCESİ DENETİM: dört deterministik kontrol, AI çağrısı yok.
+    // Onayı ENGELLEMEZ - kararı sen verirsin, ama neyi onayladığını
+    // bilerek verirsin.
+    (async () => {
+      const dk = document.getElementById('draftCheckBox');
+      if (!dk) return;
+      dk.innerHTML = '<span style="color:var(--text-muted);">Denetleniyor…</span>';
+      try {
+        const d = await api.post('/ai/draft-check', {
+          chapter_id: chapter.id, text: result.generated_text,
+        });
+        if (!d.bulgular || !d.bulgular.length) {
+          dk.innerHTML = `<span style="color:var(--text-muted);">✓ ${d.denetim_sayisi} denetim temiz (plana sadakat · zaman · beat kapsama · tekrar)</span>`;
+          return;
+        }
+        const hata = d.bulgular.filter(b => b.tur === 'hata');
+        const uyari = d.bulgular.filter(b => b.tur !== 'hata');
+        dk.innerHTML = [
+          hata.length ? `<div style="color:var(--danger);font-weight:600;">⛔ ${hata.length} hata</div>` : '',
+          ...hata.map(b => `<div style="color:var(--danger);">• <b>${escapeHtml(b.denetim)}:</b> ${escapeHtml(b.mesaj)}</div>`),
+          uyari.length ? `<div style="color:var(--gold);font-weight:600;margin-top:4px;">⚠ ${uyari.length} uyarı</div>` : '',
+          ...uyari.map(b => `<div style="color:var(--gold);">• <b>${escapeHtml(b.denetim)}:</b> ${escapeHtml(b.mesaj)}</div>`),
+        ].join('');
+      } catch (e) {
+        dk.innerHTML = '<span style="color:var(--text-muted);">Denetim çalıştırılamadı.</span>';
+      }
+    })();
+
     el('planDraftDiscardBtn').addEventListener('click', () => { box.innerHTML = ''; });
     el('planDraftAcceptBtn').addEventListener('click', async () => {
       const btn = document.getElementById('planDraftAcceptBtn');

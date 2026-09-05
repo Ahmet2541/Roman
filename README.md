@@ -79,7 +79,15 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   Taslağı Oluştur" düğmesi, planın TAMAMINI işleyen tam bir bölüm taslağı
   üretir; taslak önce gösterilir, onaylanırsa boş satırlardan paragraflara
   bölünüp bölüme eklenir - akış: plan yaz -> taslağı ürettir -> paragraf
-  paragraf düzelt. Her hücre ilk
+  paragraf düzelt. Tek sahne için "📝 bu sahne" düğmesiyle YALNIZCA o
+  hücre yazdırılabilir (bağlamda bölümün tüm planı yine gider, devamlılık
+  için, ama yazılan yalnızca seçilendir) - paragraflar her durumda mevcut
+  metnin sonuna eklenir. **Aynı bölüme birden fazla FARKLI matristen hücre
+  bağlıysa** (ör. "Ana Olay Örgüsü" + "Yan Karakter Turu" kesişti), kutu
+  hücreleri matrise göre GRUPLAR: her matris kendi başlığı ve kendi "Bu
+  plandan taslak oluştur" düğmesiyle ayrı gösterilir, genel "Tüm sahneleri
+  yaz" düğmesi bu durumda kalkar - hangi matristen yazdırdığın hep açık,
+  yanlışlıkla başka matrisin sahnelerini karıştırma riski yok. Her hücre ilk
   kaydında SABİT bir referans kodu alır (MP1, MP2, ... - araya ekleme/
   sıralama değişse bile asla değişmez). Başka bir bölümün talimatında bu
   kod anıldığında ("MP13'teki ritimle kıyasla") o hücrenin planı context'e
@@ -472,6 +480,71 @@ geçmemesi (kelime sınırıyla - alt dize araması "çözünürlüğü" içinde
 sayılır), paralel matriste çok kişi/çok beat, ODAK seçilmemesi, bağlantının
 eylem söylememesi. Hiçbiri kaydı engellemez.
 
+### Plandan taslak — tek sahne ya da tüm bölüm
+
+Bir bölüme birden çok plan hücresi bağlanabilir (olayın devamı olan
+sahneler). Hücre sayısı 1'den fazlaysa AI panelinde artık TAM plan metni
+değil, kompakt bir liste görünür: her sahne için sadece kısa `satır`
+etiketi ve hücrenin OLAY alanından çekilen numaralı özet ("1. Özet: ...",
+"2. Özet: ..." - hücreye bizzat yazılmış "kim kime ne yapar" cümlesi,
+rastgele kesilmiş bir parça değil). Tam plan metnini görmek için "👁"
+düğmesi bir pencerede (modal) açar - oradan da doğrudan taslak
+başlatılabilir. Yazma yolları:
+
+- **Tüm sahneleri yaz (N)**: bütün planlar sırayla tek hamlede yazılır.
+  Bölüme birden fazla FARKLI matristen hücre bağlıysa bu genel düğme
+  kalkar; liste matrise göre GRUPLANIR, her matrisin kendi "Bu plandan
+  taslak oluştur" düğmesi olur - hangi matristen yazdırdığın hep açık,
+  yanlışlıkla başka matrisin sahnelerini karıştırma riski yok.
+- **📝 bu sahne**: yalnızca o hücre yazılır. Bağlama bölümün BÜTÜN planları
+  yine gider (devamlılık için gerekli) ama talimat daraltılır: "yalnızca
+  şu sahneyi yaz, diğerlerini yazma - ama onları bilerek yaz: öncekiler
+  olmuş, sonrakiler henüz olmamıştır". Gelen paragraflar mevcut metnin
+  SONUNA eklenir.
+
+Taslağın başına, hücrenin ZAMAN alanından okunan tarih satırı eklenir
+(`— 28 Haziran 2030, 09:15 —`). Bölüme birden çok hücre bağlıysa EN ERKEN
+zaman alınır. Tarih AI'ya sorulmaz, koddan yazılır - model bazen unutuyor,
+bazen biçimi bozuyordu.
+
+Ana yazım promptu (`SYSTEM_PROMPT`, `/ai/assist`) "PLANA SADAKAT" ve
+"ZAMAN ÇİZGİSİ" kurallarının ardından bir **"YAZIM KALİTESİ"** bölümü de
+taşır: Denetim menüsündeki Edebî Kontrol'ün 10 ölçütü (betimleme, alt
+metin, dil ekonomisi, ritim, klişeden kaçınma, karakterizasyon...) ve Okur
+Testi'nin baktığı sorun türleri (diyalog sesi ayrışması, bilgi boşaltma,
+erken gerilim söndürme, inandırıcılık...) emir kipi yazım talimatına
+çevrilip gömülüdür - amaç, bu sorunları sonradan ayrı bir taramayla
+yakalamak yerine AI'nın metni baştan bu kurallara uygun yazması. Denetim
+araçları hâlâ ayrıca çalışır; ikisi tamamlayıcıdır (biri "yazarken uy",
+diğeri "yazdıktan sonra kontrol et").
+
+### Onay öncesi taslak denetimi (AI'sız)
+
+Plandan üretilen metin, onay düğmesinin üstünde **dört deterministik
+denetimden** geçer (`app/draft_check.py`). Hiçbiri AI çağrısı yapmaz -
+onay anında bekletmemek ve 128 sahnelik üretimde maliyeti üçe katlamamak
+için:
+
+1. **Plana sadakat** — planda olmayan KAYITLI varlık metne girmiş mi.
+   Sahne anında var olmayan varlık (Vicdan) geçiyorsa bu uyarı değil HATA.
+2. **Zaman çizgisi** — sahne saatiyle çelişen ifade ("13:30" iken "akşam"),
+   ve geleceği sızdıran kalıplar ("henüz bilmiyordu ki", "adını almamıştı").
+3. **Beat kapsama** — planın beat'leri metinde karşılık bulmuş mu.
+4. **Tekrar** — aynı kelime ya da cümle başlangıcının aşırı tekrarı.
+
+Hiçbiri onayı ENGELLEMEZ. AI gerektiren denetimler (okur testi, edebî
+değerlendirme, yapısal akış, motif haritası...) elle çalıştırılmaya
+devam eder.
+
+### Matris sağlık şeridi
+
+Matris açılır açılmaz üstte yapısal bulgular görünür
+(`GET /matrix/{id}/health`): bağsız plan, kayıp MP referansı, çift bağ,
+damgasız tur, paralellik deliği, uzunluk uyuşmazlığı + kaç hücrede eksik
+alan olduğu. Denetim promptundakiyle aynı bulgular ama oraya gitmeden -
+o araç planın TAMAMI bittiğinde kullanılıyor, oysa bağsız plan
+doldururken fark edilmeli.
+
 ### Kronoloji — hikâye zamanı, bölüm numarası değil
 
 Bölüm NUMARASI hikâye sırası DEĞİLDİR: kronolojik olarak geriye giden bir
@@ -785,7 +858,7 @@ Kurallar:
 
 ## Testler
 
-**299 test** (22 dosya, + 26 arayüz davranış testi) - AI çağrıları `unittest.mock` ile sahte Qwen
+**310 test** (23 dosya, + 27 arayüz davranış testi) - AI çağrıları `unittest.mock` ile sahte Qwen
 yanıtlarıyla çalışır, gerçek bir `DASHSCOPE_API_KEY` gerekmez.
 
 Frontend tarafında iki katman test var:

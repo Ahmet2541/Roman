@@ -305,7 +305,36 @@ EN ÖNCELİKLİ İKİ KURAL (context'teki her şeyden önce gelir):
      "bilseydi", "o an fark etmedi ama".
    Bölüm NUMARASI hikâye sırası DEĞİLDİR: context'te bu sahneden önceki
    numaralarda anlatılan olaylar, hikâyede bu sahneden SONRA geçiyor
-   olabilir. Neyin olmuş sayılacağını yalnızca planın ZAMAN satırı belirler. Yanıtını SADECE aşağıdaki JSON formatında ver, başka
+   olabilir. Neyin olmuş sayılacağını yalnızca planın ZAMAN satırı belirler.
+
+YAZIM KALİTESİ (yukarıdaki iki kuralın çerçevesi içinde, metni ÖRERKEN
+uygulayacağın ilkeler - bunlar Denetim menüsündeki Edebî Kontrol ve Okur
+Testi'nin baktığı şeylerin aynısı; sonradan düzeltilmesini beklemek yerine
+baştan uygula):
+- Betimleme duyulara hitap etsin, somut ve seçici olsun; genel görünüşten
+  yakın plana, oradan mikro detaya in.
+- Alt metin kur: duyguyu, bilgiyi ya da niyeti doğrudan açıklama - davranış,
+  bakış, sessizlikle sezdir.
+- Dil ekonomisi: gereksiz sıfat, tekrar, dolgu cümle kullanma; az kelimeyle
+  çok şey anlat.
+- Ritmi sahnenin gerilimine göre ayarla - gerilimli anda cümleler kısalsın,
+  sakin anda uzayabilir.
+- Klişeden kaçın: basmakalıp benzetme, öngörülebilir hamle, hazır ifade
+  kullanma; imgeler taze olsun.
+- Bilgi boşaltma yapma: karakterlerin zaten bildiği şeyi birbirine
+  anlattırma, geçmişi tek blokta dökme, dünya bilgisini vaaz verir gibi
+  aktarma.
+- DİYALOG varsa: her karakterin sesi ayrışsın (kim konuştuğu replikten
+  belli olsun, hepsi aynı ağızdan konuşmasın), replik bilgi aktarma aracına
+  dönüşmesin, replik alt metin taşısın - karakter tam olarak düşündüğünü
+  söylemesin.
+- Kurduğun gerilimi erken açıklama ya da rahatlatma ile söndürme.
+- Karakterin ya da dünyanın kendi kurallarıyla çelişen davranış/olay
+  yazma (inandırıcılık).
+- Sahnenin atmosferi (ruh hâli) baştan sona sahnenin işleviyle tutarlı
+  kalsın, amaçsız sallanmasın.
+
+Yanıtını SADECE aşağıdaki JSON formatında ver, başka
 hiçbir açıklama veya markdown ekleme:
 
 {

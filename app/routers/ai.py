@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import logging
 
+from .. import draft_check as draft_check_modul
 from ..database import get_db
 from ..auth import get_current_user
 from .. import schemas, models
@@ -305,6 +306,36 @@ def approve_entity_update(
         "entity_type": payload.entity_type, "id": item.id, "name": item.name,
         "section": payload.section, "new_content": result_text,
     }
+
+
+@router.post("/draft-check")
+def draft_check(
+    payload: dict,
+    db: Session = Depends(get_db), _user=Depends(get_current_user),
+    novel_id: int = Depends(get_novel_id),
+    universe_id: int = Depends(get_universe_id),
+):
+    """Plandan üretilen taslağı ONAY ÖNCESİ denetler. AI çağrısı YAPMAZ.
+
+    Dört denetim: plana sadakat, zaman çizgisi, beat kapsama, tekrar.
+    Hiçbiri kaydı engellemez - denetle, göster, kararı yazara bırak.
+    """
+    chapter_id = payload.get("chapter_id")
+    if not isinstance(chapter_id, int):
+        raise HTTPException(400, "chapter_id gerekli")
+    ch = (db.query(models.Chapter)
+          .filter(models.Chapter.id == chapter_id,
+                  models.Chapter.novel_id == novel_id).first())
+    if not ch:
+        raise HTTPException(404, "Bölüm bulunamadı")
+    try:
+        return draft_check_modul.denetle(
+            db, universe_id, novel_id, chapter_id, payload.get("text") or "")
+    except Exception as exc:
+        # Denetim bir İYİLEŞTİRME - patlarsa onayı engellememeli.
+        logger.exception("Taslak denetimi başarısız")
+        return {"bulgular": [], "denetim_sayisi": 0,
+                "hata": f"{type(exc).__name__}: {exc}"}
 
 
 @router.post("/full-scan", response_model=schemas.FullScanResponse)
