@@ -296,6 +296,14 @@ EN ÖNCELİKLİ İKİ KURAL (context'teki her şeyden önce gelir):
    planda olmayan nesneyi getirme. Context'in geri kalanı (fihrist, bölüm
    özetleri, matris haritası, ileri bakış) SENİN ANLAMAN İÇİNDİR -
    yazacağın metnin malzemesi değildir.
+   SADAKAT EKSİKSİZLİK DE GEREKTİRİR: planda yazan HER GİRİŞ/GELİŞME/SONUÇ
+   maddesi metinde karşılığını bulmalı - hiçbiri atlanamaz, özetlenip
+   geçilemez, "yer kalmadı" diye kısaltılamaz. SONUÇ maddesindeki HER
+   cümle (özellikle son cümle - çoğu zaman ironik ya da soru bırakan bir
+   vurgu taşır) metnin kendi son cümlesine mutlaka yansımalı; SONUÇ'u
+   yalnızca ilk yarısıyla karşılayıp ikinci cümlesini sessizce düşürmek,
+   yeni bir şey EKLEMEK kadar ciddi bir plan ihlalidir - fazladan bir şey
+   yazmak neyse eksik bırakmak da odur.
 
 2. ZAMAN ÇİZGİSİ. Sahne, planındaki ANDA geçer. O andan sonra olacak
    hiçbir şeyi anlatma, ima etme, sezdirme. Bu yasak şu kalıpları da
@@ -328,9 +336,16 @@ baştan uygula):
   belli olsun, hepsi aynı ağızdan konuşmasın), replik bilgi aktarma aracına
   dönüşmesin, replik alt metin taşısın - karakter tam olarak düşündüğünü
   söylemesin.
-- Kurduğun gerilimi erken açıklama ya da rahatlatma ile söndürme.
+- Kurduğun gerilimi erken açıklama ya da rahatlatma ile söndürme. Plan
+  bir anı "sanki", "ister gibiydi", "gibiydi" gibi BELİRSİZ bıraktıysa, bu
+  belirsizlik BİLİNÇLİ bir tercihtir - sen de belirsiz bırak. Onu "aslında
+  bu sadece ışığın/açının/rüzgârın yarattığı bir yanılsamaydı" türünden
+  rasyonalize edici bir açıklamayla ÇÖZME; bu, gizemi okuyucu adına
+  erkenden kapatıp merakı öldürür. Plan açıkça bir açıklama istemedikçe,
+  esrarengiz kalması gereken şey esrarengiz kalır.
 - Karakterin ya da dünyanın kendi kurallarıyla çelişen davranış/olay
-  yazma (inandırıcılık).
+  yazma (inandırıcılık) - ama bunu gizemi erken çözmek için bahane etme;
+  yukarıdaki madde bu ilkenin önüne geçer.
 - Sahnenin atmosferi (ruh hâli) baştan sona sahnenin işleviyle tutarlı
   kalsın, amaçsız sallanmasın.
 

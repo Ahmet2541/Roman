@@ -175,7 +175,12 @@ ilgili profil bölümleri, üslup uyarıları) ve her istekte ne gittiği
   kesişimi olduğunu bilir - "3. bölüm hangi tura ait", "Sorgu aşaması diğer
   turlarda hangi bölümlerde" gibi yapısal sorular ve turlar arası paralellik
   bununla kurulur. Sadece etiketler + bölüm numarası + plan doluluğu gider,
-  hücre İÇERİKLERİ değil (ucuz katman). Matris yoksa hiç oluşmaz.
+  hücre İÇERİKLERİ değil (ucuz katman). Matris yoksa hiç oluşmaz. Bir
+  bölüme birden fazla hücre bağlıysa (BÖLÜM PLANI katmanında da, panelin
+  sahne listesinde de) hücreler artık kolon/satır sırasına (`position`)
+  göre dizilir - eskiden veritabanı sırası kullanılıyordu, bu da bazen
+  matristeki gerçek sahne sırasıyla uyuşmayıp AI'ya (ve yazara) sahneleri
+  ters sırada gösterebiliyordu.
 - **📌 Talimat Kasası**: Plan Matrisi'nde her SATIRA (aşamaya) kalıcı yazım
   kısıtları yazılır ("Duyguyu ADLANDIRMA - beden/ses/nesneyle göster",
   "Sanık tek cümle konuşur"). O satıra bağlı HER bölümün AI isteğine plan
@@ -480,6 +485,20 @@ geçmemesi (kelime sınırıyla - alt dize araması "çözünürlüğü" içinde
 sayılır), paralel matriste çok kişi/çok beat, ODAK seçilmemesi, bağlantının
 eylem söylememesi. Hiçbiri kaydı engellemez.
 
+**Beat etiketleri — edebi sanatlardan gelen üç işaret:** her GİRİŞ/
+GELİŞME/SONUÇ beat'inin yanında opsiyonel bir dropdown var: 🌀 **Sezdirme**
+(bu an açıklanmasın, alt metinde kalsın - Buzdağı Tekniği), 🎭 **İroni**
+(söylenenle gerçek arasındaki çelişki açıkça yorumlanmasın), 💬 **Kinaye**
+(ifade hem gerçek hem mecaz okunabilir - roman içinde gerçek bir karşılığı
+varsa bunu unutma, mecaz anlamıyla yaz). Seçilen etiket, o beat'in AI'ya
+giden satırına köşeli parantez içinde doğrudan iğnelenir - genel
+SYSTEM_PROMPT kuralından daha güçlü bir sinyal, çünkü model tam o satırı
+işlerken talimatı üzerinde görür. Boş bırakılırsa davranış değişmez.
+Bir beat 🌀 Sezdirme etiketliyken taslak metninde "yanılsama", "aslında
+sadece" gibi rasyonalize edici bir kalıp geçerse, onay öncesi taslak
+denetimi bunu ayrı bir "Sezdirme ihlali" uyarısıyla işaretler (denetim
+sayısı 5'e çıktı) - kesin değildir, kontrol çağrısıdır.
+
 ### Plandan taslak — tek sahne ya da tüm bölüm
 
 Bir bölüme birden çok plan hücresi bağlanabilir (olayın devamı olan
@@ -769,7 +788,13 @@ frontend/
 4. **Bölüm/paragraf yaz:**
    `PUT /chapters/{chapter_id}/paragraphs/{number}` — paragrafı kaydeder ve
    içinde geçen karakter/mekan/olay/nesne isimlerini otomatik tespit edip
-   `mentions` tablosuna işler.
+   `mentions` tablosuna işler. Eşleşme büyük/küçük harf duyarsızdır AMA
+   eşleşen kelimenin metindeki İLK harfi büyük olmak zorundadır: bazı
+   isimler gündelik bir Türkçe kelimeyle aynıdır ("Vicdan"/vicdan,
+   "Damla"/damla, "Ateş"/ateş) - bu şart olmasa "bir vicdan azabı duydu"
+   gibi tamamen sıradan bir cümle "Vicdan" karakterinin sahnede geçtiği
+   sanılırdı. "YAŞLI TEKNİSYEN" gibi TÜMÜ BÜYÜK başlıklar da büyük harfle
+   başladığı için normal şekilde eşleşmeye devam eder.
 
 5. **Ara:** `GET /chapters/search/?q=Ahmet` ya da
    `GET /chapters/search/?entity_type=character&entity_id=1` — o varlığın

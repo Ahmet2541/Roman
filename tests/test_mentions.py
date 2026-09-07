@@ -79,3 +79,46 @@ def test_turkish_lowercase_dotless_i_matches_correctly(client, headers):
 
     r = client.get("/chapters/search", params={"entity_type": "character", "entity_id": char_id}, headers=headers)
     assert len(r.json()) == 1
+
+
+def test_lowercase_common_word_homonym_is_not_matched(client, headers):
+    """Bazı karakter isimleri gündelik bir Türkçe kelimeyle aynıdır
+    ("Vicdan"/vicdan, "Damla"/damla, "Ateş"/ateş). Eşleşme büyük/küçük
+    harf duyarsız yapılınca "bir vicdan azabı duydu" gibi tamamen sıradan
+    bir cümle, "Vicdan" karakterinin sahnede geçtiği sanılıyordu. Artık
+    eşleşen kelimenin metindeki İLK harfi büyük olmalı - gündelik kelime
+    kullanımı (küçük harfle) artık mention SAYILMAZ."""
+    r = client.post("/characters/", json={"name": "Vicdan"}, headers=headers)
+    char_id = r.json()["id"]
+
+    r = client.post("/chapters/", json={"number": 1, "kind": "chapter"}, headers=headers)
+    chapter_id = r.json()["id"]
+    r = client.put(
+        f"/chapters/{chapter_id}/paragraphs/1",
+        json={"number": 1, "text": "Adam bir vicdan azabı duydu ve vicdanı sızladı."},
+        headers=headers,
+    )
+    assert r.status_code == 200
+
+    r = client.get("/chapters/search", params={"entity_type": "character", "entity_id": char_id}, headers=headers)
+    assert len(r.json()) == 0
+
+
+def test_capitalized_homonym_name_is_still_matched(client, headers):
+    """Aynı ismin BÜYÜK harfle (gerçek karakter kullanımı) geçtiği durumda
+    eşleşme hâlâ çalışmalı - düzeltme sadece küçük harfli gündelik
+    kullanımı eliyor, karakterin kendisini değil."""
+    r = client.post("/characters/", json={"name": "Vicdan"}, headers=headers)
+    char_id = r.json()["id"]
+
+    r = client.post("/chapters/", json={"number": 1, "kind": "chapter"}, headers=headers)
+    chapter_id = r.json()["id"]
+    r = client.put(
+        f"/chapters/{chapter_id}/paragraphs/1",
+        json={"number": 1, "text": "Vicdan, sistemleri sessizce yönetiyordu."},
+        headers=headers,
+    )
+    assert r.status_code == 200
+
+    r = client.get("/chapters/search", params={"entity_type": "character", "entity_id": char_id}, headers=headers)
+    assert len(r.json()) == 1

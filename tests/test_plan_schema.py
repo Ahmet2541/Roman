@@ -1722,7 +1722,7 @@ def test_draft_check_clean_text_passes(client, headers):
         "text": ("Genç Mühendis panelvandan indi. "
                  "Mendille alnını sildi, sonra binaya girdi.")}, headers=headers).json()
     assert not [b for b in r["bulgular"] if b["tur"] == "hata"]
-    assert r["denetim_sayisi"] == 4
+    assert r["denetim_sayisi"] == 5
 
 
 def test_matrix_health_reports_structural_faults(client, headers):

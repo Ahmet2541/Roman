@@ -57,8 +57,24 @@ def detect_and_save_mentions(db: Session, paragraph: models.Paragraph):
                     continue
                 # Kelime sınırlarına göre ara (örn. "Ahmet" tek başına, "Ahmete" de yakalar)
                 pattern = r"\b" + re.escape(turkish_lower(name)) + r"\b"
-                if re.search(pattern, text_lower):
-                    matched = True
+                # BÜYÜK/KÜÇÜK HARF KONTROLÜ: yukarıdaki arama harf duyarsız
+                # yapılıyor (Türkçe İ/I sorunundan dolayı, bkz. turkish_lower),
+                # ama bu bazı isimlerin GÜNDELİK KELİMELERLE aynı olduğu
+                # durumlarda (Vicdan/vicdan, Damla/damla, Ateş/ateş) yanlış
+                # eşleşmeye yol açıyordu - "bir vicdan azabı duydu" cümlesi
+                # "Vicdan" karakterinin sahnede geçtiği sanılıyordu. Çözüm:
+                # eşleşen kelimenin ORİJİNAL metindeki İLK harfi büyük
+                # olmalı - proper-noun kullanımı Türkçe'de her zaman büyük
+                # harfle yazılır (cümle içinde bile), gündelik kelime ise
+                # neredeyse hiç büyük harfle başlamaz. "YAŞLI TEKNİSYEN" gibi
+                # TÜMÜ BÜYÜK başlıklar da büyük harfle başladığı için bu
+                # kontrolden geçmeye devam eder - onlar bozulmaz.
+                for m in re.finditer(pattern, text_lower):
+                    ilk_harf = paragraph.text[m.start():m.start() + 1]
+                    if ilk_harf.isupper():
+                        matched = True
+                        break
+                if matched:
                     break
             if matched:
                 db.add(models.Mention(

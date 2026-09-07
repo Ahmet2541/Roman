@@ -38,6 +38,26 @@ def test_large_rule_count_filters_by_tag_in_instruction(client, headers, novel):
     assert context_filtered.count("Kural ") > 0
 
 
+def test_large_rule_count_filters_by_tag_matching_scene_entity(client, headers, novel):
+    """Etiket, talimat metninde değil SAHNENİN VARLIK LİSTESİNDE geçiyorsa
+    da kural seçilmeli - talimat metni genelde "planı yaz" gibi genel bir
+    kalıptır, kimin sahnede olduğunu söylemez; sahne_varlik_adlari bunu
+    telafi eder."""
+    for i in range(41):
+        tags = ["vicdan"] if i == 0 else [f"nadir-etiket-{i}"]
+        client.post("/rules/", json={"title": f"Kural {i}", "description": "x", "tags": tags}, headers=headers)
+    db = _db()
+    # instruction_text tamamen genel, "vicdan" kelimesini hiç anmıyor -
+    # ama sahnede Vicdan var (sahne_varlik_adlari ile bildiriliyor).
+    context = build_fixed_layer(
+        db, novel["universe_id"],
+        instruction_text="BÖLÜM PLANI'ndaki maddelerin tamamını yaz",
+        sahne_varlik_adlari={"vicdan"},
+    )
+    assert "Kural 0" in context
+    assert context.count("Kural ") == 1
+
+
 def test_untagged_rules_always_included_even_above_threshold(client, headers, novel):
     for i in range(41):
         client.post("/rules/", json={"title": f"Evrensel Kural {i}", "description": "x"}, headers=headers)  # tags=[] (varsayılan)

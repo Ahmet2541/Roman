@@ -79,13 +79,39 @@ def _extract_paragraph_refs(text: str) -> set:
 # SABİT KATMAN: Roman kuralları. Her istekte tam ve değişmeden dahil edilir.
 # ---------------------------------------------------------------------------
 
-def build_fixed_layer(db: Session, universe_id: int, instruction_text: str = "") -> str:
+def _sahne_varlik_adlari(db: Session, entities: list) -> set:
+    """Sahnedeki (context'e dahil edilecek) varlıkların adları + takma
+    adları, küçük harfe çevrilmiş - kural etiketlerini SAHNEYE göre
+    eşleştirmek için (bkz. build_fixed_layer). instruction_text'ten daha
+    güvenilir bir sinyal: talimat metni genelde "planı yaz" gibi genel bir
+    kalıptır, sahnede kimin/neyin olduğunu SÖYLEMEZ - ama bu liste söyler."""
+    adlar = set()
+    for ref in entities:
+        model = ENTITY_MODELS.get(ref.entity_type)
+        if not model:
+            continue
+        rec = db.query(model).filter(model.id == ref.entity_id).first()
+        if not rec:
+            continue
+        if rec.name:
+            adlar.add(rec.name.lower())
+        for a in (getattr(rec, "aliases", None) or []):
+            if a:
+                adlar.add(a.lower())
+    return adlar
+
+
+def build_fixed_layer(db: Session, universe_id: int, instruction_text: str = "",
+                       sahne_varlik_adlari: set | None = None) -> str:
     """Devasa dünyalarda (bkz. proje sohbet geçmişi - 12.000 sayfalık seri
     senaryosu) kural sayısı arttıkça hepsini her seferinde göndermek token
     israfı olur. Eşik altında (KUCUK_DUNYA_ESIGI) davranış AYNI kalır -
     hepsi gönderilir, hiçbir şey değişmez. Eşik üstünde: etiketsiz
-    (evrensel) kurallar HER ZAMAN gider, etiketli kurallar SADECE o etiket
-    talimat metninde geçiyorsa gider - basit ama etkili bir alt küme."""
+    (evrensel) kurallar HER ZAMAN gider, etiketli kurallar SADECE etiket
+    talimat metninde YA DA sahnenin varlık listesinde (isim/takma ad)
+    geçiyorsa gider - ikincisi olmadan bir "Vicdan" etiketli kural, sahne
+    planında Vicdan varken bile talimat metni onun adını hiç anmıyorsa
+    (ki genelde anmaz) sessizce düşebiliyordu."""
     rules = db.query(models.Rule).filter(models.Rule.universe_id == universe_id).all()
     # Kayda özel kurallar (entity_id dolu) SABİT katmana girmez - sadece o
     # kayıt seçiliyken dinamik katmanla gider (bkz. build_dynamic_layer).
@@ -94,11 +120,15 @@ def build_fixed_layer(db: Session, universe_id: int, instruction_text: str = "")
         return ""
 
     KUCUK_DUNYA_ESIGI = 40
-    if len(rules) > KUCUK_DUNYA_ESIGI and instruction_text:
+    if len(rules) > KUCUK_DUNYA_ESIGI and (instruction_text or sahne_varlik_adlari):
         instruction_lower = instruction_text.lower()
+        adlar = sahne_varlik_adlari or set()
         selected = [
             r for r in rules
-            if not r.tags or any(tag.lower() in instruction_lower for tag in r.tags)
+            if not r.tags or any(
+                tag.lower() in instruction_lower or tag.lower() in adlar
+                for tag in r.tags
+            )
         ]
         # Filtreleme hiçbir şey seçmediyse (ör. instruction_text boşsa ya da
         # hiçbir etiket eşleşmediyse) sessizce hepsini göndermeye geri dön -
@@ -944,7 +974,24 @@ def build_context(
     universe_id: karakterler/mekanlar/kurallar/stil örnekleri gibi
     PAYLAŞILAN verinin hangi evrenden çekileceği - bu artık seride tüm
     kitapları kapsıyor."""
-    fixed = build_fixed_layer(db, universe_id, instruction_text=instruction_text)
+    # Sahnenin varlık listesi (plan hücresinden + elle seçilenlerden)
+    # fixed katmandan ÖNCE hesaplanıyor ki kural etiketleri sahneye göre
+    # eşleşebilsin (bkz. build_fixed_layer, _sahne_varlik_adlari). Bu blok
+    # aşağıda dynamic layer için TEKRAR kullanılıyor - iki kez hesaplanmıyor.
+    try:
+        plan_refs = plan_hucre_varliklari(db, novel_id, chapter_number)
+    except Exception:
+        logger.exception("Plan hücresi varlıkları okunamadı, atlanıyor")
+        plan_refs = []
+    birlesik = list(selected_entities or [])
+    mevcut = {(r.entity_type, r.entity_id) for r in birlesik}
+    for r in plan_refs:
+        if (r.entity_type, r.entity_id) not in mevcut:
+            birlesik.append(r)
+    plan_kaynakli = {(r.entity_type, r.entity_id) for r in plan_refs}
+
+    fixed = build_fixed_layer(db, universe_id, instruction_text=instruction_text,
+                               sahne_varlik_adlari=_sahne_varlik_adlari(db, birlesik))
     # Fihrist kapatılabilir: kronolojik olarak geriye giden bir sahne
     # yazarken "önceki" bölümlerin özetleri aslında GELECEKTİR.
     index = (build_index_layer(db, universe_id, novel_id, exclude_chapter_number=chapter_number)
@@ -1005,19 +1052,7 @@ def build_context(
     # PLANDAN GELEN VARLIKLAR: hücrede yazılı kişi/mekan/nesne profilleri
     # de gitsin. Elle seçilenlerle BİRLEŞTİRİLİR (üzerine yazmaz) - yazar
     # sahne dışından bir karakteri de bilerek ekleyebilir.
-    try:
-        plan_refs = plan_hucre_varliklari(db, novel_id, chapter_number)
-    except Exception:
-        # Bu katman bir İYİLEŞTİRME (profilleri otomatik ekler), çekirdek
-        # değil. Patlarsa bütün bağlamı düşürmemeli - elle seçilenlerle
-        # devam edilir.
-        logger.exception("Plan hücresi varlıkları okunamadı, atlanıyor")
-        plan_refs = []
-    birlesik = list(selected_entities or [])
-    mevcut = {(r.entity_type, r.entity_id) for r in birlesik}
-    for r in plan_refs:
-        if (r.entity_type, r.entity_id) not in mevcut:
-            birlesik.append(r)
+    # (plan_refs, birlesik, plan_kaynakli fonksiyonun başında hesaplandı.)
     # Sahnenin hikâye zamanı: varlık yokluk denetiminin ölçüsü.
     try:
         sahne_zamani = None
@@ -1030,7 +1065,6 @@ def build_context(
     except Exception:
         logger.exception("Sahne zamanı okunamadı, varlık denetimi atlanıyor")
         sahne_zamani = None
-    plan_kaynakli = {(r.entity_type, r.entity_id) for r in plan_refs}
     dynamic = build_dynamic_layer(db, universe_id, birlesik, instruction_text=instruction_text, include_hidden=include_hidden, sahne_zamani=sahne_zamani, plan_kaynakli=plan_kaynakli, su_anki_bolum=chapter_number)
     # KATMAN SIRASI - plan EN SONA alındı.
     # Plan, modelin en çok uyması gereken katman ama on beşin sekizincisi

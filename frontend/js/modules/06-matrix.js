@@ -898,11 +898,31 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     ['gelisme', 'GELİŞME', "dönme beat'i", YARDIM.gelisme],
     ['sonuc', 'SONUÇ', tur.damga ? `"${tur.damga}" burada asılı kalmalı` : "kapanış beat'i", YARDIM.sonuc],
   ];
+  // BEAT ETİKETLERİ: bkz. app/plan_schema.py BEAT_ETIKETLERI - üç edebi
+  // sanat, o beat'in AI'ya NASIL yazılması gerektiğini işaretler. Boş =
+  // özel talimat yok. Etiket seçilince o beat'in metnine AI'ya giden
+  // satırda doğrudan bir talimat iğnelenir (bkz. backend render_cell).
+  const BEAT_ETIKETLERI = [
+    ['', '—'],
+    ['sezdirme', '🌀 Sezdirme'],
+    ['ironi', '🎭 İroni'],
+    ['kinaye', '💬 Kinaye'],
+  ];
+  const BEAT_ETIKET_ACIKLAMA = {
+    sezdirme: 'Bu an açıklanmasın, alt metinde sezdirilmiş kalsın - rasyonalize edici bir açıklamayla çözme.',
+    ironi: 'Söylenenle gerçek arasındaki çelişki korunsun, açıkça yorumlanmasın.',
+    kinaye: 'Bu ifade hem gerçek hem mecaz okunabilir; mecaz anlamı yaz, olduğu gibi kopyalama.',
+  };
+
   const beatler = {};
   YAY.forEach(([k]) => {
     const v = d[k];
-    beatler[k] = Array.isArray(v) ? v.slice() : (v ? [v] : ['']);
-    if (!beatler[k].length) beatler[k] = [''];
+    const list = Array.isArray(v)
+      ? v.map(it => (it && typeof it === 'object')
+          ? { metin: it.metin || '', etiket: it.etiket || '' }
+          : { metin: it || '', etiket: '' })
+      : [];
+    beatler[k] = list.length ? list : [{ metin: '', etiket: '' }];
   });
 
   function cizYay() {
@@ -914,8 +934,16 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
           <span style="font-weight:400;color:var(--text-muted);">(${escapeHtml(ipucu)})</span>${yardim(yardimMetni, 'sol')}</label>
         ${beatler[k].map((b, i) => `
           <div class="mc-beat-row" style="display:flex;gap:4px;align-items:flex-start;margin-top:3px;">
-            ${beatler[k].length > 1 ? `<span style="font-size:11px;color:var(--text-muted);padding-top:8px;min-width:14px;">${i + 1}</span>` : ''}
-            <textarea class="mc-beat" data-k="${k}" data-i="${i}" style="min-height:48px;flex:1;">${escapeHtml(b)}</textarea>
+            ${beatler[k].length > 1 ? `
+            <span style="display:flex;flex-direction:column;gap:0;">
+              <button class="btn-icon-sm mc-beat-yukari" data-k="${k}" data-i="${i}" title="Yukarı taşı" ${i === 0 ? 'disabled style="opacity:.3;"' : ''}>▲</button>
+              <button class="btn-icon-sm mc-beat-asagi" data-k="${k}" data-i="${i}" title="Aşağı taşı" ${i === beatler[k].length - 1 ? 'disabled style="opacity:.3;"' : ''}>▼</button>
+            </span>
+            <span style="font-size:11px;color:var(--text-muted);padding-top:8px;min-width:14px;">${i + 1}</span>` : ''}
+            <textarea class="mc-beat" data-k="${k}" data-i="${i}" style="min-height:48px;flex:1;">${escapeHtml(b.metin)}</textarea>
+            <select class="mc-beat-etiket" data-k="${k}" data-i="${i}" style="width:88px;font-size:11px;align-self:flex-start;" title="${b.etiket ? escapeHtml(BEAT_ETIKET_ACIKLAMA[b.etiket] || '') : 'Bu beat için özel bir yazım talimatı seç (opsiyonel)'}">
+              ${BEAT_ETIKETLERI.map(([val, label]) => `<option value="${val}" ${b.etiket === val ? 'selected' : ''}>${label}</option>`).join('')}
+            </select>
             ${beatler[k].length > 1 ? `<button class="btn-icon-sm mc-beat-sil" data-k="${k}" data-i="${i}" title="Bu beat'i kaldır">✕</button>` : ''}
           </div>
           <div class="mc-beat-sayac" data-k="${k}" data-i="${i}" style="font-size:10.5px;text-align:right;"></div>`).join('')}
@@ -932,17 +960,37 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     kutu.querySelectorAll('.mc-beat').forEach(t => {
       sayacGuncelle(t);
       t.addEventListener('input', () => {
-        beatler[t.dataset.k][+t.dataset.i] = t.value;
+        beatler[t.dataset.k][+t.dataset.i].metin = t.value;
         sayacGuncelle(t);
         tanimaSeridi(t, t.value);
       });
       tanimaSeridi(t, t.value);
     });
+    kutu.querySelectorAll('.mc-beat-etiket').forEach(s => {
+      s.addEventListener('change', () => {
+        beatler[s.dataset.k][+s.dataset.i].etiket = s.value;
+        s.title = s.value ? (BEAT_ETIKET_ACIKLAMA[s.value] || '') : 'Bu beat için özel bir yazım talimatı seç (opsiyonel)';
+      });
+    });
     kutu.querySelectorAll('.mc-beat-ekle').forEach(b => b.addEventListener('click', () => {
-      beatler[b.dataset.k].push(''); cizYay();
+      beatler[b.dataset.k].push({ metin: '', etiket: '' }); cizYay();
     }));
     kutu.querySelectorAll('.mc-beat-sil').forEach(b => b.addEventListener('click', () => {
       beatler[b.dataset.k].splice(+b.dataset.i, 1); cizYay();
+    }));
+    kutu.querySelectorAll('.mc-beat-yukari').forEach(b => b.addEventListener('click', () => {
+      const arr = beatler[b.dataset.k];
+      const i = +b.dataset.i;
+      if (i <= 0) return;
+      [arr[i - 1], arr[i]] = [arr[i], arr[i - 1]];
+      cizYay();
+    }));
+    kutu.querySelectorAll('.mc-beat-asagi').forEach(b => b.addEventListener('click', () => {
+      const arr = beatler[b.dataset.k];
+      const i = +b.dataset.i;
+      if (i >= arr.length - 1) return;
+      [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]];
+      cizYay();
     }));
   }
   cizYay();
@@ -1048,9 +1096,9 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       nesneler: _adlariAyristir(el('mcNesneler').value, varliklar.nesneler),
       odak: el('mcOdak').value,
       uzunluk: el('mcUzunluk').value,
-      giris: beatler.giris.map(x => x.trim()).filter(Boolean),
-      gelisme: beatler.gelisme.map(x => x.trim()).filter(Boolean),
-      sonuc: beatler.sonuc.map(x => x.trim()).filter(Boolean),
+      giris: beatler.giris.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '' })).filter(x => x.metin),
+      gelisme: beatler.gelisme.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '' })).filter(x => x.metin),
+      sonuc: beatler.sonuc.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '' })).filter(x => x.metin),
       baglantilar: baglar.filter(b => (b.kod || '').trim()),
     };
   }
@@ -1075,7 +1123,12 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     if (v.odak) satir.push(`ODAK: ${v.odak} (dikkat bu nesnede toplanır)`);
     ['giris', 'gelisme', 'sonuc'].forEach((k, i) => {
       const etiket = ['GİRİŞ', 'GELİŞME', 'SONUÇ'][i];
-      v[k].forEach((b, j) => satir.push(`${etiket}${v[k].length > 1 ? ` ${j + 1}` : ''}: ${b}`));
+      v[k].forEach((b, j) => {
+        let baslik = `${etiket}${v[k].length > 1 ? ` ${j + 1}` : ''}`;
+        const gorunen = { sezdirme: '🌀 Sezdirme', ironi: '🎭 İroni', kinaye: '💬 Kinaye' }[b.etiket];
+        if (gorunen) baslik += ` [${gorunen} — ${BEAT_ETIKET_ACIKLAMA[b.etiket]}]`;
+        satir.push(`${baslik}: ${b.metin}`);
+      });
     });
     const uzTarif = { ozet: 'ÖZET — 1-2 paragraf', normal: 'NORMAL — 4-6 paragraf', uzun: 'UZUN METİN — 8+ paragraf' }[v.uzunluk];
     if (uzTarif) satir.push(`HEDEF UZUNLUK: ${uzTarif}…`);

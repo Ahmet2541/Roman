@@ -105,6 +105,32 @@ YAY_ALANLARI = [
     ("sonuc", "SONUÇ", "Kapanış beat'i - damga kelime burada asılı kalır"),
 ]
 
+# BEAT ETİKETLERİ: bir beat'in AI'ya NASIL yazılması gerektiğini belirten,
+# edebiyat teorisinden gelen üç işaret (araştırılıp seçildi - bkz. sohbet):
+# Buzdağı Tekniği/alt metin (sezdirme), dramatik ironi, ve kinaye (bir
+# ifadenin hem gerçek hem mecaz anlamda okunabildiği durum - ör. romanda
+# GERÇEK bir taş heykel varken "taş kesildi" demek gibi). Bu talimat genel
+# SYSTEM_PROMPT'takinden daha güçlüdür çünkü tam o beat'in yanına, o satırın
+# üzerine iğnelenir - sayfalar öncesindeki genel bir maddeyi hatırlamaya
+# çalışmak zorunda kalmaz. Boş ("") = özel talimat yok, eskisi gibi davranır.
+BEAT_ETIKETLERI = [
+    ("", "—", ""),
+    ("sezdirme", "🌀 Sezdirme",
+     "Bu an AÇIKLANMASIN - alt metinde, sezdirilmiş olarak kalsın; "
+     "\"aslında bu sadece ...ydı\" türünden rasyonalize edici bir "
+     "açıklamayla ÇÖZME."),
+    ("ironi", "🎭 İroni",
+     "Söylenenle gerçek arasındaki çelişki (ironi) korunsun - açıkça "
+     "yorumlanmasın, okuyucu kendi çıkarsın."),
+    ("kinaye", "💬 Kinaye",
+     "Bu ifade hem gerçek hem mecaz anlamda okunabilir; MECAZ anlamıyla "
+     "yaz, deyimi olduğu gibi kopyalama - gerçek anlamıyla da "
+     "çakışabileceğini unutma."),
+]
+BEAT_ETIKET_ANAHTARLARI = [k for k, _, _ in BEAT_ETIKETLERI]
+BEAT_ETIKET_GORUNEN = {k: g for k, g, _ in BEAT_ETIKETLERI if k}
+BEAT_ETIKET_TALIMAT = {k: t for k, _, t in BEAT_ETIKETLERI if k}
+
 
 def _zaman_tipi(deger) -> str:
     """Girişi şemadaki anahtara oturtur. Kullanıcı ya da eski kayıt "SAYAÇ"
@@ -159,13 +185,28 @@ def normalize_cell(data: Any) -> dict:
         if isinstance(val, str):
             out[key] = val.strip()
 
-    # Beat'ler: eski kayıtlarda düz metin, yenilerde liste. İkisi de kabul.
+    # Beat'ler: eski kayıtlarda düz metin ya da düz metin listesi, yenilerde
+    # {"metin","etiket"} listesi. Üçü de kabul edilir - eski kayıt hiç
+    # bozulmadan yeni şekle (etiket="") oturur.
     for key, _, _ in YAY_ALANLARI:
         val = data.get(key)
         if isinstance(val, str):
-            out[key] = [val.strip()] if val.strip() else []
+            out[key] = [{"metin": val.strip(), "etiket": ""}] if val.strip() else []
         elif isinstance(val, list):
-            out[key] = [str(x).strip() for x in val if str(x or "").strip()]
+            temiz = []
+            for it in val:
+                if isinstance(it, dict):
+                    metin = str(it.get("metin") or "").strip()
+                    if not metin:
+                        continue
+                    etiket = str(it.get("etiket") or "").strip().lower()
+                    temiz.append({
+                        "metin": metin,
+                        "etiket": etiket if etiket in BEAT_ETIKET_ANAHTARLARI else "",
+                    })
+                elif isinstance(it, str) and it.strip():
+                    temiz.append({"metin": it.strip(), "etiket": ""})
+            out[key] = temiz
 
     # Bilinmeyen ya da boş değer "normal"e düşer: uzunluksuz plan, modelin
     # her sahnede kendi ölçüsünü seçmesi demek - bölümler arası tutarsızlığın
@@ -303,6 +344,10 @@ SAPMA_KILIDI = """SINIRLAR (bu sahne için MUTLAK):
   hiçbir karakteri sahneye sokma, adını andırma, hatırlatma.
 - Yalnızca yukarıda yazılı beat'ler gerçekleşir. Yeni olay, yeni geri
   dönüş, yeni sır, yeni nesne EKLEME.
+- BEAT SIRASI: GİRİŞ, ardından GELİŞME (numaralandıysa 1'den başlayarak
+  YAZILDIĞI SIRAYLA), ardından SONUÇ - bu, sahnenin KENDİ İÇİNDEKİ
+  kronolojik akışıdır. Bu sırayı değiştirme, GELİŞME'leri karıştırma ya
+  da SONUÇ'u ortaya alma; her biri kendinden öncekinin ardından olur.
 - Bağlamdaki fihrist ve diğer bölüm özetleri GEÇMİŞİ ANLAMAN İÇİNDİR;
   oradaki olayları, kişileri ve imgeleri bu sahneye TAŞIMA.
 - Hedef uzunluğa ulaşmak için olay uydurma. Yetmiyorsa beat'leri
@@ -373,14 +418,19 @@ def render_cell(data: Any) -> str:
             f"başka nesneye, mekana ya da ayrıntıya geçme.")
 
     # Beat'ler numaralanır ki AI her birini AYRI bir hareket olarak görsün;
-    # tek beat varsa numara konmaz (gereksiz gürültü).
+    # tek beat varsa numara konmaz (gereksiz gürültü). Etiketli bir beat'in
+    # talimatı KÖŞELİ PARANTEZ içinde, o beat'in BAŞLIĞININ hemen yanına
+    # eklenir - genel SYSTEM_PROMPT kuralından çok daha güçlü bir sinyal,
+    # çünkü model tam o satırı işlerken talimatı gözünün önünde görür.
     for key, etiket, _ in YAY_ALANLARI:
         beatler = d[key]
-        if len(beatler) == 1:
-            satirlar.append(f"{etiket}: {beatler[0]}")
-        else:
-            for i, b in enumerate(beatler, start=1):
-                satirlar.append(f"{etiket} {i}: {b}")
+        tekli = len(beatler) == 1
+        for i, b in enumerate(beatler, start=1):
+            baslik = etiket if tekli else f"{etiket} {i}"
+            et = b["etiket"]
+            if et:
+                baslik += f" [{BEAT_ETIKET_GORUNEN[et]} — {BEAT_ETIKET_TALIMAT[et]}]"
+            satirlar.append(f"{baslik}: {b['metin']}")
 
     tarif = dict((k, t) for k, _, t in UZUNLUK_SEVIYELERI).get(d["uzunluk"])
     if tarif:
@@ -497,7 +547,7 @@ def cell_warnings(data: Any, tur_data: Any = None, paralel: bool = False) -> lis
 
     # Damga kilidi: turun damga kelimesi SONUÇ beat'inde asılı kalmalı.
     damga = normalize_meta(tur_data, TUR_ALANLARI).get("damga", "")
-    sonuc_metni = " ".join(d["sonuc"])
+    sonuc_metni = " ".join(b["metin"] for b in d["sonuc"])
     if damga and sonuc_metni:
         kalip = r"(?<!\w)" + re.escape(_tr_lower(damga)) + r"(?!\w)"
         if not re.search(kalip, _tr_lower(sonuc_metni)):
@@ -508,9 +558,9 @@ def cell_warnings(data: Any, tur_data: Any = None, paralel: bool = False) -> lis
         uyarilar.append("OLAY tek cümleyi aşmış - sahne kimliği özet değil")
     for key, etiket, _ in YAY_ALANLARI:
         for i, b in enumerate(d[key], start=1):
-            if len(b) > BEAT_SINIRI:
+            if len(b["metin"]) > BEAT_SINIRI:
                 sira = f" {i}" if len(d[key]) > 1 else ""
                 uyarilar.append(f"{etiket}{sira} bir beat değil olay dizisi olmuş "
-                                f"({len(b)} karakter) - yazana kuracak yer bırakmıyor")
+                                f"({len(b['metin'])} karakter) - yazana kuracak yer bırakmıyor")
 
     return uyarilar

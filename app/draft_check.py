@@ -137,8 +137,9 @@ def _beat_kapsama(metin_kucuk, plan) -> list:
     bulgular = []
     for anahtar, etiket, _ in plan_schema.YAY_ALANLARI:
         for i, beat in enumerate(plan[anahtar], start=1):
+            metin = beat["metin"]
             kelimeler = [
-                k for k in re.findall(r"[\wçğıöşüÇĞİÖŞÜ]{5,}", _tr_lower(beat))
+                k for k in re.findall(r"[\wçğıöşüÇĞİÖŞÜ]{5,}", _tr_lower(metin))
             ][:8]
             if not kelimeler:
                 continue
@@ -147,8 +148,43 @@ def _beat_kapsama(metin_kucuk, plan) -> list:
                 bulgular.append({
                     "tur": "uyari", "denetim": "Beat kapsama",
                     "mesaj": f"{etiket}{sira} metinde karşılık bulmamış olabilir: "
-                             f"\"{beat[:60]}\"",
+                             f"\"{metin[:60]}\"",
                 })
+    return bulgular
+
+
+# "Sezdirme" etiketli bir beat'in kasıtlı bıraktığı belirsizliği, modelin
+# rasyonalize edici bir açıklamayla çözüp çözmediğinin kaba bir kalıp
+# taraması - Gemini ve DeepSeek'in aynı hatayı yaptığı ("aslında bu sadece
+# ışığın/açının yarattığı bir yanılsamaydı") somut örneklerden çıkarıldı.
+_RASYONALIZE_KALIPLARI = [
+    "yanılsama", "göz yanılması", "aslında bu sadece", "meğer",
+    "sadece bir izlenimdi", "açıklaması basitti", "gerçekte ise sadece",
+    "aslında sadece", "yalnızca bir yanılsama", "imkânsızdı, ama",
+    "imkansızdı, ama",
+]
+
+
+def _sezdirme_ihlali(metin_kucuk, plan) -> list:
+    """'Sezdirme' etiketli beat'ler için: metinde rasyonalize edici bir
+    kalıp geçiyor mu? Kesin değil (kalıp başka bir beat'le ilgili de
+    olabilir) - o yüzden 'uyarı'."""
+    bulgular = []
+    etiketli_var = any(
+        b["etiket"] == "sezdirme"
+        for anahtar, _, _ in plan_schema.YAY_ALANLARI
+        for b in plan[anahtar]
+    )
+    if not etiketli_var:
+        return bulgular
+    bulunan = [k for k in _RASYONALIZE_KALIPLARI if k in metin_kucuk]
+    if bulunan:
+        bulgular.append({
+            "tur": "uyari", "denetim": "Sezdirme ihlali",
+            "mesaj": "\"Sezdirme\" etiketli bir beat var ama metinde rasyonalize "
+                     f"edici bir kalıp geçiyor olabilir (\"{bulunan[0]}\") - "
+                     "kasıtlı belirsizlik açıklanarak çözülmüş olabilir, kontrol et.",
+        })
     return bulgular
 
 
@@ -177,7 +213,7 @@ def _tekrar(metin) -> list:
 
 
 def denetle(db, universe_id: int, novel_id: int, chapter_id: int, metin: str) -> dict:
-    """Dört denetimi çalıştırır. Plan yoksa yalnızca tekrar denetimi koşar."""
+    """Beş denetimi çalıştırır. Plan yoksa yalnızca tekrar denetimi koşar."""
     metin = (metin or "").strip()
     if not metin:
         return {"bulgular": [], "denetim_sayisi": 0}
@@ -211,6 +247,7 @@ def denetle(db, universe_id: int, novel_id: int, chapter_id: int, metin: str) ->
     bulgular += _plana_sadakat(db, metin_kucuk, birlesik, universe_id, sahne_zamani)
     bulgular += _zaman_cizgisi(metin_kucuk, birlesik)
     bulgular += _beat_kapsama(metin_kucuk, birlesik)
+    bulgular += _sezdirme_ihlali(metin_kucuk, birlesik)
 
     # Aynı mesaj iki denetimden gelirse bir kez göster.
     gorulen, temiz = set(), []
@@ -219,4 +256,4 @@ def denetle(db, universe_id: int, novel_id: int, chapter_id: int, metin: str) ->
             continue
         gorulen.add(b["mesaj"])
         temiz.append(b)
-    return {"bulgular": temiz[:20], "denetim_sayisi": 4}
+    return {"bulgular": temiz[:20], "denetim_sayisi": 5}
