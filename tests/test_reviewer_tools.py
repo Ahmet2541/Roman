@@ -766,6 +766,42 @@ def test_tradeoff_rejects_net_negative(client, headers):
     assert "donmasını" in d["counter_argument"]
 
 
+def test_beat_etiket_dogrula_flags_wrong_choice(client, headers):
+    """Yazar bir beat'e 💬 Kinaye seçmiş ama AI aslında 🎭 İroni olması
+    gerektiğini düşünüyor - uygun=false, onerilen_etiket='ironi' dönmeli."""
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "uygun": False, "onerilen_etiket": "ironi",
+            "aciklama": "Niyet ile sonuç arasında çelişki var, çift anlamlılık yok.",
+        })
+        r = client.post("/ai/beat-etiket-dogrula", json={
+            "metin": "Kendilerine gelmeleri neredeyse bir dakika sürdü.",
+            "etiket": "kinaye",
+        }, headers=headers)
+    d = r.json()
+    assert d["uygun"] is False
+    assert d["onerilen_etiket"] == "ironi"
+    assert d["aciklama"]
+
+
+def test_beat_etiket_dogrula_confirms_correct_choice(client, headers):
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "uygun": True, "onerilen_etiket": "sezdirme", "aciklama": "Doğru seçim.",
+        })
+        r = client.post("/ai/beat-etiket-dogrula", json={
+            "metin": "Heykel, avucundakini saklamak istercesine ağır ağır dönüyordu.",
+            "etiket": "sezdirme",
+        }, headers=headers)
+    d = r.json()
+    assert d["uygun"] is True
+
+
+def test_beat_etiket_dogrula_rejects_empty_text(client, headers):
+    r = client.post("/ai/beat-etiket-dogrula", json={"metin": "   ", "etiket": "ironi"}, headers=headers)
+    assert r.status_code == 400
+
+
 def test_necessity_blocks_deletion_of_load_bearing_paragraph(client, headers):
     """Silme testi: karakter değişimi ya da ön sezdirme taşıyan paragraf
     için silme ASLA önerilmez; 'zayıf ama gerekli' ise güçlendirilir."""

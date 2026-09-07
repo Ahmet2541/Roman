@@ -946,7 +946,8 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
             </select>
             ${beatler[k].length > 1 ? `<button class="btn-icon-sm mc-beat-sil" data-k="${k}" data-i="${i}" title="Bu beat'i kaldır">✕</button>` : ''}
           </div>
-          <div class="mc-beat-sayac" data-k="${k}" data-i="${i}" style="font-size:10.5px;text-align:right;"></div>`).join('')}
+          <div class="mc-beat-sayac" data-k="${k}" data-i="${i}" style="font-size:10.5px;text-align:right;"></div>
+          <div class="mc-beat-dogrulama" data-k="${k}" data-i="${i}" style="font-size:11.5px;margin-top:2px;"></div>`).join('')}
         <button class="btn btn-sm mc-beat-ekle" data-k="${k}" style="margin-top:2px;">+ ${etiket}</button>
       </div>`).join('');
 
@@ -964,12 +965,17 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
         sayacGuncelle(t);
         tanimaSeridi(t, t.value);
       });
+      // "Kutu tamamlandıktan sonra" = kutudan çıkınca (blur). Her tuş
+      // vuruşunda değil - yavaş/maliyetli olur.
+      t.addEventListener('blur', () => dogrulaBeat(t.dataset.k, +t.dataset.i));
       tanimaSeridi(t, t.value);
     });
     kutu.querySelectorAll('.mc-beat-etiket').forEach(s => {
       s.addEventListener('change', () => {
         beatler[s.dataset.k][+s.dataset.i].etiket = s.value;
         s.title = s.value ? (BEAT_ETIKET_ACIKLAMA[s.value] || '') : 'Bu beat için özel bir yazım talimatı seç (opsiyonel)';
+        // Etiket az önce mi seçildi - metin zaten yazılıysa hemen kontrol et.
+        dogrulaBeat(s.dataset.k, +s.dataset.i);
       });
     });
     kutu.querySelectorAll('.mc-beat-ekle').forEach(b => b.addEventListener('click', () => {
@@ -992,6 +998,59 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]];
       cizYay();
     }));
+  }
+
+  // BEAT ETİKET DOĞRULAMA: her beat AYRI ve KENDİ kutusunda cevaplanır -
+  // toplu bir tarama değil. Aynı (metin, etiket) ikilisi tekrar tekrar
+  // sorulmasın diye son kontrol edilen kombinasyon saklanıyor.
+  const beatDogrulamaSonKontrol = {};
+  async function dogrulaBeat(k, i) {
+    const b = beatler[k] && beatler[k][i];
+    const kutu = document.getElementById('mcYay');
+    if (!kutu) return;
+    const box = kutu.querySelector(`.mc-beat-dogrulama[data-k="${k}"][data-i="${i}"]`);
+    if (!b || !box) return;
+    if (!b.etiket || !b.metin.trim()) { box.innerHTML = ''; return; }
+    const anahtar = `${k}:${i}:${b.metin.trim()}:${b.etiket}`;
+    if (beatDogrulamaSonKontrol[`${k}:${i}`] === anahtar) return; // değişiklik yok
+    beatDogrulamaSonKontrol[`${k}:${i}`] = anahtar;
+
+    box.style.color = 'var(--text-muted)';
+    box.textContent = '⏳ Etiket kontrol ediliyor…';
+    let sonuc;
+    try {
+      sonuc = await api.post('/ai/beat-etiket-dogrula', { metin: b.metin.trim(), etiket: b.etiket });
+    } catch (err) {
+      box.textContent = '⚠ Doğrulanamadı (bağlantı hatası) - etiket olduğu gibi kaldı.';
+      return;
+    }
+    // Kutu bu arada silindiyse ya da anahtar değiştiyse (kullanıcı devam
+    // etti) eski sonucu artık gösterme.
+    if (beatDogrulamaSonKontrol[`${k}:${i}`] !== anahtar) return;
+
+    if (sonuc.uygun) {
+      box.style.color = 'var(--text-muted)';
+      box.textContent = `✓ ${BEAT_ETIKETLERI.find(([v]) => v === b.etiket)[1]} uygun görünüyor.`;
+      return;
+    }
+    const onerilenGorunen = sonuc.onerilen_etiket
+      ? (BEAT_ETIKETLERI.find(([v]) => v === sonuc.onerilen_etiket) || [null, 'hiçbiri'])[1]
+      : 'hiçbiri (etiketsiz kalsın)';
+    box.innerHTML = `
+      <div style="border:1px solid var(--gold);border-radius:4px;padding:5px 7px;background:var(--paper-dim);">
+        🤔 AI önerisi: <b>${escapeHtml(onerilenGorunen)}</b> olmalı.
+        <div style="color:var(--text-muted);margin:2px 0 4px;">${escapeHtml(sonuc.aciklama || '')}</div>
+        <button class="btn btn-sm mc-beat-dogrulama-degistir" data-k="${k}" data-i="${i}" data-onerilen="${sonuc.onerilen_etiket || ''}">Değiştir</button>
+        <button class="btn btn-sm mc-beat-dogrulama-red" data-k="${k}" data-i="${i}">Hayır, bu kalsın</button>
+      </div>`;
+    box.querySelector('.mc-beat-dogrulama-degistir').addEventListener('click', () => {
+      beatler[k][i].etiket = sonuc.onerilen_etiket || '';
+      beatDogrulamaSonKontrol[`${k}:${i}`] = null; // yeni etiketle tekrar kontrol edilebilsin
+      cizYay();
+    });
+    box.querySelector('.mc-beat-dogrulama-red').addEventListener('click', () => {
+      box.innerHTML = '';
+    });
   }
   cizYay();
   tumTanimalariTazele();

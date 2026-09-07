@@ -32,6 +32,7 @@ from .prompts import (
     FUSION_PROMPT,
     TRADEOFF_PROMPT,
     NECESSITY_PROMPT,
+    BEAT_ETIKET_DOGRULAMA_PROMPT,
     PLAN_FROM_TEXT_PROMPT,
     MICRO_EDIT_PROMPT,
     KNOWLEDGE_EXTRACT_PROMPT,
@@ -2427,6 +2428,40 @@ def evaluate_tradeoff(db: Session, old_text: str, new_text: str, purpose: str = 
 # GEREKLİLİK ayrı ölçülür: "iyi yazılmış ama gereksiz" ile "zayıf yazılmış
 # ama zorunlu" tamamen farklı iki durumdur ve farklı müdahale ister.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# BEAT ETİKET DOĞRULAMA: bkz. prompts.py BEAT_ETIKET_DOGRULAMA_PROMPT.
+# ---------------------------------------------------------------------------
+
+_BEAT_ETIKET_ANAHTARLARI = {"sezdirme", "ironi", "kinaye"}
+_BEAT_ETIKET_GORUNEN = {"sezdirme": "🌀 Sezdirme", "ironi": "🎭 İroni", "kinaye": "💬 Kinaye"}
+
+
+def dogrula_beat_etiketi(metin: str, etiket: str) -> dict:
+    """TEK bir beat'in seçili etiketini denetler - toplu değil, bu beat'e
+    özel. Dönen etiket anahtarları hep geçerli kümede olur (model uydurma
+    bir etiket dönerse null'a düşülür, arayüz bozulmaz)."""
+    if etiket not in _BEAT_ETIKET_ANAHTARLARI:
+        return {"uygun": True, "onerilen_etiket": None, "aciklama": ""}
+    user = f"BEAT METNİ: \"{metin.strip()}\"\nYAZARIN SEÇTİĞİ ETİKET: {_BEAT_ETIKET_GORUNEN[etiket]}"
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": BEAT_ETIKET_DOGRULAMA_PROMPT},
+            {"role": "user", "content": user},
+        ],
+    )
+    data = _parse_json_lenient(response.choices[0].message.content) or {}
+    onerilen = data.get("onerilen_etiket")
+    if onerilen not in _BEAT_ETIKET_ANAHTARLARI:
+        onerilen = None
+    return {
+        "uygun": bool(data.get("uygun", True)),
+        "onerilen_etiket": onerilen,
+        "aciklama": (data.get("aciklama") or "")[:300],
+    }
 
 
 def paragraph_necessity(db: Session, chapter, paragraph_text: str, purpose: str = "") -> dict:

@@ -8,7 +8,7 @@ from ..auth import get_current_user
 from .. import schemas, models
 from ..qwen_client import (
     build_context, ask_qwen, full_scan, chat_with_qwen, reader_test_chapter,
-    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite, retest_paragraph, motif_map, paragraph_roles, fuse_diagnoses, evaluate_tradeoff, paragraph_necessity, plan_from_text, micro_edit, extract_knowledge_map, review_arc, scan_voice, review_options, strip_tool_leaks,
+    suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite, retest_paragraph, motif_map, paragraph_roles, fuse_diagnoses, evaluate_tradeoff, paragraph_necessity, plan_from_text, micro_edit, extract_knowledge_map, review_arc, scan_voice, review_options, strip_tool_leaks, dogrula_beat_etiketi,
 )
 from ..entities import ENTITY_MODELS
 from ..sections import SECTIONS_BY_ENTITY_TYPE, _tr_lower
@@ -601,6 +601,22 @@ def necessity_endpoint(
         raise HTTPException(404, "Bölüm bulunamadı")
     try:
         return schemas.NecessityResponse(**paragraph_necessity(db, chapter, payload.paragraph_text, payload.purpose))
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+
+
+@router.post("/beat-etiket-dogrula", response_model=schemas.BeatEtiketDogrulaResponse)
+def beat_etiket_dogrula_endpoint(
+    payload: schemas.BeatEtiketDogrulaRequest,
+    _user=Depends(rate_limit(max_calls=30, window_seconds=60, label="beat etiket doğrulama")),
+):
+    """Plan matrisinde bir beat'e Sezdirme/İroni/Kinaye etiketi seçildiğinde,
+    seçimin isabetini TEK O BEAT üzerinden denetler - toplu değil, kutu
+    tamamlanır tamamlanmaz (frontend blur olayında) tetiklenir."""
+    if not payload.metin.strip():
+        raise HTTPException(400, "Boş beat metni doğrulanamaz")
+    try:
+        return schemas.BeatEtiketDogrulaResponse(**dogrula_beat_etiketi(payload.metin, payload.etiket))
     except Exception as exc:
         raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
 

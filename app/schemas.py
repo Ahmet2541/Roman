@@ -1241,6 +1241,19 @@ class NecessityResponse(BaseModel):
     note: str = ""
 
 
+class BeatEtiketDogrulaRequest(BaseModel):
+    metin: str
+    etiket: str  # "sezdirme" | "ironi" | "kinaye"
+
+
+class BeatEtiketDogrulaResponse(BaseModel):
+    """Yazarın bir beat'e seçtiği etiketin (Sezdirme/İroni/Kinaye) isabetini
+    denetler - tek beat'e özel, toplu değil."""
+    uygun: bool = True
+    onerilen_etiket: Optional[str] = None
+    aciklama: str = ""
+
+
 class KnowledgeFactCreate(BaseModel):
     information: str
     notes: str = ""

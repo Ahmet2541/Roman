@@ -499,6 +499,14 @@ sadece" gibi rasyonalize edici bir kalıp geçerse, onay öncesi taslak
 denetimi bunu ayrı bir "Sezdirme ihlali" uyarısıyla işaretler (denetim
 sayısı 5'e çıktı) - kesin değildir, kontrol çağrısıdır.
 
+**Etiket doğrulama:** Bir beat kutusundan çıkınca (blur) ya da etiket
+seçimi değişince, o TEK beat AYRICA AI'ya sorulur (`POST
+/ai/beat-etiket-dogrula`) - "seçtiğin etiket isabetli mi?" Uygunsa küçük
+bir "✓ uygun" notu; değilse AI'nın önerdiği etiket + gerekçesiyle birlikte
+"Değiştir" / "Hayır, bu kalsın" seçenekli bir kart belirir. Her beat kendi
+kutusunda, ayrı ayrı sorulur - toplu bir tarama değil; aynı (metin,
+etiket) ikilisi tekrar sorulmaz (önbellek).
+
 ### Plandan taslak — tek sahne ya da tüm bölüm
 
 Bir bölüme birden çok plan hücresi bağlanabilir (olayın devamı olan

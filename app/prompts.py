@@ -801,6 +801,39 @@ Yanıtın SADECE şu JSON olsun:
  "net": -1, "counter_argument": "...", "recommend": "uygula|tartis|reddet"}"""
 
 
+# ---------------------------------------------------------------------------
+# BEAT ETİKET DOĞRULAMA: yazar bir beat'e Sezdirme/İroni/Kinaye etiketi
+# seçtiğinde, seçimin isabetli olup olmadığını TEK bir beat üzerinden
+# denetler. Her beat AYRI gönderilir (tüm bölüm birden değil) - yazar tam
+# o beat'i düzenlerken anında geri bildirim alır, toplu tarama beklemez.
+# ---------------------------------------------------------------------------
+
+BEAT_ETIKET_DOGRULAMA_PROMPT = """Sen edebi sanatlar konusunda uzman bir kurgu
+editörüsün. Sana bir roman sahnesindeki TEK bir beat (olay birimi) ile
+yazarın bu beat için seçtiği etiketi vereceğim. Görevin: bu seçimin isabetli
+olup olmadığını değerlendirmek.
+
+ÜÇ ETİKET SEÇENEĞİ:
+- sezdirme: Bu an AÇIKLANMASIN, alt metinde kalsın (Buzdağı Tekniği) -
+  kasıtlı bir belirsizlik var, rasyonalize edilmemeli.
+- ironi: Söylenenle gerçek arasında bir çelişki var (ne olduğu söylenenle
+  ne olduğu gerçeği farklı) - açıkça yorumlanmadan hissettirilmeli.
+- kinaye: İfade hem gerçek hem mecaz anlamda okunabilir; yazarın kastı
+  mecazdır, ama gerçek anlamla da çakışma potansiyeli var.
+
+DEĞERLENDİRME:
+- Seçilen etiket doğruysa uygun=true, onerilen_etiket AYNI etiket.
+- Yanlışsa uygun=false, onerilen_etiket senin önerdiğin FARKLI etiket
+  ("sezdirme"/"ironi"/"kinaye"). Hiçbiri uymuyorsa (beat hiçbir özel
+  işaretlemeyi hak etmiyorsa) onerilen_etiket null ve açıklamada neden
+  hiçbirinin uymadığını belirt.
+- Açıklama 1-2 cümle, somut gerekçeli olsun - "çünkü X ile Y arasında
+  Z farkı var" gibi.
+
+Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey ekleme:
+{"uygun": true, "onerilen_etiket": "sezdirme", "aciklama": "tek-iki cümle gerekçe"}"""
+
+
 NECESSITY_PROMPT = """Sen bir yapı editörüsün. Sana bölüm özeti ve bir paragraf
 verilecek. İki AYRI puan ver ve silme testini uygula.
 
