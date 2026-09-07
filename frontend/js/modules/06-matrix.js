@@ -944,6 +944,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
             <select class="mc-beat-etiket" data-k="${k}" data-i="${i}" style="width:88px;font-size:11px;align-self:flex-start;" title="${b.etiket ? escapeHtml(BEAT_ETIKET_ACIKLAMA[b.etiket] || '') : 'Bu beat için özel bir yazım talimatı seç (opsiyonel)'}">
               ${BEAT_ETIKETLERI.map(([val, label]) => `<option value="${val}" ${b.etiket === val ? 'selected' : ''}>${label}</option>`).join('')}
             </select>
+            <button class="btn-icon-sm mc-beat-dogrula-btn" data-k="${k}" data-i="${i}" style="${b.etiket ? '' : 'visibility:hidden;'}min-width:26px;" title="Bu etiketi AI'ya kontrol ettir">🔍</button>
             ${beatler[k].length > 1 ? `<button class="btn-icon-sm mc-beat-sil" data-k="${k}" data-i="${i}" title="Bu beat'i kaldır">✕</button>` : ''}
           </div>
           <div class="mc-beat-sayac" data-k="${k}" data-i="${i}" style="font-size:10.5px;text-align:right;"></div>
@@ -974,9 +975,14 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       s.addEventListener('change', () => {
         beatler[s.dataset.k][+s.dataset.i].etiket = s.value;
         s.title = s.value ? (BEAT_ETIKET_ACIKLAMA[s.value] || '') : 'Bu beat için özel bir yazım talimatı seç (opsiyonel)';
+        const btn = kutu.querySelector(`.mc-beat-dogrula-btn[data-k="${s.dataset.k}"][data-i="${s.dataset.i}"]`);
+        if (btn) { btn.style.visibility = s.value ? 'visible' : 'hidden'; btn.textContent = '🔍'; }
         // Etiket az önce mi seçildi - metin zaten yazılıysa hemen kontrol et.
         dogrulaBeat(s.dataset.k, +s.dataset.i);
       });
+    });
+    kutu.querySelectorAll('.mc-beat-dogrula-btn').forEach(btn => {
+      btn.addEventListener('click', () => dogrulaBeat(btn.dataset.k, +btn.dataset.i, { zorla: true }));
     });
     kutu.querySelectorAll('.mc-beat-ekle').forEach(b => b.addEventListener('click', () => {
       beatler[b.dataset.k].push({ metin: '', etiket: '' }); cizYay();
@@ -1002,26 +1008,33 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
 
   // BEAT ETİKET DOĞRULAMA: her beat AYRI ve KENDİ kutusunda cevaplanır -
   // toplu bir tarama değil. Aynı (metin, etiket) ikilisi tekrar tekrar
-  // sorulmasın diye son kontrol edilen kombinasyon saklanıyor.
+  // sorulmasın diye son kontrol edilen kombinasyon saklanıyor - "zorla"
+  // ile (🔍 düğmesine elle tıklanınca) bu önbellek atlanabilir; bu, DAHA
+  // ÖNCE kaydedilmiş (sayfa açılışında zaten etiketli gelen) beat'leri de
+  // kontrol edebilmek için gerekli - onlarda hiç blur/change olayı
+  // ateşlenmiyor, o yüzden düğme her zaman görünür ve elle tetiklenebilir.
   const beatDogrulamaSonKontrol = {};
-  async function dogrulaBeat(k, i) {
+  async function dogrulaBeat(k, i, { zorla = false } = {}) {
     const b = beatler[k] && beatler[k][i];
     const kutu = document.getElementById('mcYay');
     if (!kutu) return;
     const box = kutu.querySelector(`.mc-beat-dogrulama[data-k="${k}"][data-i="${i}"]`);
-    if (!b || !box) return;
-    if (!b.etiket || !b.metin.trim()) { box.innerHTML = ''; return; }
+    const btn = kutu.querySelector(`.mc-beat-dogrula-btn[data-k="${k}"][data-i="${i}"]`);
+    if (!b || !box || !btn) return;
+    if (!b.etiket || !b.metin.trim()) { box.innerHTML = ''; btn.textContent = '🔍'; return; }
     const anahtar = `${k}:${i}:${b.metin.trim()}:${b.etiket}`;
-    if (beatDogrulamaSonKontrol[`${k}:${i}`] === anahtar) return; // değişiklik yok
+    if (!zorla && beatDogrulamaSonKontrol[`${k}:${i}`] === anahtar) return; // değişiklik yok
     beatDogrulamaSonKontrol[`${k}:${i}`] = anahtar;
 
-    box.style.color = 'var(--text-muted)';
-    box.textContent = '⏳ Etiket kontrol ediliyor…';
+    btn.textContent = '⏳';
+    btn.title = 'Kontrol ediliyor…';
     let sonuc;
     try {
       sonuc = await api.post('/ai/beat-etiket-dogrula', { metin: b.metin.trim(), etiket: b.etiket });
     } catch (err) {
-      box.textContent = '⚠ Doğrulanamadı (bağlantı hatası) - etiket olduğu gibi kaldı.';
+      btn.textContent = '⚠';
+      btn.title = 'Doğrulanamadı (bağlantı hatası) - tekrar denemek için tıkla';
+      beatDogrulamaSonKontrol[`${k}:${i}`] = null; // tekrar denenebilsin
       return;
     }
     // Kutu bu arada silindiyse ya da anahtar değiştiyse (kullanıcı devam
@@ -1029,10 +1042,13 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     if (beatDogrulamaSonKontrol[`${k}:${i}`] !== anahtar) return;
 
     if (sonuc.uygun) {
-      box.style.color = 'var(--text-muted)';
-      box.textContent = `✓ ${BEAT_ETIKETLERI.find(([v]) => v === b.etiket)[1]} uygun görünüyor.`;
+      btn.textContent = '✓';
+      btn.title = 'AI bu etiketi uygun buldu - tekrar kontrol etmek için tıkla';
+      box.innerHTML = '';
       return;
     }
+    btn.textContent = '⚠';
+    btn.title = 'AI farklı bir etiket öneriyor - detay için aşağıya bak';
     const onerilenGorunen = sonuc.onerilen_etiket
       ? (BEAT_ETIKETLERI.find(([v]) => v === sonuc.onerilen_etiket) || [null, 'hiçbiri'])[1]
       : 'hiçbiri (etiketsiz kalsın)';
@@ -1050,6 +1066,8 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     });
     box.querySelector('.mc-beat-dogrulama-red').addEventListener('click', () => {
       box.innerHTML = '';
+      btn.textContent = '✓';
+      btn.title = 'Yazar bu etiketi onayladı';
     });
   }
   cizYay();
