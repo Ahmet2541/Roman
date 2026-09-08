@@ -394,7 +394,7 @@ def _gelecek_uyarisi(metin: str, gelecek_adlar: list) -> str:
               "adsız da olsa sezdirme.")
 
 
-def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3, instruction_text: str = "", include_hidden: bool = False, sahne_zamani: int | None = None, plan_kaynakli: set | None = None, su_anki_bolum: int | None = None) -> str:
+def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, max_paragraphs_per_entity: int = 3, instruction_text: str = "", include_hidden: bool = False, sahne_zamani: int | None = None, plan_kaynakli: set | None = None, su_anki_bolum: int | None = None, tools_available: bool = False) -> str:
     if not selected_entities:
         return ""
 
@@ -510,7 +510,12 @@ def build_dynamic_layer(db: Session, universe_id: int, selected_entities: list, 
                 blocks.append(f"{section_label} ({key}): {content}")
                 injected.append(key)
         remaining = [k for k, v in visible.items() if v and k not in injected]
-        if remaining:
+        # "gerekirse get_entity_section ile çek" notu YALNIZCA modelin bu
+        # aracı GERÇEKTEN çağırabildiği durumlarda (chat modu, CHAT_TOOLS
+        # tanımlıyken) eklenir. Taslak modunda (ask_qwen) bu araç hiç
+        # tanımlı değil - not eklenirse model boş bir vaade güvenip
+        # eksik/halüsinasyonlu yazabiliyordu (bkz. Madde 5 incelemesi).
+        if remaining and tools_available:
             blocks.append(f"Ek detay bölümleri mevcut (gerekirse get_entity_section ile çek): {', '.join(remaining)}")
 
         # GİZLİ KATMAN: sadece include_hidden (alt-metin modu) açıkken ve
@@ -963,7 +968,7 @@ def build_context(
     chapter_number: int | None = None, instruction_text: str = "",
     include_hidden: bool = False, include_chapter_text: bool = False,
     text_scope: str = "chapter", include_own_summary: bool = False,
-    include_index: bool = True,
+    include_index: bool = True, tools_available: bool = False,
 ) -> str:
     """chapter_number verilirse (o an üzerinde çalışılan bölüm), fihrist
     katmanında o bölüm dışlanır - bir bölümün kendi özetini kendi context'i
@@ -1065,7 +1070,7 @@ def build_context(
     except Exception:
         logger.exception("Sahne zamanı okunamadı, varlık denetimi atlanıyor")
         sahne_zamani = None
-    dynamic = build_dynamic_layer(db, universe_id, birlesik, instruction_text=instruction_text, include_hidden=include_hidden, sahne_zamani=sahne_zamani, plan_kaynakli=plan_kaynakli, su_anki_bolum=chapter_number)
+    dynamic = build_dynamic_layer(db, universe_id, birlesik, instruction_text=instruction_text, include_hidden=include_hidden, sahne_zamani=sahne_zamani, plan_kaynakli=plan_kaynakli, su_anki_bolum=chapter_number, tools_available=tools_available)
     # KATMAN SIRASI - plan EN SONA alındı.
     # Plan, modelin en çok uyması gereken katman ama on beşin sekizincisi
     # olarak yığının ortasında kalıyordu; fihrist ise ikinci sıradaydı.

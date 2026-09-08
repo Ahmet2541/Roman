@@ -42,7 +42,7 @@ def test_only_relevant_section_content_is_injected(client, headers, novel):
     ref = schemas.EntityRef(entity_type="character", entity_id=char["id"])
 
     ctx = build_dynamic_layer(db, novel["universe_id"], [ref],
-                              instruction_text="Aeron'un görünüşünü betimle")
+                              instruction_text="Aeron'un görünüşünü betimle", tools_available=True)
     assert "yara izi" in ctx                      # fiziksel_yapi İÇERİĞİ girdi
     assert "Buz Savaşı" not in ctx                # gecmis içeriği GİRMEDİ
     assert "suçluluk" not in ctx                  # iliskiler içeriği GİRMEDİ
@@ -57,9 +57,25 @@ def test_irrelevant_instruction_injects_nothing(client, headers, novel):
     db = _db()
     ref = schemas.EntityRef(entity_type="character", entity_id=char["id"])
     ctx = build_dynamic_layer(db, novel["universe_id"], [ref],
-                              instruction_text="Bir savaş sahnesi yaz")
+                              instruction_text="Bir savaş sahnesi yaz", tools_available=True)
     assert "yara izi" not in ctx and "Buz Savaşı" not in ctx
     assert "get_entity_section ile çek" in ctx    # eski davranış korunuyor
+
+
+def test_get_entity_section_note_hidden_without_tool_access(client, headers, novel):
+    """ask_qwen (taslak modu) get_entity_section'ı ÇAĞIRAMIYOR - tools
+    hiç tanımlı değil. tools_available belirtilmezse (varsayılan False,
+    taslak modunun gerçek davranışı) context bu notu HİÇ içermemeli -
+    aksi hâlde model boş bir vaade güveniyordu (bkz. prompt incelemesi
+    Madde 5)."""
+    char = _make_character(client, headers, name="Beren")
+    db = _db()
+    ref = schemas.EntityRef(entity_type="character", entity_id=char["id"])
+    ctx = build_dynamic_layer(db, novel["universe_id"], [ref],
+                              instruction_text="Bir savaş sahnesi yaz")  # tools_available belirtilmedi
+    assert "get_entity_section ile çek" not in ctx
+    # Ama içerik özeti (Özet:) yine de gider - sadece "ek bölümler" notu düşer.
+    assert "Kuzeyli bir komutan" in ctx
 
 
 def test_meta_never_leaks_even_with_keyword(client, headers, novel):
@@ -188,7 +204,7 @@ def test_object_selective_injection(client, headers, novel):
     db = _db()
     ref = schemas.EntityRef(entity_type="object", entity_id=obj["id"])
     ctx = build_dynamic_layer(db, novel["universe_id"], [ref],
-                              instruction_text="Kül Kılıcı'nın gücünü ve bedelini anlat")
+                              instruction_text="Kül Kılıcı'nın gücünü ve bedelini anlat", tools_available=True)
     assert "yaşlandırır" in ctx                    # islev içeriği girdi
     assert "pelerinin altında" not in ctx          # sahiplik girmedi
     assert "intikamın bedelinin metaforu" not in ctx  # meta asla

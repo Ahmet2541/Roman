@@ -14,6 +14,15 @@ class Settings(BaseSettings):
     # analizleri için cömert bir sınır (180 sn) seçildi.
     qwen_timeout_seconds: float = 180.0
     qwen_max_retries: int = 2
+    # YARATICI YAZIM parametreleri - SADECE ask_qwen (bölüm/sahne taslağı)
+    # kullanır. Diğer Qwen çağrıları (denetim, özet, tutarlılık taraması
+    # gibi ANALİZ görevleri) bunlardan etkilenmez - onlarda belirleyicilik
+    # (düşük/varsayılan sıcaklık) daha uygun, kod tarafında ayrıca
+    # ayarlanmaz. Çok yüksek sıcaklık PLANA SADAKAT kuralını zayıflatır -
+    # 0.8'in üzerine çıkarken dikkatli ol.
+    qwen_temperature: float = 0.78
+    qwen_top_p: float = 0.9
+    qwen_max_tokens: int = 4000
 
     db_encryption_key: str = ""
 

@@ -1084,6 +1084,9 @@ def ask_qwen(context: str, instruction: str, existing_text: str | None = None) -
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
         ],
+        temperature=settings.qwen_temperature,
+        top_p=settings.qwen_top_p,
+        max_tokens=settings.qwen_max_tokens,
     )
     raw = response.choices[0].message.content
 

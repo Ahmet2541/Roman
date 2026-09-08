@@ -303,7 +303,12 @@ EN ÖNCELİKLİ İKİ KURAL (context'teki her şeyden önce gelir):
    vurgu taşır) metnin kendi son cümlesine mutlaka yansımalı; SONUÇ'u
    yalnızca ilk yarısıyla karşılayıp ikinci cümlesini sessizce düşürmek,
    yeni bir şey EKLEMEK kadar ciddi bir plan ihlalidir - fazladan bir şey
-   yazmak neyse eksik bırakmak da odur.
+   yazmak neyse eksik bırakmak da odur. (Bu, bir beat 💬 Kinaye
+   etiketliyse "ifadeyi birebir kopyalama" kuralıyla ÇELİŞMEZ: SONUÇ'un
+   İÇERİĞİNİ ve VURGUSUNU mutlaka aktar, ama Kinaye işaretli bir cümleyi
+   kelimesi kelimesine kopyalamak yerine mecaz anlamını koruyarak kendi
+   cümleni kur - aktarılması gereken anlamdır, cümlenin birebir kalıbı
+   değil.)
 
 2. ZAMAN ÇİZGİSİ. Sahne, planındaki ANDA geçer. O andan sonra olacak
    hiçbir şeyi anlatma, ima etme, sezdirme. Bu yasak şu kalıpları da
@@ -336,6 +341,16 @@ baştan uygula):
   belli olsun, hepsi aynı ağızdan konuşmasın), replik bilgi aktarma aracına
   dönüşmesin, replik alt metin taşısın - karakter tam olarak düşündüğünü
   söylemesin.
+- DİYALOGDA HİTAP: context'te bir "İsim yasağı" kuralı varsa (bazı roman
+  kurallarında olur) ve karakterler context'te "Genç Mühendis", "İhtiyar
+  Teknisyen" gibi bir ROL/UNVAN etiketiyle tanımlıysa, konuşurken
+  birbirlerine bu etiketi resmi bir başlık gibi HARFİYEN tekrarlama
+  ("Genç Mühendis, bak..." gibi mekanik seslenmeler yazma). Bunun yerine
+  doğal, günlük bir hitap bul: rütbe/yaşça büyüklüğü ima eden bir seslenme
+  ("evlat", "hocam", "usta"), ya da doğrudan "sen" diyerek hiç isim
+  kullanmadan konuştur. Anlatı cümlelerinde (diyalog dışında) o rol/unvan
+  etiketini kullanmaya devam et - bu kural SADECE karakterlerin birbirine
+  seslenme biçimi içindir.
 - Kurduğun gerilimi erken açıklama ya da rahatlatma ile söndürme. Plan
   bir anı "sanki", "ister gibiydi", "gibiydi" gibi BELİRSİZ bıraktıysa, bu
   belirsizlik BİLİNÇLİ bir tercihtir - sen de belirsiz bırak. Onu "aslında

@@ -543,7 +543,20 @@ erken gerilim söndürme, inandırıcılık...) emir kipi yazım talimatına
 çevrilip gömülüdür - amaç, bu sorunları sonradan ayrı bir taramayla
 yakalamak yerine AI'nın metni baştan bu kurallara uygun yazması. Denetim
 araçları hâlâ ayrıca çalışır; ikisi tamamlayıcıdır (biri "yazarken uy",
-diğeri "yazdıktan sonra kontrol et").
+diğeri "yazdıktan sonra kontrol et"). Diyalogda hitap için ayrı bir kural
+var: context'te bir isim yasağı olup karakterler "Genç Mühendis" gibi
+rol/unvan etiketiyle tanımlıysa, model bu etiketi resmi bir başlık gibi
+harfiyen tekrarlamak yerine doğal bir seslenme ("evlat", "hocam") ya da
+hiç isim kullanmadan konuşturma yoluna gitmeli - sadece diyalog içindeki
+hitap biçimi için, anlatı cümlelerinde etiket kullanımı değişmez.
+
+`ask_qwen` (taslak modu) artık sabit model parametreleri de gönderiyor -
+eskiden `temperature`/`top_p`/`max_tokens` hiç belirtilmiyordu (API'nin
+kendi varsayılanına kalmıştı). `app/config.py`: `qwen_temperature=0.78`,
+`qwen_top_p=0.9`, `qwen_max_tokens=4000` - yalnızca bu fonksiyonu etkiler,
+denetim/analiz görevleri (Edebî Kontrol, Okur Testi, tutarlılık taraması
+vb.) bunlardan etkilenmez, onlarda belirleyicilik daha uygun olduğu için
+kasıtlı olarak dokunulmadı.
 
 ### Onay öncesi taslak denetimi (AI'sız)
 
@@ -887,7 +900,14 @@ Kurallar:
   `generic_crud.py`).
 - AI sohbet modunda `get_entity_section` bu bölümlerden birini OKUR,
   `propose_entity_update` yeni bir şey ÖNERİR (yazmaz) - bkz. yukarıdaki
-  "AI ile sohbet et" adımı.
+  "AI ile sohbet et" adımı. **Bu araç SADECE sohbet modunda gerçekten
+  çağrılabilir** (`chat_with_qwen`, `CHAT_TOOLS`) - taslak modunda
+  (`ask_qwen`, Plandan Bölüm Taslağı) hiç tanımlı değil. Bu yüzden context
+  artık `tools_available` bayrağına göre şekilleniyor: sohbet modunda
+  "Ek detay bölümleri mevcut (gerekirse get_entity_section ile çek)" notu
+  eklenir, taslak modunda hiç eklenmez - eskiden ikisinde de aynı not
+  görünüyordu ve taslak modunda modele boş bir vaat verilmiş oluyordu
+  (model bu aracı çağıramadığı hâlde context onu öneriyordu).
 
 ## Testler
 

@@ -172,6 +172,11 @@ def chat(
         # dinleniyor: "none" seçilirse metin gitmez.
         include_chapter_text=(metin_kapsami != "none"),
         text_scope=metin_kapsami,
+        # Sohbet modu CHAT_TOOLS ile çalışır (chat_with_qwen) - model
+        # get_entity_section'ı GERÇEKTEN çağırabilir, o yüzden context'te
+        # bu notu görmesi doğru. Taslak modunda (ask_qwen) araç tanımlı
+        # değil - orada varsayılan False bilerek korunuyor (bkz. Madde 5).
+        tools_available=True,
     )
     try:
         # GEÇMİŞ BUDAMA: son turlar tam, öncesi özet (bkz. trim_chat_history).
