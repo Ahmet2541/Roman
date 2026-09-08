@@ -940,14 +940,16 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
               <button class="btn-icon-sm mc-beat-asagi" data-k="${k}" data-i="${i}" title="Aşağı taşı" ${i === beatler[k].length - 1 ? 'disabled style="opacity:.3;"' : ''}>▼</button>
             </span>
             <span style="font-size:11px;color:var(--text-muted);padding-top:8px;min-width:14px;">${i + 1}</span>` : ''}
-            <textarea class="mc-beat" data-k="${k}" data-i="${i}" style="min-height:48px;flex:1;">${escapeHtml(b.metin)}</textarea>
-            <select class="mc-beat-etiket" data-k="${k}" data-i="${i}" style="width:88px;font-size:11px;align-self:flex-start;" title="${b.etiket ? escapeHtml(BEAT_ETIKET_ACIKLAMA[b.etiket] || '') : 'Bu beat için özel bir yazım talimatı seç (opsiyonel)'}">
+            <div style="position:relative;flex:1;min-width:0;">
+              <textarea class="mc-beat" data-k="${k}" data-i="${i}" style="min-height:48px;width:100%;box-sizing:border-box;padding-bottom:14px;">${escapeHtml(b.metin)}</textarea>
+              <span class="mc-beat-sayac" data-k="${k}" data-i="${i}" style="position:absolute;right:5px;bottom:3px;font-size:9.5px;color:var(--text-muted);background:var(--paper);padding:0 3px;border-radius:2px;pointer-events:none;"></span>
+            </div>
+            <select class="mc-beat-etiket" data-k="${k}" data-i="${i}" style="width:78px;font-size:11px;align-self:flex-start;flex-shrink:0;" title="${b.etiket ? escapeHtml(BEAT_ETIKET_ACIKLAMA[b.etiket] || '') : 'Bu beat için özel bir yazım talimatı seç (opsiyonel)'}">
               ${BEAT_ETIKETLERI.map(([val, label]) => `<option value="${val}" ${b.etiket === val ? 'selected' : ''}>${label}</option>`).join('')}
             </select>
-            <button class="btn-icon-sm mc-beat-dogrula-btn" data-k="${k}" data-i="${i}" style="${b.etiket ? '' : 'visibility:hidden;'}min-width:26px;" title="Bu etiketi AI'ya kontrol ettir">🔍</button>
-            ${beatler[k].length > 1 ? `<button class="btn-icon-sm mc-beat-sil" data-k="${k}" data-i="${i}" title="Bu beat'i kaldır">✕</button>` : ''}
+            <button class="btn-icon-sm mc-beat-dogrula-btn" data-k="${k}" data-i="${i}" style="${b.etiket ? '' : 'visibility:hidden;'}min-width:24px;flex-shrink:0;" title="Bu etiketi AI'ya kontrol ettir">🔍</button>
+            ${beatler[k].length > 1 ? `<button class="btn-icon-sm mc-beat-sil" data-k="${k}" data-i="${i}" style="flex-shrink:0;" title="Bu beat'i kaldır">✕</button>` : ''}
           </div>
-          <div class="mc-beat-sayac" data-k="${k}" data-i="${i}" style="font-size:10.5px;text-align:right;"></div>
           <div class="mc-beat-dogrulama" data-k="${k}" data-i="${i}" style="font-size:11.5px;margin-top:2px;"></div>`).join('')}
         <button class="btn btn-sm mc-beat-ekle" data-k="${k}" style="margin-top:2px;">+ ${etiket}</button>
       </div>`).join('');
@@ -956,8 +958,10 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       const n = t.value.length;
       const s = kutu.querySelector(`.mc-beat-sayac[data-k="${t.dataset.k}"][data-i="${t.dataset.i}"]`);
       if (!s) return;
-      s.textContent = n > 160 ? `${n}/160 — beat değil olay dizisi` : `${n}/160`;
-      s.style.color = n > 160 ? 'var(--gold)' : 'var(--text-muted)';
+      const asildi = n > 160;
+      s.textContent = asildi ? `${n}/160 ⚠` : `${n}/160`;
+      s.title = asildi ? 'Bir beat değil olay dizisi olmuş - yazana kuracak yer bırakmıyor' : '';
+      s.style.color = asildi ? 'var(--gold)' : 'var(--text-muted)';
     };
     kutu.querySelectorAll('.mc-beat').forEach(t => {
       sayacGuncelle(t);
@@ -1219,46 +1223,13 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
   // bağlamın SADECE BİR KATMANI - kişi/mekan profilleri, kurallar, fihrist,
   // üslup uyarıları ayrı katmanlardan geliyor. "Neden mekan detayı yok"
   // sorusunun cevabı buydu: yerel önizleme onları hiç görmüyor.
-  el('mcTamOnizle').addEventListener('click', async () => {
-    const kutu = document.getElementById('mcUyari');
-    const chapterVal = el('mCellChapter').value;
-    if (!chapterVal) {
-      kutu.innerHTML = '<div style="margin-top:8px;font-size:11.5px;color:var(--gold);">Bu hücre bir bölüme bağlı değil. Tam bağlam bölüm bazında oluşuyor - önce aşağıdan bölüm seç ve kaydet.</div>';
-      return;
-    }
-    const secili = chapters.find(c => c.id === parseInt(chapterVal, 10));
-    kutu.innerHTML = '<div class="empty-state">Bağlam oluşturuluyor…</div>';
-    try {
-      const r = await api.post('/ai/context-preview', {
-        selected_entities: [],
-        chapter_number: secili ? secili.number : null,
-        instruction: '', include_hidden: false,
-        include_chapter_text: false, text_scope: 'none',
-        include_own_summary: false,
-      });
-      // full_prompt = sistem yönergesi + bağlam + talimat, yani Qwen'e
-      // giden isteğin TAMAMI. Eski sürümlerde alan yoksa bağlama düşer.
-      const metin = r.full_prompt || r.context || '(boş)';
-      const katmanlar = (r.breakdown || [])
-        .map(b => `${escapeHtml(b.name || b.ad || '')}: ${b.char_count || b.chars || 0}`)
-        .join(' · ');
-      kutu.innerHTML = `
-        <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">
-          ${metin.length} karakter · ~${r.approx_tokens || 0} token · Qwen'e istek atılmadı, ücretsiz.
-          ${katmanlar ? `<div style="margin-top:2px;">${katmanlar}</div>` : ''}
-        </div>
-        <div style="margin-top:4px;"><button class="btn btn-sm" id="mcPromptKopya">Kopyala</button></div>
-        <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper-dim);border:1px solid var(--border);border-radius:4px;padding:8px;margin-top:4px;max-height:400px;overflow-y:auto;">${escapeHtml(metin)}</pre>`;
-      el('mcPromptKopya').addEventListener('click', async () => {
-        const b = el('mcPromptKopya');
-        try { await navigator.clipboard.writeText(metin); b.textContent = 'Kopyalandı ✓'; }
-        catch (e) { b.textContent = 'Kopyalanamadı'; }
-        setTimeout(() => { b.textContent = 'Kopyala'; }, 2000);
-      });
-    } catch (err) {
-      kutu.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
-    }
-  });
+  //
+  // Bölüm seçimi AYRI bir pencerede (modal) yapılır - "Bağlı bölüm"
+  // dropdown'ını (mCellChapter) BURADA KULLANMIYORUZ artık: o dropdown
+  // hücrenin GERÇEK bağlantısını belirliyor, önizleme için değiştirip
+  // sonra "Kaydet"e basılırsa hücre YANLIŞLIKLA başka bir bölüme
+  // bağlanmış olurdu. Modal'daki seçim hiçbir kayda dokunmaz.
+  el('mcTamOnizle').addEventListener('click', () => openTamPromptModal(cell, chapters));
 
   el('mCellCancel').addEventListener('click', () => { editor.innerHTML = ''; });
   el('mCellSave').addEventListener('click', async () => {
@@ -3124,6 +3095,76 @@ function ensureModalOverlay() {
     document.body.appendChild(overlay);
   }
   return overlay;
+}
+
+// "AI'ya giden tam prompt" için bölüm seçimi - hücrenin GERÇEK "Bağlı
+// bölüm" alanından TAMAMEN AYRI bir modal. Buradaki seçim hiçbir kayda
+// dokunmaz, sadece önizleme neyi göstereceğini belirler.
+function openTamPromptModal(cell, chapters) {
+  const overlay = ensureModalOverlay();
+  const varsayilan = cell && cell.chapter_id ? cell.chapter_id : (chapters[0] ? chapters[0].id : '');
+  overlay.innerHTML = `
+    <div class="panel" style="max-width:640px;width:94%;max-height:85vh;overflow-y:auto;">
+      <b>AI'ya giden tam prompt</b>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px;">
+        Bağlam bölüm bazında oluşur. Aşağıdan hangi bölümün prompt'unu
+        görmek istediğini seç - bu seçim hücrenin gerçek bölüm bağlantısını
+        DEĞİŞTİRMEZ, sadece önizleme.
+      </div>
+      <div class="field" style="margin-top:8px;">
+        <label>Bölüm</label>
+        <select id="tpBolumSecim">
+          ${chapters.length ? chapters.map(c => {
+            const t = c.kind === 'part' ? 'ÜST' : (c.kind === 'subtitle' ? 'ARA' : 'metin');
+            return `<option value="${c.id}" ${c.id === varsayilan ? 'selected' : ''}>#${c.displayNumber} [${t}] ${escapeHtml(stripMarkdownArtifacts(c.title) || '(başlıksız)')}</option>`;
+          }).join('') : '<option value="">(hiç bölüm yok)</option>'}
+        </select>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:8px;">
+        <button class="btn btn-primary btn-sm" id="tpGoster" ${chapters.length ? '' : 'disabled'}>Göster</button>
+        <button class="btn btn-sm" id="tpKapat">Kapat</button>
+      </div>
+      <div id="tpSonuc" style="margin-top:8px;"></div>
+    </div>`;
+  overlay.style.display = 'flex';
+  const close = () => { overlay.style.display = 'none'; overlay.innerHTML = ''; };
+  el('tpKapat').addEventListener('click', close);
+  el('tpGoster').addEventListener('click', async () => {
+    const chapterId = parseInt(el('tpBolumSecim').value, 10);
+    const secili = chapters.find(c => c.id === chapterId);
+    const sonuc = el('tpSonuc');
+    sonuc.innerHTML = '<div class="empty-state">Bağlam oluşturuluyor…</div>';
+    try {
+      const r = await api.post('/ai/context-preview', {
+        selected_entities: [],
+        chapter_number: secili ? secili.number : null,
+        instruction: '', include_hidden: false,
+        include_chapter_text: false, text_scope: 'none',
+        include_own_summary: false,
+      });
+      // full_prompt = sistem yönergesi + bağlam + talimat, yani Qwen'e
+      // giden isteğin TAMAMI. Eski sürümlerde alan yoksa bağlama düşer.
+      const metin = r.full_prompt || r.context || '(boş)';
+      const katmanlar = (r.breakdown || [])
+        .map(b => `${escapeHtml(b.name || b.ad || '')}: ${b.char_count || b.chars || 0}`)
+        .join(' · ');
+      sonuc.innerHTML = `
+        <div style="font-size:11px;color:var(--text-muted);">
+          ${metin.length} karakter · ~${r.approx_tokens || 0} token · Qwen'e istek atılmadı, ücretsiz.
+          ${katmanlar ? `<div style="margin-top:2px;">${katmanlar}</div>` : ''}
+        </div>
+        <div style="margin-top:4px;"><button class="btn btn-sm" id="tpKopya">Kopyala</button></div>
+        <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper-dim);border:1px solid var(--border);border-radius:4px;padding:8px;margin-top:4px;max-height:50vh;overflow-y:auto;">${escapeHtml(metin)}</pre>`;
+      el('tpKopya').addEventListener('click', async () => {
+        const b = el('tpKopya');
+        try { await navigator.clipboard.writeText(metin); b.textContent = 'Kopyalandı ✓'; }
+        catch (e) { b.textContent = 'Kopyalanamadı'; }
+        setTimeout(() => { const bb = el('tpKopya'); if (bb) bb.textContent = 'Kopyala'; }, 2000);
+      });
+    } catch (err) {
+      sonuc.innerHTML = `<div class="error-text">${escapeHtml(err.message)}</div>`;
+    }
+  });
 }
 
 function openNewMatrixDialog() {
