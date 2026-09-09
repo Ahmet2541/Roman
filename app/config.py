@@ -6,8 +6,16 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./roman.db"
 
     dashscope_api_key: str = ""
+    # Standart DashScope pay-as-you-go endpoint. Coding Plan / Token Plan
+    # gibi abonelik-özel endpoint'lerle KARIŞTIRMA - onlar farklı bir
+    # anahtar formatı (sk-sp-xxxxx) ve farklı base_url ister, bu ikisi asla
+    # birbirinin yerine kullanılamaz. Standart anahtar "sk-xxxxx" formatında
+    # olur (dashscope_api_key buraya girer).
     dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    qwen_model: str = "qwen-plus"
+    # qwen3.8-max: Ağustos 2026'da çıkan flagship (2.4T MoE, 1M context) -
+    # önceki varsayılan qwen-plus'tan yükseltildi. Standart pay-as-you-go
+    # ile uyumlu, plan-özel bir anahtar gerektirmiyor.
+    qwen_model: str = "qwen3.8-max"
     # AI isteklerinde ZAMAN AŞIMI ve YENİDEN DENEME. Eskiden ikisi de yoktu:
     # ağ tıkandığında istek sonsuza kadar bekliyor, tarayıcı "Failed to
     # fetch" veriyor ve kullanıcı neyin olduğunu anlamıyordu. Uzun bölüm
