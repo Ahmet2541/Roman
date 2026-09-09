@@ -33,6 +33,7 @@ from .prompts import (
     TRADEOFF_PROMPT,
     NECESSITY_PROMPT,
     BEAT_ETIKET_DOGRULAMA_PROMPT,
+    SYSTEM_PROMPT_HYBRID,
     PLAN_FROM_TEXT_PROMPT,
     MICRO_EDIT_PROMPT,
     KNOWLEDGE_EXTRACT_PROMPT,
@@ -1077,11 +1078,14 @@ def build_user_message(context: str, instruction: str, existing_text: str | None
 def ask_qwen(context: str, instruction: str, existing_text: str | None = None) -> dict:
     user_message = build_user_message(context, instruction, existing_text)
 
+    # A/B DENEYİ: bkz. prompts.py SYSTEM_PROMPT_HYBRID başındaki not.
+    system_prompt = SYSTEM_PROMPT_HYBRID if settings.qwen_use_hybrid_prompt else SYSTEM_PROMPT
+
     client = get_client()
     response = client.chat.completions.create(
         model=settings.qwen_model,
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ],
         temperature=settings.qwen_temperature,

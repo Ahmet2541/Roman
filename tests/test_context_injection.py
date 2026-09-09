@@ -335,3 +335,37 @@ def test_tool_names_never_leak_to_user():
     # Prompt seviyesinde de yasak
     assert "ARAÇ ADLARINI KULLANICIYA ASLA SÖYLEME" in CHAT_SYSTEM_PROMPT
     assert "İZİN İSTEME, ÜRET" in CHAT_SYSTEM_PROMPT
+
+
+def test_hybrid_system_prompt_flag_selects_correct_prompt(monkeypatch):
+    """A/B deneyi: qwen_use_hybrid_prompt=False iken (varsayılan, kanıtlanmış
+    Türkçe prompt) SYSTEM_PROMPT kullanılmalı; True iken SYSTEM_PROMPT_HYBRID.
+    Gerçek bir API çağrısı yapmadan, ask_qwen'e giden system content'i
+    yakalayarak doğrular."""
+    from app import qwen_client
+    from app.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_HYBRID
+
+    yakalanan = {}
+
+    class SahteCompletions:
+        def create(self, **kwargs):
+            yakalanan["system"] = kwargs["messages"][0]["content"]
+            class R:
+                choices = [type("C", (), {"message": type("M", (), {"content": '{"generated_text": "x"}'})()})()]
+            return R()
+
+    class SahteClient:
+        chat = type("Chat", (), {"completions": SahteCompletions()})()
+
+    monkeypatch.setattr(qwen_client, "get_client", lambda: SahteClient())
+
+    monkeypatch.setattr(qwen_client.settings, "qwen_use_hybrid_prompt", False)
+    qwen_client.ask_qwen("context", "talimat")
+    assert yakalanan["system"] == SYSTEM_PROMPT
+
+    monkeypatch.setattr(qwen_client.settings, "qwen_use_hybrid_prompt", True)
+    qwen_client.ask_qwen("context", "talimat")
+    assert yakalanan["system"] == SYSTEM_PROMPT_HYBRID
+    assert "OUTPUT LANGUAGE: Turkish" in SYSTEM_PROMPT_HYBRID
+    # Kinaye'nin genislemis kapsami hibrit metinde de dogru mu
+    assert "whichever beat — GİRİŞ, GELİŞME, or SONUÇ — is tagged Kinaye" in SYSTEM_PROMPT_HYBRID

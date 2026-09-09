@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     qwen_temperature: float = 0.78
     qwen_top_p: float = 0.9
     qwen_max_tokens: int = 4000
+    # A/B DENEYİ: True olursa ask_qwen SYSTEM_PROMPT yerine
+    # SYSTEM_PROMPT_HYBRID kullanır (bkz. prompts.py). Varsayılan False -
+    # kanıtlanmış Türkçe prompt. Gerçek çıktı karşılaştırması yapılmadan
+    # production'da True'ya çevirme.
+    qwen_use_hybrid_prompt: bool = False
 
     db_encryption_key: str = ""
 
