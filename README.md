@@ -505,7 +505,16 @@ seçimi değişince, o TEK beat AYRICA AI'ya sorulur (`POST
 bir "✓ uygun" notu; değilse AI'nın önerdiği etiket + gerekçesiyle birlikte
 "Değiştir" / "Hayır, bu kalsın" seçenekli bir kart belirir. Her beat kendi
 kutusunda, ayrı ayrı sorulur - toplu bir tarama değil; aynı (metin,
-etiket) ikilisi tekrar sorulmaz (önbellek).
+etiket) ikilisi tekrar sorulmaz (önbellek). Etiket seçiliyken her zaman
+görünen bir 🔍 düğmesiyle elle de tetiklenebilir - önceden kaydedilmiş
+(sayfa açılışında zaten etiketli gelen) beat'ler için gerekli, onlarda
+blur/change olayı hiç ateşlenmiyor.
+
+**AI'ya giden tam prompt** ayrı bir pencerede açılır ve orada bir bölüm
+seçilir - bu seçim hücrenin "Bağlı bölüm" alanına dokunmaz. Eskiden ikisi
+aynı dropdown'ı kullanıyordu: önizleme için o dropdown'ı değiştirip
+ardından "Kaydet"e basmak, hücreyi YANLIŞLIKLA başka bir bölüme
+bağlıyordu - artık önizleme ve gerçek bağlantı tamamen ayrı.
 
 ### Plandan taslak — tek sahne ya da tüm bölüm
 
@@ -549,6 +558,10 @@ rol/unvan etiketiyle tanımlıysa, model bu etiketi resmi bir başlık gibi
 harfiyen tekrarlamak yerine doğal bir seslenme ("evlat", "hocam") ya da
 hiç isim kullanmadan konuşturma yoluna gitmeli - sadece diyalog içindeki
 hitap biçimi için, anlatı cümlelerinde etiket kullanımı değişmez.
+
+Kinaye netleştirmesi SADECE SONUÇ'a değil, hangi beat (GİRİŞ/GELİŞME/
+SONUÇ) Kinaye etiketliyse ona uygulanır - "eksiksizlik" kuralı zaten
+üçünü de eşit kapsıyor, Kinaye istisnası da aynı genişlikte olmalıydı.
 
 `ask_qwen` (taslak modu) artık sabit model parametreleri de gönderiyor -
 eskiden `temperature`/`top_p`/`max_tokens` hiç belirtilmiyordu (API'nin

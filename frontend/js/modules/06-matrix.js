@@ -933,7 +933,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
         <label style="font-size:12px;font-weight:600;">${etiket}
           <span style="font-weight:400;color:var(--text-muted);">(${escapeHtml(ipucu)})</span>${yardim(yardimMetni, 'sol')}</label>
         ${beatler[k].map((b, i) => `
-          <div class="mc-beat-row" style="display:flex;gap:4px;align-items:flex-start;margin-top:3px;">
+          <div class="mc-beat-row" style="display:flex;gap:4px;align-items:flex-start;margin-top:6px;">
             ${beatler[k].length > 1 ? `
             <span style="display:flex;flex-direction:column;gap:0;">
               <button class="btn-icon-sm mc-beat-yukari" data-k="${k}" data-i="${i}" title="Yukarı taşı" ${i === 0 ? 'disabled style="opacity:.3;"' : ''}>▲</button>
@@ -941,10 +941,12 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
             </span>
             <span style="font-size:11px;color:var(--text-muted);padding-top:8px;min-width:14px;">${i + 1}</span>` : ''}
             <div style="position:relative;flex:1;min-width:0;">
-              <textarea class="mc-beat" data-k="${k}" data-i="${i}" style="min-height:48px;width:100%;box-sizing:border-box;padding-bottom:14px;">${escapeHtml(b.metin)}</textarea>
+              <textarea class="mc-beat" data-k="${k}" data-i="${i}" style="min-height:90px;width:100%;box-sizing:border-box;padding-bottom:14px;resize:vertical;">${escapeHtml(b.metin)}</textarea>
               <span class="mc-beat-sayac" data-k="${k}" data-i="${i}" style="position:absolute;right:5px;bottom:3px;font-size:9.5px;color:var(--text-muted);background:var(--paper);padding:0 3px;border-radius:2px;pointer-events:none;"></span>
             </div>
-            <select class="mc-beat-etiket" data-k="${k}" data-i="${i}" style="width:78px;font-size:11px;align-self:flex-start;flex-shrink:0;" title="${b.etiket ? escapeHtml(BEAT_ETIKET_ACIKLAMA[b.etiket] || '') : 'Bu beat için özel bir yazım talimatı seç (opsiyonel)'}">
+          </div>
+          <div style="display:flex;gap:4px;align-items:center;margin:3px 0 0 ${beatler[k].length > 1 ? '32px' : '0'};">
+            <select class="mc-beat-etiket" data-k="${k}" data-i="${i}" style="width:110px;font-size:11px;" title="${b.etiket ? escapeHtml(BEAT_ETIKET_ACIKLAMA[b.etiket] || '') : 'Bu beat için özel bir yazım talimatı seç (opsiyonel)'}">
               ${BEAT_ETIKETLERI.map(([val, label]) => `<option value="${val}" ${b.etiket === val ? 'selected' : ''}>${label}</option>`).join('')}
             </select>
             <button class="btn-icon-sm mc-beat-dogrula-btn" data-k="${k}" data-i="${i}" style="${b.etiket ? '' : 'visibility:hidden;'}min-width:24px;flex-shrink:0;" title="Bu etiketi AI'ya kontrol ettir">🔍</button>

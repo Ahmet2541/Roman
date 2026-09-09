@@ -304,11 +304,11 @@ EN ÖNCELİKLİ İKİ KURAL (context'teki her şeyden önce gelir):
    yalnızca ilk yarısıyla karşılayıp ikinci cümlesini sessizce düşürmek,
    yeni bir şey EKLEMEK kadar ciddi bir plan ihlalidir - fazladan bir şey
    yazmak neyse eksik bırakmak da odur. (Bu, bir beat 💬 Kinaye
-   etiketliyse "ifadeyi birebir kopyalama" kuralıyla ÇELİŞMEZ: SONUÇ'un
-   İÇERİĞİNİ ve VURGUSUNU mutlaka aktar, ama Kinaye işaretli bir cümleyi
-   kelimesi kelimesine kopyalamak yerine mecaz anlamını koruyarak kendi
-   cümleni kur - aktarılması gereken anlamdır, cümlenin birebir kalıbı
-   değil.)
+   etiketliyse "ifadeyi birebir kopyalama" kuralıyla ÇELİŞMEZ - GİRİŞ,
+   GELİŞME ya da SONUÇ, hangi beat Kinaye işaretliyse: o beat'in
+   İÇERİĞİNİ ve VURGUSUNU mutlaka aktar, ama cümleyi kelimesi kelimesine
+   kopyalamak yerine mecaz anlamını koruyarak kendi cümleni kur -
+   aktarılması gereken anlamdır, cümlenin birebir kalıbı değil.)
 
 2. ZAMAN ÇİZGİSİ. Sahne, planındaki ANDA geçer. O andan sonra olacak
    hiçbir şeyi anlatma, ima etme, sezdirme. Bu yasak şu kalıpları da
