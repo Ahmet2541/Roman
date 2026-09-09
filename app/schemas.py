@@ -590,7 +590,14 @@ class ContextPreviewResponse(BaseModel):
 class ContextLayerSize(BaseModel):
     name: str
     char_count: int
-    approx_tokens: int
+
+
+class PromptLanguageOut(BaseModel):
+    hybrid: bool
+
+
+class PromptLanguageIn(BaseModel):
+    hybrid: bool
 
 
 # ---- Gelişim çizelgesi (Progressions) ---------------------------------------

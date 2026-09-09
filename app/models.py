@@ -611,3 +611,15 @@ class MatrixCell(Base):
     matrix = relationship("PlanMatrix", back_populates="cells")
 
     __table_args__ = (UniqueConstraint("column_id", "row_id", name="uq_matrix_cell"),)
+
+
+class AppSetting(Base):
+    """Tek satırlık (id=1) küresel ayar tablosu - şu an sadece AI yazım
+    prompt'unun dili için. .env'deki settings.qwen_use_hybrid_prompt
+    varsayılanı verir (kod değişmeden değiştirilemez); buradaki satır
+    VARSA onu ezer - Plan Matrisi'ndeki aç/kapa anahtarı bunu yazar.
+    Yeni tablo olduğu için migration gerekmez (Base.metadata.create_all
+    eksik tabloları zaten oluşturur - bkz. migrations.py başlığı)."""
+    __tablename__ = "app_settings"
+    id = Column(Integer, primary_key=True)
+    qwen_use_hybrid_prompt = Column(Boolean, nullable=True)

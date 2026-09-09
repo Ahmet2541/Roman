@@ -1075,11 +1075,37 @@ def build_user_message(context: str, instruction: str, existing_text: str | None
     return user_message
 
 
-def ask_qwen(context: str, instruction: str, existing_text: str | None = None) -> dict:
+def get_hybrid_prompt_enabled(db: Session) -> bool:
+    """Plan Matrisi'ndeki Türkçe/İngilizce (Hibrit) anahtarının GERÇEK
+    değeri. app_settings tablosunda bir satır varsa (kullanıcı anahtara
+    en az bir kez dokunmuşsa) o değer geçerlidir; yoksa .env'deki
+    settings.qwen_use_hybrid_prompt varsayılanına düşülür. ask_qwen ve
+    /ai/context-preview AYNI bu fonksiyonu kullanır - yoksa önizleme
+    gerçekte gidenden sapar."""
+    row = db.query(models.AppSetting).filter_by(id=1).first()
+    if row is None or row.qwen_use_hybrid_prompt is None:
+        return settings.qwen_use_hybrid_prompt
+    return row.qwen_use_hybrid_prompt
+
+
+def set_hybrid_prompt_enabled(db: Session, value: bool) -> None:
+    row = db.query(models.AppSetting).filter_by(id=1).first()
+    if row is None:
+        row = models.AppSetting(id=1, qwen_use_hybrid_prompt=value)
+        db.add(row)
+    else:
+        row.qwen_use_hybrid_prompt = value
+    db.commit()
+
+
+def ask_qwen(context: str, instruction: str, existing_text: str | None = None, use_hybrid: bool | None = None) -> dict:
     user_message = build_user_message(context, instruction, existing_text)
 
     # A/B DENEYİ: bkz. prompts.py SYSTEM_PROMPT_HYBRID başındaki not.
-    system_prompt = SYSTEM_PROMPT_HYBRID if settings.qwen_use_hybrid_prompt else SYSTEM_PROMPT
+    # use_hybrid verilmemişse (eski çağıranlar, testler) .env varsayılanına
+    # düşülür - Plan Matrisi anahtarına bakan tek yer routers/ai.py'dir.
+    hybrid = settings.qwen_use_hybrid_prompt if use_hybrid is None else use_hybrid
+    system_prompt = SYSTEM_PROMPT_HYBRID if hybrid else SYSTEM_PROMPT
 
     client = get_client()
     response = client.chat.completions.create(

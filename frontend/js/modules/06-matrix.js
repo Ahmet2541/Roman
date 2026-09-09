@@ -13,8 +13,53 @@ async function renderMatrixView() {
       yazılırken plan AI'ya <b>otomatik</b> gider - başka hiçbir bölümde gitmez.</p>
     <div id="matrixListArea"></div>
     <div id="matrixGridArea" style="margin-top:16px;"></div>
-    <div id="matrixCellEditor" style="margin-top:16px;"></div>`;
+    <div id="matrixCellEditor" style="margin-top:16px;"></div>
+    <div id="promptLangToggleArea" style="margin-top:24px;padding-top:12px;border-top:1px solid var(--border);"></div>`;
   await loadMatrixList();
+  await loadPromptLanguageToggle();
+}
+
+// AI yazım isteğinin sistem yönergesi dili: Türkçe (kanıtlanmış varsayılan)
+// ya da İngilizce/Hibrit (A/B deney, bkz. prompts.py SYSTEM_PROMPT_HYBRID).
+// Küresel bir anahtar - tüm romanlar için ortak, /ai/prompt-language ile
+// DB'de saklanır (kalıcı, sunucu yeniden başlasa bile durur).
+async function loadPromptLanguageToggle() {
+  const area = document.getElementById('promptLangToggleArea');
+  if (!area) return;
+  try {
+    const durum = await api.get('/ai/prompt-language');
+    renderPromptLanguageToggle(area, durum.hybrid);
+  } catch (err) {
+    area.innerHTML = `<div class="error-text" style="font-size:11.5px;">Prompt dili anahtarı yüklenemedi: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderPromptLanguageToggle(area, hybrid) {
+  area.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="font-size:12px;color:var(--text-muted);">AI yazım isteğinin sistem yönergesi dili:</span>
+      <div class="btn-group" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
+        <button class="btn btn-sm m-lang-tr" style="border-radius:0;${!hybrid ? 'background:var(--gold);color:#000;' : ''}"
+          title="Kanıtlanmış varsayılan - production'da kalması önerilir">Türkçe</button>
+        <button class="btn btn-sm m-lang-en" style="border-radius:0;border-left:1px solid var(--border);${hybrid ? 'background:var(--gold);color:#000;' : ''}"
+          title="A/B deney: İngilizce mekanik talimatlar + Türkçe içerik - kanıtlanmamış hipotez">İngilizce (Hibrit)</button>
+      </div>
+      <span id="mLangSaved" style="font-size:11px;color:var(--text-muted);"></span>
+    </div>`;
+  const kaydediliyor = async (yeniHybrid) => {
+    if (yeniHybrid === hybrid) return;
+    const not_ = document.getElementById('mLangSaved');
+    if (not_) not_.textContent = 'kaydediliyor…';
+    try {
+      await api.post('/ai/prompt-language', { hybrid: yeniHybrid });
+      renderPromptLanguageToggle(area, yeniHybrid);
+    } catch (err) {
+      if (not_) not_.textContent = '';
+      alert(err.message);
+    }
+  };
+  area.querySelector('.m-lang-tr').addEventListener('click', () => kaydediliyor(false));
+  area.querySelector('.m-lang-en').addEventListener('click', () => kaydediliyor(true));
 }
 
 async function loadMatrixList() {

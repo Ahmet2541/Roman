@@ -9,6 +9,7 @@ from .. import schemas, models
 from ..qwen_client import (
     build_context, ask_qwen, full_scan, chat_with_qwen, reader_test_chapter,
     suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite, retest_paragraph, motif_map, paragraph_roles, fuse_diagnoses, evaluate_tradeoff, paragraph_necessity, plan_from_text, micro_edit, extract_knowledge_map, review_arc, scan_voice, review_options, strip_tool_leaks, dogrula_beat_etiketi,
+    get_hybrid_prompt_enabled, set_hybrid_prompt_enabled,
 )
 from ..entities import ENTITY_MODELS
 from ..sections import SECTIONS_BY_ENTITY_TYPE, _tr_lower
@@ -37,7 +38,10 @@ def assist(
         include_index=getattr(payload, 'include_index', True),
     )
     try:
-        result = ask_qwen(context, payload.instruction, payload.existing_text)
+        result = ask_qwen(
+            context, payload.instruction, payload.existing_text,
+            use_hybrid=get_hybrid_prompt_enabled(db),
+        )
     except Exception as exc:
         logger.exception("Qwen (DashScope) isteği başarısız oldu")
         raise HTTPException(
@@ -92,16 +96,42 @@ def preview_context(
         logger.exception("Bağlam ölçümü başarısız")
         chars, tokens, breakdown = len(context), 0, []
     # Gönderilenin TAMAMI aynı fonksiyonlardan kurulur (ask_qwen ile ortak),
-    # yoksa önizleme gerçekte gidenden sapar.
-    from ..qwen_client import SYSTEM_PROMPT, build_user_message
+    # yoksa önizleme gerçekte gidenden sapar. Hangi sistem yönergesinin
+    # (SYSTEM_PROMPT_HYBRID / SYSTEM_PROMPT) kullanılacağı get_hybrid_prompt_enabled
+    # ile AYNI kaynaktan (Plan Matrisi'ndeki aç/kapa anahtarı, yoksa .env
+    # varsayılanı) okunmalı - yoksa anahtarı açsan bile önizleme hep
+    # Türkçe SYSTEM_PROMPT'u gösterir ve "AI'ya gerçekte ne gidiyor"
+    # sorusuna yalan cevap verir.
+    from ..qwen_client import SYSTEM_PROMPT, SYSTEM_PROMPT_HYBRID, build_user_message
+    system_prompt = SYSTEM_PROMPT_HYBRID if get_hybrid_prompt_enabled(db) else SYSTEM_PROMPT
     kullanici = build_user_message(context, payload.instruction or "", None)
     return schemas.ContextPreviewResponse(
         context=context, char_count=chars, approx_tokens=tokens,
         breakdown=[schemas.ContextLayerSize(**b) for b in breakdown],
-        system_prompt=SYSTEM_PROMPT,
-        full_prompt=f"=== SİSTEM YÖNERGESİ ===\n{SYSTEM_PROMPT}\n\n"
+        system_prompt=system_prompt,
+        full_prompt=f"=== SİSTEM YÖNERGESİ ===\n{system_prompt}\n\n"
                     f"=== KULLANICI MESAJI ===\n{kullanici}",
     )
+
+
+@router.get("/prompt-language", response_model=schemas.PromptLanguageOut)
+def get_prompt_language(db: Session = Depends(get_db), _user=Depends(get_current_user)):
+    """Plan Matrisi'ndeki Türkçe/İngilizce (Hibrit) anahtarının GÜNCEL
+    durumu - küresel, tüm romanlar/kullanıcılar için ortak (roman-bazlı
+    değil, AI'ya giden sistem yönergesi seçimi)."""
+    return schemas.PromptLanguageOut(hybrid=get_hybrid_prompt_enabled(db))
+
+
+@router.post("/prompt-language", response_model=schemas.PromptLanguageOut)
+def set_prompt_language(
+    payload: schemas.PromptLanguageIn,
+    db: Session = Depends(get_db), _user=Depends(get_current_user),
+):
+    """Anahtarı değiştirir - bir sonraki AI yazım isteğinden (ask_qwen)
+    itibaren geçerli olur, sunucu yeniden başlamasa bile kalıcıdır
+    (app_settings tablosunda saklanır)."""
+    set_hybrid_prompt_enabled(db, payload.hybrid)
+    return schemas.PromptLanguageOut(hybrid=payload.hybrid)
 
 
 # Bölüm metnine atıf yapan işaretler. Biri geçiyorsa metin gönderilir.

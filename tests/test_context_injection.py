@@ -369,3 +369,59 @@ def test_hybrid_system_prompt_flag_selects_correct_prompt(monkeypatch):
     assert "OUTPUT LANGUAGE: Turkish" in SYSTEM_PROMPT_HYBRID
     # Kinaye'nin genislemis kapsami hibrit metinde de dogru mu
     assert "whichever beat — GİRİŞ, GELİŞME, or SONUÇ — is tagged Kinaye" in SYSTEM_PROMPT_HYBRID
+
+
+def test_context_preview_respects_hybrid_toggle(client, headers, monkeypatch):
+    """/ai/context-preview, ask_qwen'in KULLANDIĞI system prompt'u göstermeli.
+    Önceden her zaman SYSTEM_PROMPT'u (Türkçe) hardcode ediyordu ve
+    settings.qwen_use_hybrid_prompt anahtarına hiç bakmıyordu - anahtar
+    açık olsa bile önizleme gerçekte gidenden sapıyordu."""
+    from app import qwen_client
+
+    monkeypatch.setattr(qwen_client.settings, "qwen_use_hybrid_prompt", False)
+    r = client.post("/ai/context-preview", json={"selected_entities": []}, headers=headers)
+    assert r.json()["system_prompt"] == qwen_client.SYSTEM_PROMPT
+
+    monkeypatch.setattr(qwen_client.settings, "qwen_use_hybrid_prompt", True)
+    r = client.post("/ai/context-preview", json={"selected_entities": []}, headers=headers)
+    assert r.json()["system_prompt"] == qwen_client.SYSTEM_PROMPT_HYBRID
+    assert "SİSTEM YÖNERGESİ" in r.json()["full_prompt"]
+    assert "OUTPUT LANGUAGE: Turkish" in r.json()["full_prompt"]
+
+
+def test_prompt_language_toggle_endpoint_overrides_env_default(client, headers):
+    """Plan Matrisi'ndeki aç/kapa anahtarı (/ai/prompt-language) DB'de
+    saklanır ve .env'deki settings.qwen_use_hybrid_prompt varsayılanını
+    EZER - hem /ai/context-preview hem (dolaylı olarak) /ai/assist bunu
+    kullanmalı. Sunucu yeniden başlasa bile (yeni bir client/session)
+    kalıcı olmalı."""
+    from app.database import SessionLocal
+    from app import models
+
+    r = client.get("/ai/prompt-language", headers=headers)
+    assert r.status_code == 200
+    assert r.json() == {"hybrid": False}  # .env varsayılanı
+
+    r = client.post("/ai/prompt-language", json={"hybrid": True}, headers=headers)
+    assert r.json() == {"hybrid": True}
+
+    # context-preview artik hibrit gostermeli - .env hic degismedi
+    r = client.post("/ai/context-preview", json={"selected_entities": []}, headers=headers)
+    assert "OUTPUT LANGUAGE: Turkish" in r.json()["full_prompt"]  # hibrit metninin bir parcasi
+
+    r = client.get("/ai/prompt-language", headers=headers)
+    assert r.json() == {"hybrid": True}
+
+    # Temizlik: DB testleri SESSION boyunca aynı dosyayı paylaşıyor - satırı
+    # sadece False'a çekmek yetmez (bu da bir "override" olurdu ve sonraki
+    # testlerdeki settings.qwen_use_hybrid_prompt monkeypatch'lerini
+    # ezerdi). Satırı tamamen sil ki durum test öncesine (override YOK,
+    # .env varsayılanı geçerli) dönsün.
+    db = SessionLocal()
+    try:
+        row = db.query(models.AppSetting).filter_by(id=1).first()
+        if row is not None:
+            db.delete(row)
+            db.commit()
+    finally:
+        db.close()
