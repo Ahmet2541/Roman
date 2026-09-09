@@ -105,12 +105,20 @@ def preview_context(
     from ..qwen_client import SYSTEM_PROMPT, SYSTEM_PROMPT_HYBRID, build_user_message
     system_prompt = SYSTEM_PROMPT_HYBRID if get_hybrid_prompt_enabled(db) else SYSTEM_PROMPT
     kullanici = build_user_message(context, payload.instruction or "", None)
+    # SYSTEM_PROMPT_HYBRID kendi "=== SYSTEM INSTRUCTION ===" başlığını
+    # zaten içeriyor (bkz. prompts.py) - üstüne bir de "=== SİSTEM
+    # YÖNERGESİ ===" eklersek çift başlık çıkar (hibrit inceleme
+    # raporunda bulunan sorun). SYSTEM_PROMPT (Türkçe) kendi başlığını
+    # taşımıyor, o yüzden ona hâlâ ekliyoruz.
+    sistem_blogu = (
+        system_prompt if system_prompt.lstrip().startswith("===")
+        else f"=== SİSTEM YÖNERGESİ ===\n{system_prompt}"
+    )
     return schemas.ContextPreviewResponse(
         context=context, char_count=chars, approx_tokens=tokens,
         breakdown=[schemas.ContextLayerSize(**b) for b in breakdown],
         system_prompt=system_prompt,
-        full_prompt=f"=== SİSTEM YÖNERGESİ ===\n{system_prompt}\n\n"
-                    f"=== KULLANICI MESAJI ===\n{kullanici}",
+        full_prompt=f"{sistem_blogu}\n\n=== KULLANICI MESAJI ===\n{kullanici}",
     )
 
 

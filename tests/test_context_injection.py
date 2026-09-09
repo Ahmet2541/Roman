@@ -385,8 +385,33 @@ def test_context_preview_respects_hybrid_toggle(client, headers, monkeypatch):
     monkeypatch.setattr(qwen_client.settings, "qwen_use_hybrid_prompt", True)
     r = client.post("/ai/context-preview", json={"selected_entities": []}, headers=headers)
     assert r.json()["system_prompt"] == qwen_client.SYSTEM_PROMPT_HYBRID
-    assert "SİSTEM YÖNERGESİ" in r.json()["full_prompt"]
+    assert "SYSTEM INSTRUCTION" in r.json()["full_prompt"]
     assert "OUTPUT LANGUAGE: Turkish" in r.json()["full_prompt"]
+
+
+def test_context_preview_no_duplicate_header_in_hybrid_mode(client, headers):
+    """full_prompt, SYSTEM_PROMPT_HYBRID'in kendi '=== SYSTEM INSTRUCTION ==='
+    başlığının üstüne bir de Türkçe '=== SİSTEM YÖNERGESİ ===' EKLEMEMELİ -
+    hibrit inceleme raporunda bulunan çift başlık hatası."""
+    from app.database import SessionLocal
+    from app import models
+
+    client.post("/ai/prompt-language", json={"hybrid": True}, headers=headers)
+    try:
+        r = client.post("/ai/context-preview", json={"selected_entities": []}, headers=headers)
+        full = r.json()["full_prompt"]
+        assert full.count("=== SYSTEM INSTRUCTION ===") == 1
+        assert "=== SİSTEM YÖNERGESİ ===" not in full
+        assert "=== KULLANICI MESAJI ===" in full
+    finally:
+        db = SessionLocal()
+        try:
+            row = db.query(models.AppSetting).filter_by(id=1).first()
+            if row is not None:
+                db.delete(row)
+                db.commit()
+        finally:
+            db.close()
 
 
 def test_prompt_language_toggle_endpoint_overrides_env_default(client, headers):
