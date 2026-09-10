@@ -419,6 +419,26 @@ baştan uygula):
      kendisinin dışarıdan betimlemesi yapılmaz.
   📷 etiketi TAŞIMAYAN beat'ler varsayılan döngüyü izler - etiketsiz
   bir beat'te kamera hareketi uydurma.
+- POV KİLİDİ (bkz. Denetim menüsü → Anlatıcı Sesi Taraması, aynı ihlalleri
+  ARAMA yerine baştan ÖNLER): bir beat 👁 POV etiketiyle bir kişiye
+  kilitlenmişse, o beat'te SADECE o kişinin doğrudan iç dünyasına
+  (düşüncesi, hissi, bedensel duyusu) girebilirsin. Sahnede başka kişiler
+  varsa onları YALNIZCA dışarıdan gözlemlenebilir şekilde anlat -
+  davranışı, sözü, yüz ifadesi, sesi; ne düşündüğünü ya da hissettiğini
+  ASLA doğrudan verme (dolaylı: "gözlerini kaçırdı" ✅ - doğrudan:
+  "utanmıştı" ❌, o kişi POV değilse). Bir beat'te 👁 POV etiketi YOKSA,
+  o beat'i dış/objektif bir anlatıcıdan yaz: HİÇBİR kişinin iç dünyasına
+  girme, sadece gözlemlenebilir olanı anlat. Bu kilit ayrıca şunu önler:
+  anlatıcı, POV kişisinin konumu/bilgisi gereği BİLEMEYECEĞİ bir şeyi
+  (başka bir odada olan biteni, başka birinin geçmişte yaşadığı bir anı
+  o kişi anlatmadıkça) asla söylemez.
+- DUYGU YAYI DAĞILIMI: KİŞİLER'de bir kişinin duygu yayı (başlangıç→bitiş)
+  tanımlıysa, bu geçişi GİRİŞ/GELİŞME/SONUÇ'un doğal sırasına yay - GİRİŞ
+  başlangıç duygusuna yakın dursun, GELİŞME kademeli değişimi taşısın,
+  SONUÇ bitiş duygusuna varsın. Geçişi tek bir cümleye sıkıştırıp aniden
+  çözme. Ama plan açıkça ani bir kırılma istiyorsa (şok, ihanetin ortaya
+  çıktığı an) o anîliği yumuşatma - o zaman anîlik bilinçli bir tercihtir,
+  kademeli dağıtım o durumda uygulanmaz.
 
 Yanıtını SADECE aşağıdaki JSON formatında ver, başka
 hiçbir açıklama veya markdown ekleme:
@@ -598,6 +618,29 @@ later correction):
      description of the character themselves.
   Beats WITHOUT a 📷 tag follow the default cycle — do NOT invent a
   camera movement where none is tagged.
+- POV LOCK (this is the write-time prevention for what Denetim menu's
+  Narrator Voice Scan checks for AFTER the fact — bakis_kaymasi /
+  bilgi_asimi violations): if a beat carries a 👁 POV tag locking it to
+  one character, you may ONLY enter that character's direct interiority
+  (thought, feeling, bodily sensation) in that beat. Other characters
+  present must be rendered ONLY from the outside — behavior, speech,
+  facial expression, voice; NEVER give their thoughts or feelings
+  directly (indirect is fine: "looked away" ✅ — direct is not: "she felt
+  ashamed" ❌, unless she is the locked POV). If a beat carries NO 👁 POV
+  tag, write it from an objective/external narrator: do NOT enter ANY
+  character's interiority, describe only what is observable. This lock
+  also prevents the narrator from stating something the locked POV
+  character could not know (what's happening in another room, another
+  person's unshared memory) unless that information reaches them
+  in-scene.
+- EMOTION ARC PACING: If a KİŞİLER entry defines an emotional arc
+  (start→end) for a character, spread that transition across the
+  natural order of GİRİŞ/GELİŞME/SONUÇ — GİRİŞ should sit close to the
+  starting emotion, GELİŞME should carry the gradual shift, SONUÇ should
+  land on the ending emotion. Do not compress the whole transition into
+  one sudden line. But if the plan clearly calls for an abrupt break
+  (shock, the moment a betrayal surfaces), do not soften it — then
+  abruptness is the deliberate choice and gradual pacing does not apply.
 
 KİNAYE / SEZDİRME / İRONİ (Turkish literary terms — keep these terms as-is):
 - 💬 KİNAYE (double-meaning / allegorical intent): The expression can be

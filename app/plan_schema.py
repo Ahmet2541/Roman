@@ -224,7 +224,7 @@ def normalize_cell(data: Any) -> dict:
     for key, _, _ in YAY_ALANLARI:
         val = data.get(key)
         if isinstance(val, str):
-            out[key] = [{"metin": val.strip(), "etiket": "", "kamera": ""}] if val.strip() else []
+            out[key] = [{"metin": val.strip(), "etiket": "", "kamera": "", "pov": ""}] if val.strip() else []
         elif isinstance(val, list):
             temiz = []
             for it in val:
@@ -234,13 +234,15 @@ def normalize_cell(data: Any) -> dict:
                         continue
                     etiket = str(it.get("etiket") or "").strip().lower()
                     kamera = str(it.get("kamera") or "").strip().lower()
+                    pov = str(it.get("pov") or "").strip()
                     temiz.append({
                         "metin": metin,
                         "etiket": etiket if etiket in BEAT_ETIKET_ANAHTARLARI else "",
                         "kamera": kamera if kamera in KAMERA_ANAHTARLARI else "",
+                        "pov": pov,  # kişi adı serbest metin - cell_warnings'te kisiler'e karşı doğrulanır
                     })
                 elif isinstance(it, str) and it.strip():
-                    temiz.append({"metin": it.strip(), "etiket": "", "kamera": ""})
+                    temiz.append({"metin": it.strip(), "etiket": "", "kamera": "", "pov": ""})
             out[key] = temiz
 
     # Bilinmeyen ya da boş değer "normal"e düşer: uzunluksuz plan, modelin
@@ -473,6 +475,13 @@ def render_cell(data: Any) -> str:
             kam = b.get("kamera", "")
             if kam:
                 baslik += f" [{KAMERA_GORUNEN[kam]}]"
+            # POV kilidi: kamera/etiketten TAMAMEN BAĞIMSIZ üçüncü katman -
+            # bu beat'te iç dünyasına girilebilecek TEK kişi. Boşsa dış/
+            # objektif anlatıcı (kimsenin içine girilmez) - bkz. SYSTEM_PROMPT
+            # "POV KİLİDİ" kuralı.
+            pov = b.get("pov", "")
+            if pov:
+                baslik += f" [👁 POV: {pov}]"
             satirlar.append(f"{baslik}: {b['metin']}")
 
     tarif = dict((k, t) for k, _, t in UZUNLUK_SEVIYELERI).get(d["uzunluk"])
@@ -559,6 +568,18 @@ def cell_warnings(data: Any, tur_data: Any = None, paralel: bool = False) -> lis
     for k in d["kisiler"]:
         if not any(k["duygu"].values()):
             uyarilar.append(f"\"{k['ad']}\" için duygu yazılmamış")
+
+    # POV KİLİDİ: bir beat'e POV kişisi seçilmişse, o isim KİŞİLER
+    # listesinde olmalı - yoksa yazım hatası ya da silinmiş bir kişiye
+    # işaret ediyordur ve kilit sessizce işlemez hale gelir.
+    kisi_adlari = {k["ad"].casefold() for k in d["kisiler"] if k["ad"]}
+    for key, etiket, _ in YAY_ALANLARI:
+        for i, b in enumerate(d[key], start=1):
+            pov = b.get("pov", "")
+            if pov and pov.casefold() not in kisi_adlari:
+                sira = f" {i}" if len(d[key]) > 1 else ""
+                uyarilar.append(
+                    f"{etiket}{sira} POV'u \"{pov}\" - bu isim KİŞİLER listesinde yok")
 
     # ORTAM ile kişilerin hepsi aynıysa ayrımdan yararlanılmıyor.
     def _yay(x):

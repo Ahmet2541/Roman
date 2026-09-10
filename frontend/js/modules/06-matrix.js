@@ -923,10 +923,10 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       </div>`;
     }).join('');
     kutu.querySelectorAll('.mc-k-ad').forEach(x => x.addEventListener('input', () => { kisiler[+x.dataset.i].ad = x.value; }));
-    kutu.querySelectorAll('.mc-k-ad').forEach(x => x.addEventListener('change', () => { kisiler[+x.dataset.i].ad = x.value; cizKisiler(); }));
+    kutu.querySelectorAll('.mc-k-ad').forEach(x => x.addEventListener('change', () => { kisiler[+x.dataset.i].ad = x.value; cizKisiler(); cizYay(); }));
     kutu.querySelectorAll('.mc-k-a').forEach(x => x.addEventListener('input', () => { kisiler[+x.dataset.i].duygu.baslangic = x.value; }));
     kutu.querySelectorAll('.mc-k-b').forEach(x => x.addEventListener('input', () => { kisiler[+x.dataset.i].duygu.bitis = x.value; }));
-    kutu.querySelectorAll('.mc-k-sil').forEach(x => x.addEventListener('click', () => { kisiler.splice(+x.dataset.i, 1); cizKisiler(); }));
+    kutu.querySelectorAll('.mc-k-sil').forEach(x => x.addEventListener('click', () => { kisiler.splice(+x.dataset.i, 1); cizKisiler(); cizYay(); }));
   }
   cizKisiler();
   el('mcKisiEkle').addEventListener('click', () => {
@@ -991,10 +991,10 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     const v = d[k];
     const list = Array.isArray(v)
       ? v.map(it => (it && typeof it === 'object')
-          ? { metin: it.metin || '', etiket: it.etiket || '', kamera: it.kamera || '' }
-          : { metin: it || '', etiket: '', kamera: '' })
+          ? { metin: it.metin || '', etiket: it.etiket || '', kamera: it.kamera || '', pov: it.pov || '' }
+          : { metin: it || '', etiket: '', kamera: '', pov: '' })
       : [];
-    beatler[k] = list.length ? list : [{ metin: '', etiket: '', kamera: '' }];
+    beatler[k] = list.length ? list : [{ metin: '', etiket: '', kamera: '', pov: '' }];
   });
 
   function cizYay() {
@@ -1023,6 +1023,13 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
             </select>
             <select class="mc-beat-kamera" data-k="${k}" data-i="${i}" style="width:110px;font-size:11px;" title="${b.kamera ? escapeHtml(KAMERA_ACIKLAMA[b.kamera] || '') : 'Bu beat için kamera hareketi seç (opsiyonel) - Kinaye/Sezdirme\'den bağımsız'}">
               ${KAMERA_ETIKETLERI.map(([val, label]) => `<option value="${val}" ${b.kamera === val ? 'selected' : ''}>${label}</option>`).join('')}
+            </select>
+            <select class="mc-beat-pov" data-k="${k}" data-i="${i}" style="width:130px;font-size:11px;" title="${b.pov ? `Bu beat'te sadece ${escapeHtml(b.pov)}'in iç dünyasına girilir` : 'POV kilidi yok - bu beat dış/objektif anlatıcıdan yazılır (opsiyonel)'}">
+              <option value="">👁 — (dış/objektif)</option>
+              ${[...new Set(kisiler.map(x => (x.ad || '').trim()).filter(Boolean))].map(ad =>
+                `<option value="${escapeHtml(ad)}" ${b.pov === ad ? 'selected' : ''}>👁 ${escapeHtml(ad)}</option>`
+              ).join('')}
+              ${b.pov && !kisiler.some(x => (x.ad || '').trim() === b.pov) ? `<option value="${escapeHtml(b.pov)}" selected>👁 ${escapeHtml(b.pov)} (KİŞİLER'de yok!)</option>` : ''}
             </select>
             <button class="btn-icon-sm mc-beat-dogrula-btn" data-k="${k}" data-i="${i}" style="${b.etiket ? '' : 'visibility:hidden;'}min-width:24px;flex-shrink:0;" title="Bu etiketi AI'ya kontrol ettir">🔍</button>
             ${beatler[k].length > 1 ? `<button class="btn-icon-sm mc-beat-sil" data-k="${k}" data-i="${i}" style="flex-shrink:0;" title="Bu beat'i kaldır">✕</button>` : ''}
@@ -1068,11 +1075,17 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
         s.title = s.value ? (KAMERA_ACIKLAMA[s.value] || '') : 'Bu beat için kamera hareketi seç (opsiyonel) - Kinaye/Sezdirme\'den bağımsız';
       });
     });
+    kutu.querySelectorAll('.mc-beat-pov').forEach(s => {
+      s.addEventListener('change', () => {
+        beatler[s.dataset.k][+s.dataset.i].pov = s.value;
+        s.title = s.value ? `Bu beat'te sadece ${s.value}'in iç dünyasına girilir` : 'POV kilidi yok - bu beat dış/objektif anlatıcıdan yazılır (opsiyonel)';
+      });
+    });
     kutu.querySelectorAll('.mc-beat-dogrula-btn').forEach(btn => {
       btn.addEventListener('click', () => dogrulaBeat(btn.dataset.k, +btn.dataset.i, { zorla: true }));
     });
     kutu.querySelectorAll('.mc-beat-ekle').forEach(b => b.addEventListener('click', () => {
-      beatler[b.dataset.k].push({ metin: '', etiket: '', kamera: '' }); cizYay();
+      beatler[b.dataset.k].push({ metin: '', etiket: '', kamera: '', pov: '' }); cizYay();
     }));
     kutu.querySelectorAll('.mc-beat-sil').forEach(b => b.addEventListener('click', () => {
       beatler[b.dataset.k].splice(+b.dataset.i, 1); cizYay();
@@ -1260,9 +1273,9 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       nesneler: _adlariAyristir(el('mcNesneler').value, varliklar.nesneler),
       odak: el('mcOdak').value,
       uzunluk: el('mcUzunluk').value,
-      giris: beatler.giris.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '', kamera: x.kamera || '' })).filter(x => x.metin),
-      gelisme: beatler.gelisme.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '', kamera: x.kamera || '' })).filter(x => x.metin),
-      sonuc: beatler.sonuc.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '', kamera: x.kamera || '' })).filter(x => x.metin),
+      giris: beatler.giris.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '', kamera: x.kamera || '', pov: x.pov || '' })).filter(x => x.metin),
+      gelisme: beatler.gelisme.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '', kamera: x.kamera || '', pov: x.pov || '' })).filter(x => x.metin),
+      sonuc: beatler.sonuc.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '', kamera: x.kamera || '', pov: x.pov || '' })).filter(x => x.metin),
       baglantilar: baglar.filter(b => (b.kod || '').trim()),
     };
   }
@@ -1293,6 +1306,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
         if (gorunen) baslik += ` [${gorunen} — ${BEAT_ETIKET_ACIKLAMA[b.etiket]}]`;
         const kameraGorunen = KAMERA_ETIKETLERI.find(([val]) => val === b.kamera && val)?.[1];
         if (kameraGorunen) baslik += ` [${kameraGorunen}]`;
+        if (b.pov) baslik += ` [👁 POV: ${b.pov}]`;
         satir.push(`${baslik}: ${b.metin}`);
       });
     });

@@ -90,6 +90,41 @@ def test_camera_tag_defaults_to_empty_and_is_backward_compatible(client, headers
     assert "📷" not in r2.json()["content"]
 
 
+def test_pov_lock_renders_independently_and_warns_on_unknown_name(client, headers):
+    """POV kilidi (👁), Kinaye/Sezdirme/Kamera'dan TAMAMEN BAĞIMSIZ - bir
+    beat üçünü birden taşıyabilir. KİŞİLER'de olmayan bir POV ismi kaydı
+    ENGELLEMEZ ama uyarı üretir (yazım hatası / silinmiş kişi yakalamak
+    için)."""
+    m = _matris(client, headers)
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {
+            "olay": "Test olayı.",
+            "kisiler": [{"id": None, "ad": "Vicdan", "duygu": {"baslangic": "güven", "bitis": "şüphe"}}],
+            "gelisme": [{"metin": "İçinden geçenler.", "etiket": "sezdirme",
+                         "kamera": "close", "pov": "Vicdan"}],
+            "sonuc": [{"metin": "Kapı kapandı.", "etiket": "", "kamera": "", "pov": "Olmayan Kişi"}],
+        },
+    }, headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    c = body["content"]
+    assert "[🌀 Sezdirme —" in c and "[📷 Yakın plan]" in c and "[👁 POV: Vicdan]" in c
+    assert "SONUÇ [👁 POV: Olmayan Kişi]: Kapı kapandı." in c
+    assert any("Olmayan Kişi" in w and "KİŞİLER listesinde yok" in w for w in body["warnings"])
+
+
+def test_pov_lock_backward_compatible_when_absent(client, headers):
+    """Eski kayıtlarda (pov alanı hiç yok) hiçbir şey bozulmaz."""
+    m = _matris(client, headers)
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"olay": "Test.", "giris": [{"metin": "Eski kayıt.", "etiket": ""}]},
+    }, headers=headers)
+    assert r.status_code == 200, r.text
+    assert "👁" not in r.json()["content"]
+
+
 def test_missing_fields_warn_but_do_not_block(client, headers):
     m = _matris(client, headers)
     r = client.put(f"/matrix/{m['id']}/cells", json={

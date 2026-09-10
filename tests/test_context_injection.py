@@ -391,6 +391,11 @@ def test_camera_system_rules_present_in_both_prompts():
     assert "CAMERA TAGS" in SYSTEM_PROMPT_HYBRID
     assert "📷 MACRO" in SYSTEM_PROMPT_HYBRID
 
+    assert "POV KİLİDİ" in SYSTEM_PROMPT and "👁 POV" in SYSTEM_PROMPT
+    assert "POV LOCK" in SYSTEM_PROMPT_HYBRID and "👁 POV" in SYSTEM_PROMPT_HYBRID
+    assert "DUYGU YAYI DAĞILIMI" in SYSTEM_PROMPT
+    assert "EMOTION ARC PACING" in SYSTEM_PROMPT_HYBRID
+
 
 def test_context_preview_respects_hybrid_toggle(client, headers, monkeypatch):
     """/ai/context-preview, ask_qwen'in KULLANDIĞI system prompt'u göstermeli.
