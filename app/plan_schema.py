@@ -131,6 +131,39 @@ BEAT_ETIKET_ANAHTARLARI = [k for k, _, _ in BEAT_ETIKETLERI]
 BEAT_ETIKET_GORUNEN = {k: g for k, g, _ in BEAT_ETIKETLERI if k}
 BEAT_ETIKET_TALIMAT = {k: t for k, _, t in BEAT_ETIKETLERI if k}
 
+# KAMERA ETİKETLERİ: betimleme akışını (zoom yönü) plan düzeyinde kontrol
+# eden, Kinaye/Sezdirme/İroni'den TAMAMEN BAĞIMSIZ ikinci bir etiket seti
+# (bkz. sohbet - "Kamera Sistemi"). Bir beat ikisini aynı anda taşıyabilir:
+# anlam katmanı (etiket) ile teknik katman (kamera) çakışmaz. Boş ("") =
+# etiketsiz - model varsayılan döngüye (geniş→yakın→mikro) bırakılır,
+# kamera hareketi uydurmaz. SYSTEM_PROMPT/SYSTEM_PROMPT_HYBRID'deki
+# "KAMERA ETİKETLERİ"/"CAMERA TAGS" bloğuyla birebir eşleşmeli.
+KAMERA_ETIKETLERI = [
+    ("", "—", ""),
+    ("wide", "📷 Geniş açı",
+     "Sadece çevre: mekan, ışık, mimari; kişi bunun içinde küçük kalır."),
+    ("zoom_in", "📷 Yaklaşma",
+     "Önce dünya, sonra karakter/nesne; geniş açının göstereceği şey "
+     "ODAK satırından gelmeli, uydurulmaz."),
+    ("close", "📷 Yakın plan",
+     "Karakterin bedeni, jesti, yüzü; çevre bulanıklaşır."),
+    ("macro", "📷 Mikro detay",
+     "TEK bir ayrıntıya aşırı yakınlaşma; geri kalan her şey kaybolur."),
+    ("zoom_out", "📷 Uzaklaşma",
+     "Yakından başlar, genişe çıkar; karakter dünya içinde küçülür."),
+    ("threshold", "📷 Eşik geçişi",
+     "Sınır aşımı: kapı, geçit, iç/dış; geçiş anı beat'in merkezidir."),
+    ("cycle", "📷 Tam döngü",
+     "Beat içinde tam bir tur: geniş → yakın → geri çekilme."),
+    ("tracking", "📷 Takip",
+     "Kamera karakterle birlikte hareket eder; çevre akıp geçer."),
+    ("pov", "📷 Bakış açısı",
+     "Dünya karakterin gözünden görülür; karakterin kendisi dışarıdan "
+     "betimlenmez."),
+]
+KAMERA_ANAHTARLARI = [k for k, _, _ in KAMERA_ETIKETLERI]
+KAMERA_GORUNEN = {k: g for k, g, _ in KAMERA_ETIKETLERI if k}
+
 
 def _zaman_tipi(deger) -> str:
     """Girişi şemadaki anahtara oturtur. Kullanıcı ya da eski kayıt "SAYAÇ"
@@ -191,7 +224,7 @@ def normalize_cell(data: Any) -> dict:
     for key, _, _ in YAY_ALANLARI:
         val = data.get(key)
         if isinstance(val, str):
-            out[key] = [{"metin": val.strip(), "etiket": ""}] if val.strip() else []
+            out[key] = [{"metin": val.strip(), "etiket": "", "kamera": ""}] if val.strip() else []
         elif isinstance(val, list):
             temiz = []
             for it in val:
@@ -200,12 +233,14 @@ def normalize_cell(data: Any) -> dict:
                     if not metin:
                         continue
                     etiket = str(it.get("etiket") or "").strip().lower()
+                    kamera = str(it.get("kamera") or "").strip().lower()
                     temiz.append({
                         "metin": metin,
                         "etiket": etiket if etiket in BEAT_ETIKET_ANAHTARLARI else "",
+                        "kamera": kamera if kamera in KAMERA_ANAHTARLARI else "",
                     })
                 elif isinstance(it, str) and it.strip():
-                    temiz.append({"metin": it.strip(), "etiket": ""})
+                    temiz.append({"metin": it.strip(), "etiket": "", "kamera": ""})
             out[key] = temiz
 
     # Bilinmeyen ya da boş değer "normal"e düşer: uzunluksuz plan, modelin
@@ -430,6 +465,14 @@ def render_cell(data: Any) -> str:
             et = b["etiket"]
             if et:
                 baslik += f" [{BEAT_ETIKET_GORUNEN[et]} — {BEAT_ETIKET_TALIMAT[et]}]"
+            # Kamera etiketi, anlam etiketinden (Kinaye/Sezdirme/İroni)
+            # TAMAMEN BAĞIMSIZ - ikisi aynı beat'te yan yana durabilir.
+            # Kısa tutulur (sadece görünen ad) çünkü tam tanım zaten
+            # SYSTEM_PROMPT/SYSTEM_PROMPT_HYBRID'deki "KAMERA ETİKETLERİ"
+            # sözlüğünde var - burada tekrarlamak gürültü olurdu.
+            kam = b.get("kamera", "")
+            if kam:
+                baslik += f" [{KAMERA_GORUNEN[kam]}]"
             satirlar.append(f"{baslik}: {b['metin']}")
 
     tarif = dict((k, t) for k, _, t in UZUNLUK_SEVIYELERI).get(d["uzunluk"])

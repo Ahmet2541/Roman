@@ -363,6 +363,62 @@ baştan uygula):
   yukarıdaki madde bu ilkenin önüne geçer.
 - Sahnenin atmosferi (ruh hâli) baştan sona sahnenin işleviyle tutarlı
   kalsın, amaçsız sallanmasın.
+- PARAGRAF GEÇİŞLERİ: Ardışık paragraflar AYNI karakterin kesintisiz
+  eylemini sürdürüyorsa, aralarına küçük bir mekânsal/zamansal köprü
+  koy - bir adım, bir nefes, bakışın kayması. Bir mikro-eylemden
+  diğerine hiçbir bağ dokusu olmadan sert atlama; okurun bedenin
+  paragraflar arasında mekânda hareket ettiğini hissetmesi gerekir.
+  İyi köprü örnekleri: "Birkaç adım sonra...", "Yürüyüşü
+  sürdürürken...", "Tam o sırada...", "Bir nefeslik sessizlikte..."
+  Bu kalıpları HER SEFERİNDE aynı şekilde kullanma - çeşitlendir ya da
+  sahneye özgü yenisini uydur. Köprü sahneden doğmalı, formülden değil.
+- PARAGRAFLAR ARASI TEKRAR: Aynı zarfı, sıfatı ya da duyusal betimleyiciyi
+  ARDIŞIK paragraflarda tekrar kullanma. N. paragrafta bir kelime
+  gerekliyse, N+1. paragrafta farklı bir kelime bul ya da cümleyi yeniden
+  kur. Bu, "Dil ekonomisi" ilkesinin paragraf sınırları arasına uzanmış
+  hâlidir.
+  İhlal örneği: "omuzları hafifçe dikleşti" (4. paragraf) ardından
+  "hafifçe yanına dönüp baktı" (5. paragraf) - "hafifçe" bitişik iki
+  paragrafta tekrar ediyor; ikincisi değiştirilmeli ya da cümle yeniden
+  kurulmalı.
+  Kapsam: bu kural SADECE ardışık paragraflar için geçerlidir. Aynı
+  kelime uzak paragraflarda meşru şekilde tekrar edebilir (leitmotif,
+  nakarat).
+- BELİRSİZLİK KONUMLANDIRMASI: Planın belirsiz işaretlediği beat'lerde
+  ("sanki", "ister gibiydi", "gibiydi"), belirsizlik ifadesini cümlenin
+  BAŞINA koy ki okur şüphe çerçevesine ilk kelimeden girsin. Sona
+  bırakılan bir ifade sonradan akla gelmiş gibi okunur ve gizemi
+  zayıflatır. Bu, belirsiz beat'ler için bir VARSAYILANDIR, başka
+  konumlara mutlak bir yasak değil - ama beat açıkça geç gelen bir
+  şüphe istemedikçe sondaki konumu kullanma.
+- BETİMLEME KAMERA DÖNGÜSÜ: Betimleme, tek yönlü bir yakınlaşma değil,
+  sinematik bir zoom döngüsü izlesin: GENİŞ (dünya, ışık) → YAKIN
+  (beden, jest) → NESNE/MEKAN → GENİŞE GERİ ÇEKİL, artık karakterin
+  o dünya içindeki küçüklüğünü ya da yerini taşıyarak. Bu, sahne
+  açılışları için VARSAYILANDIR; her paragrafta zorlama.
+- KAMERA ETİKETLERİ: Bir beat 📷 etiketi taşıyorsa, bu o beat için
+  AÇIK bir çerçeveleme talimatıdır:
+  📷 Geniş açı — kurucu görünüş: çevre, ışık, mimari; kişi bunun
+     içinde küçük kalır.
+  📷 Yaklaşma — geniş başlar, yakınla biter: önce dünya, sonra
+     karakter/nesne. Geniş açının göstereceği şey planın ODAK
+     satırından gelmeli, asla uydurulmaz.
+  📷 Yakın plan — karakterin bedeninde, jestinde, yüzünde kal; çevre
+     bulanıklaşır.
+  📷 Mikro detay — TEK bir ayrıntıya aşırı yakınlaşma; geri kalan
+     her şey geri planda kaybolur.
+  📷 Uzaklaşma — yakından başlar, genişe biter: karakter dünya
+     içinde küçülür (yalnızlık, ölçek, önemsizlik).
+  📷 Eşik geçişi — bir sınırı aşmak: kapı, geçit, iç/dış; geçiş anı
+     beat'in merkezidir.
+  📷 Tam döngü — beat içinde tam bir tur: geniş → yakın → geri
+     çekilme.
+  📷 Takip — kamera karakterle birlikte hareket eder; çevre akıp
+     geçer.
+  📷 Bakış açısı — dünya karakterin gözünden görülür; karakterin
+     kendisinin dışarıdan betimlemesi yapılmaz.
+  📷 etiketi TAŞIMAYAN beat'ler varsayılan döngüyü izler - etiketsiz
+  bir beat'te kamera hareketi uydurma.
 
 Yanıtını SADECE aşağıdaki JSON formatında ver, başka
 hiçbir açıklama veya markdown ekleme:
@@ -485,6 +541,63 @@ later correction):
   precedence.
 - ATMOSPHERE: The scene's mood must remain consistent with its function
   from start to finish; don't let it drift aimlessly.
+- PARAGRAPH TRANSITIONS: When consecutive paragraphs follow the SAME
+  character's continuous action, bridge them with a small spatial or
+  temporal cue — a step, a breath, a shift in gaze. Do NOT jump
+  abruptly from one completed micro-action to the next without any
+  connective tissue; the reader needs to feel the body moving through
+  space between paragraphs.
+  Examples of good bridges: "Birkaç adım sonra...", "Yürüyüşü
+  sürdürürken...", "Tam o sırada...", "Bir nefeslik sessizlikte..."
+  Do NOT use these exact phrases every time — vary them or invent
+  context-appropriate ones. The bridge must arise from the scene,
+  not from a formula.
+- CROSS-PARAGRAPH REPETITION: Do not reuse the same adverb, adjective,
+  or sensory descriptor in CONSECUTIVE paragraphs. If a word is
+  necessary in paragraph N, find a different word or restructure the
+  sentence in paragraph N+1. This is an extension of "Economy of
+  language" across paragraph boundaries.
+  Example of the violation: "omuzları hafifçe dikleşti" (paragraph 4)
+  followed by "hafifçe yanına dönüp baktı" (paragraph 5) — "hafifçe"
+  appears twice in adjacent paragraphs; the second must be replaced
+  or the sentence restructured.
+  Scope: this applies to CONSECUTIVE paragraphs only. The same word
+  may legitimately recur in distant paragraphs (leitmotif, refrain).
+- BELİRSİZLİK KONUMLANDIRMASI (ambiguity placement): For beats the plan
+  marks as ambiguous ("sanki", "ister gibiydi", "gibiydi"), place the
+  ambiguity marker at the BEGINNING of the clause so the reader enters
+  the doubt-frame from the first word. A trailing marker reads as an
+  afterthought and weakens the mystery. This is a DEFAULT for ambiguous
+  beats, not an absolute ban on other positions — but do not use the
+  trailing position unless the beat explicitly calls for late-arriving
+  doubt.
+- DESCRIPTIVE CAMERA CYCLE: Description should follow a cinematic zoom
+  cycle, not a single-direction zoom-in: WIDE (world, light) → CLOSE
+  (body, gesture) → OBJECT/SPACE → PULL BACK to wide, now carrying the
+  character's smallness or place within the world. This is the DEFAULT
+  for scene openings; do not force it in every paragraph.
+- CAMERA TAGS: If a beat carries a 📷 tag, it is an EXPLICIT framing
+  instruction for that beat:
+  📷 WIDE — establishing view: environment, light, architecture; the
+     person stays small within it.
+  📷 ZOOM_IN — start wide, end close: the world first, then the
+     character/object. What the wide view shows must come from the
+     plan's ODAK line, never invented.
+  📷 CLOSE — stay on the character's body, gesture, face; the
+     surroundings blur.
+  📷 MACRO — extreme close-up on ONE micro-detail; everything else
+     falls away.
+  📷 ZOOM_OUT — start close, end wide: the character becomes small
+     within the world (solitude, scale, insignificance).
+  📷 THRESHOLD — crossing a boundary: door, gate, inside/outside; the
+     moment of passing is the beat's center.
+  📷 CYCLE — full round within the beat: wide → close → pull-back.
+  📷 TRACKING — the camera moves with the character; the environment
+     streams past.
+  📷 POV — the world seen through the character's eyes; no external
+     description of the character themselves.
+  Beats WITHOUT a 📷 tag follow the default cycle — do NOT invent a
+  camera movement where none is tagged.
 
 KİNAYE / SEZDİRME / İRONİ (Turkish literary terms — keep these terms as-is):
 - 💬 KİNAYE (double-meaning / allegorical intent): The expression can be

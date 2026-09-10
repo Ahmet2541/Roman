@@ -43,6 +43,53 @@ def test_structured_cell_renders_to_content(client, headers):
     assert "BAĞLANTI: MP7 (ayna) → T1·G1" in c
 
 
+def test_camera_tag_renders_independently_of_beat_etiket(client, headers):
+    """Kamera etiketi (kamera_sistemi), Kinaye/Sezdirme/İroni'den TAMAMEN
+    BAĞIMSIZ - bir beat ikisini aynı anda taşıyabilir ve ikisi de köşeli
+    parantez içinde AI'ya giden satıra eklenir."""
+    m = _matris(client, headers)
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {
+            "olay": "Test olayı.",
+            "giris": [{"metin": "Panelvandan indiler.", "etiket": "", "kamera": "zoom_in"}],
+            "gelisme": [{"metin": "Avuçtaki şişliği fark etti.",
+                         "etiket": "sezdirme", "kamera": "macro"}],
+            "sonuc": [{"metin": "İçeri girdiler.", "etiket": "", "kamera": "threshold"}],
+        },
+    }, headers=headers)
+    assert r.status_code == 200, r.text
+    c = r.json()["content"]
+    assert "GİRİŞ [📷 Yaklaşma]: Panelvandan indiler." in c
+    assert "[🌀 Sezdirme —" in c and "[📷 Mikro detay]" in c
+    assert "SONUÇ [📷 Eşik geçişi]: İçeri girdiler." in c
+
+
+def test_camera_tag_defaults_to_empty_and_is_backward_compatible(client, headers):
+    """Eski kayıtlarda (kamera alanı hiç yok) hiçbir şey bozulmaz - kamera
+    köşeli parantezi hiç eklenmez."""
+    m = _matris(client, headers)
+    r = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {
+            "olay": "Test olayı.",
+            "giris": [{"metin": "Eski kayıt.", "etiket": ""}],  # kamera yok
+        },
+    }, headers=headers)
+    assert r.status_code == 200, r.text
+    c = r.json()["content"]
+    assert "GİRİŞ: Eski kayıt." in c
+    assert "📷" not in c
+
+    # Geçersiz/bilinmeyen kamera değeri sessizce boşa düşer.
+    r2 = client.put(f"/matrix/{m['id']}/cells", json={
+        "column_id": m["columns"][0]["id"], "row_id": m["rows"][0]["id"],
+        "data": {"giris": [{"metin": "Test.", "etiket": "", "kamera": "uydurma_deger"}]},
+    }, headers=headers)
+    assert r2.status_code == 200, r2.text
+    assert "📷" not in r2.json()["content"]
+
+
 def test_missing_fields_warn_but_do_not_block(client, headers):
     m = _matris(client, headers)
     r = client.put(f"/matrix/{m['id']}/cells", json={

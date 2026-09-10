@@ -371,6 +371,27 @@ def test_hybrid_system_prompt_flag_selects_correct_prompt(monkeypatch):
     assert "whichever beat — GİRİŞ, GELİŞME, or SONUÇ — is tagged Kinaye" in SYSTEM_PROMPT_HYBRID
 
 
+def test_camera_system_rules_present_in_both_prompts():
+    """Kamera Sistemi (5 yeni kural + CAMERA TAGS sözlüğü) SYSTEM_PROMPT
+    (Türkçe) ve SYSTEM_PROMPT_HYBRID (İngilizce) ikisinde de olmalı -
+    hangi prompt aktifse aktif olsun davranış aynı kalsın."""
+    from app.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_HYBRID
+
+    assert "PARAGRAF GEÇİŞLERİ" in SYSTEM_PROMPT
+    assert "PARAGRAFLAR ARASI TEKRAR" in SYSTEM_PROMPT
+    assert "BELİRSİZLİK KONUMLANDIRMASI" in SYSTEM_PROMPT
+    assert "BETİMLEME KAMERA DÖNGÜSÜ" in SYSTEM_PROMPT
+    assert "KAMERA ETİKETLERİ" in SYSTEM_PROMPT
+    assert "📷 Mikro detay" in SYSTEM_PROMPT
+
+    assert "PARAGRAPH TRANSITIONS" in SYSTEM_PROMPT_HYBRID
+    assert "CROSS-PARAGRAPH REPETITION" in SYSTEM_PROMPT_HYBRID
+    assert "BELİRSİZLİK KONUMLANDIRMASI (ambiguity placement)" in SYSTEM_PROMPT_HYBRID
+    assert "DESCRIPTIVE CAMERA CYCLE" in SYSTEM_PROMPT_HYBRID
+    assert "CAMERA TAGS" in SYSTEM_PROMPT_HYBRID
+    assert "📷 MACRO" in SYSTEM_PROMPT_HYBRID
+
+
 def test_context_preview_respects_hybrid_toggle(client, headers, monkeypatch):
     """/ai/context-preview, ask_qwen'in KULLANDIĞI system prompt'u göstermeli.
     Önceden her zaman SYSTEM_PROMPT'u (Türkçe) hardcode ediyordu ve

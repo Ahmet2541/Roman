@@ -959,15 +959,42 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     kinaye: 'Bu ifade hem gerçek hem mecaz okunabilir; mecaz anlamı yaz, olduğu gibi kopyalama.',
   };
 
+  // KAMERA ETİKETLERİ: bkz. app/plan_schema.py KAMERA_ETIKETLERI - betimleme
+  // akışını (zoom yönü) plan düzeyinde kontrol eden, Kinaye/Sezdirme/İroni'den
+  // TAMAMEN BAĞIMSIZ ikinci bir dropdown. Bir beat ikisini aynı anda taşıyabilir.
+  const KAMERA_ETIKETLERI = [
+    ['', '—'],
+    ['wide', '📷 Geniş açı'],
+    ['zoom_in', '📷 Yaklaşma'],
+    ['close', '📷 Yakın plan'],
+    ['macro', '📷 Mikro detay'],
+    ['zoom_out', '📷 Uzaklaşma'],
+    ['threshold', '📷 Eşik geçişi'],
+    ['cycle', '📷 Tam döngü'],
+    ['tracking', '📷 Takip'],
+    ['pov', '📷 Bakış açısı'],
+  ];
+  const KAMERA_ACIKLAMA = {
+    wide: 'Sadece çevre: mekan, ışık, mimari; kişi bunun içinde küçük kalır.',
+    zoom_in: 'Önce dünya, sonra karakter/nesne; ODAK satırından gelmeli, uydurulmaz.',
+    close: 'Karakterin bedeni, jesti, yüzü; çevre bulanıklaşır.',
+    macro: 'TEK bir ayrıntıya aşırı yakınlaşma; geri kalan her şey kaybolur.',
+    zoom_out: 'Yakından başlar, genişe çıkar; karakter dünya içinde küçülür.',
+    threshold: 'Sınır aşımı: kapı, geçit, iç/dış; geçiş anı beat\'in merkezidir.',
+    cycle: 'Beat içinde tam bir tur: geniş → yakın → geri çekilme.',
+    tracking: 'Kamera karakterle birlikte hareket eder; çevre akıp geçer.',
+    pov: 'Dünya karakterin gözünden görülür; karakter dışarıdan betimlenmez.',
+  };
+
   const beatler = {};
   YAY.forEach(([k]) => {
     const v = d[k];
     const list = Array.isArray(v)
       ? v.map(it => (it && typeof it === 'object')
-          ? { metin: it.metin || '', etiket: it.etiket || '' }
-          : { metin: it || '', etiket: '' })
+          ? { metin: it.metin || '', etiket: it.etiket || '', kamera: it.kamera || '' }
+          : { metin: it || '', etiket: '', kamera: '' })
       : [];
-    beatler[k] = list.length ? list : [{ metin: '', etiket: '' }];
+    beatler[k] = list.length ? list : [{ metin: '', etiket: '', kamera: '' }];
   });
 
   function cizYay() {
@@ -993,6 +1020,9 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
           <div style="display:flex;gap:4px;align-items:center;margin:3px 0 0 ${beatler[k].length > 1 ? '32px' : '0'};">
             <select class="mc-beat-etiket" data-k="${k}" data-i="${i}" style="width:110px;font-size:11px;" title="${b.etiket ? escapeHtml(BEAT_ETIKET_ACIKLAMA[b.etiket] || '') : 'Bu beat için özel bir yazım talimatı seç (opsiyonel)'}">
               ${BEAT_ETIKETLERI.map(([val, label]) => `<option value="${val}" ${b.etiket === val ? 'selected' : ''}>${label}</option>`).join('')}
+            </select>
+            <select class="mc-beat-kamera" data-k="${k}" data-i="${i}" style="width:110px;font-size:11px;" title="${b.kamera ? escapeHtml(KAMERA_ACIKLAMA[b.kamera] || '') : 'Bu beat için kamera hareketi seç (opsiyonel) - Kinaye/Sezdirme\'den bağımsız'}">
+              ${KAMERA_ETIKETLERI.map(([val, label]) => `<option value="${val}" ${b.kamera === val ? 'selected' : ''}>${label}</option>`).join('')}
             </select>
             <button class="btn-icon-sm mc-beat-dogrula-btn" data-k="${k}" data-i="${i}" style="${b.etiket ? '' : 'visibility:hidden;'}min-width:24px;flex-shrink:0;" title="Bu etiketi AI'ya kontrol ettir">🔍</button>
             ${beatler[k].length > 1 ? `<button class="btn-icon-sm mc-beat-sil" data-k="${k}" data-i="${i}" style="flex-shrink:0;" title="Bu beat'i kaldır">✕</button>` : ''}
@@ -1032,11 +1062,17 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
         dogrulaBeat(s.dataset.k, +s.dataset.i);
       });
     });
+    kutu.querySelectorAll('.mc-beat-kamera').forEach(s => {
+      s.addEventListener('change', () => {
+        beatler[s.dataset.k][+s.dataset.i].kamera = s.value;
+        s.title = s.value ? (KAMERA_ACIKLAMA[s.value] || '') : 'Bu beat için kamera hareketi seç (opsiyonel) - Kinaye/Sezdirme\'den bağımsız';
+      });
+    });
     kutu.querySelectorAll('.mc-beat-dogrula-btn').forEach(btn => {
       btn.addEventListener('click', () => dogrulaBeat(btn.dataset.k, +btn.dataset.i, { zorla: true }));
     });
     kutu.querySelectorAll('.mc-beat-ekle').forEach(b => b.addEventListener('click', () => {
-      beatler[b.dataset.k].push({ metin: '', etiket: '' }); cizYay();
+      beatler[b.dataset.k].push({ metin: '', etiket: '', kamera: '' }); cizYay();
     }));
     kutu.querySelectorAll('.mc-beat-sil').forEach(b => b.addEventListener('click', () => {
       beatler[b.dataset.k].splice(+b.dataset.i, 1); cizYay();
@@ -1224,9 +1260,9 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       nesneler: _adlariAyristir(el('mcNesneler').value, varliklar.nesneler),
       odak: el('mcOdak').value,
       uzunluk: el('mcUzunluk').value,
-      giris: beatler.giris.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '' })).filter(x => x.metin),
-      gelisme: beatler.gelisme.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '' })).filter(x => x.metin),
-      sonuc: beatler.sonuc.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '' })).filter(x => x.metin),
+      giris: beatler.giris.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '', kamera: x.kamera || '' })).filter(x => x.metin),
+      gelisme: beatler.gelisme.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '', kamera: x.kamera || '' })).filter(x => x.metin),
+      sonuc: beatler.sonuc.map(x => ({ metin: (x.metin || '').trim(), etiket: x.etiket || '', kamera: x.kamera || '' })).filter(x => x.metin),
       baglantilar: baglar.filter(b => (b.kod || '').trim()),
     };
   }
@@ -1255,6 +1291,8 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
         let baslik = `${etiket}${v[k].length > 1 ? ` ${j + 1}` : ''}`;
         const gorunen = { sezdirme: '🌀 Sezdirme', ironi: '🎭 İroni', kinaye: '💬 Kinaye' }[b.etiket];
         if (gorunen) baslik += ` [${gorunen} — ${BEAT_ETIKET_ACIKLAMA[b.etiket]}]`;
+        const kameraGorunen = KAMERA_ETIKETLERI.find(([val]) => val === b.kamera && val)?.[1];
+        if (kameraGorunen) baslik += ` [${kameraGorunen}]`;
         satir.push(`${baslik}: ${b.metin}`);
       });
     });
