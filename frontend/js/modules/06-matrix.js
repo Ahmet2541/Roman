@@ -707,7 +707,12 @@ function wireKisiAdAutocomplete(girdiEl, kayitlar) {
 // bir dalda (her şeye izin verir, çünkü kesme zaten niyeti belli eder).
 const _TR_COKLUK = "lar|ler";
 const _TR_IYELIK = "ımız|imiz|umuz|ümüz|ınız|iniz|unuz|ünüz|ları|leri|ım|im|um|üm|ın|in|un|ün|sı|si|su|sü|ı|i|u|ü";
-const _TR_HAL = "dan|den|tan|ten|nın|nin|nun|nün|yla|yle|ya|ye|yı|yi|yu|yü|da|de|ta|te|ın|in|un|ün|la|le|a|e|ı|i|u|ü";
+// "n" tamponu: 3. tekil iyelik (-ı/-i/-u/-ü) ile biten bir kelimeye (ör.
+// "Binası") hâl eki eklenirken araya "n" girer - "Binası"+"na"="Binasına",
+// +"nda"="Binasında", +"ndan"="Binasından", +"nı"="Binasını" (belirtme).
+// Bunlar "y" tamponlu biçimlerden (Ankara+ya="Ankaraya") FARKLI bir seri,
+// ikisi de gerekli.
+const _TR_HAL = "ndan|nden|nda|nde|nın|nin|nun|nün|dan|den|tan|ten|yla|yle|ya|ye|yı|yi|yu|yü|na|ne|nı|ni|nu|nü|da|de|ta|te|ın|in|un|ün|la|le|a|e|ı|i|u|ü";
 const _TR_EK_ZINCIRI = `(?:${_TR_COKLUK})?(?:${_TR_IYELIK})?(?:${_TR_HAL})?`;
 
 function taraVarliklar(metin, kayitlar) {
