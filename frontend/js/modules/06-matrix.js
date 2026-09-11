@@ -603,22 +603,92 @@ function wireMultiAutocomplete(inputId, kayitlar) {
   girdi.addEventListener('blur', () => setTimeout(() => { kutu.style.display = 'none'; }, 180));
 }
 
-// Tek değerli alanlar için aynı gösterge: alanın altında tek rozet.
+// Tek değerli alanlar için: hem eşleşme rozeti hem tıklanabilir öneri
+// listesi (MEKAN gibi - virgülsüz, tek değer). Takma adları da arar.
 function wireSingleMatch(inputId, kayitlar) {
   const girdi = document.getElementById(inputId);
   if (!girdi || !girdi.parentElement) return;
+  const kutu = document.createElement('div');
+  kutu.style.cssText = 'display:none;flex-wrap:wrap;gap:4px;margin-top:4px;';
+  girdi.parentElement.appendChild(kutu);
   const durum = document.createElement('div');
   durum.className = 'eslesme-satiri';
   girdi.parentElement.appendChild(durum);
-  const ciz = () => {
+
+  function durumCiz() {
     const ad = (girdi.value || '').trim();
     if (!ad) { durum.innerHTML = ''; return; }
     const esti = kayitlar.some(k => _trLowerJs(k.name || '') === _trLowerJs(ad));
     durum.innerHTML = `<span class="eslesme-rozet${esti ? '' : ' yok'}" title="${esti ? 'Kayıtlı varlık - ID ile bağlanacak' : 'Kayıtta yok - serbest metin olarak gidecek'}">${escapeHtml(ad)}${esti ? '' : ' ?'}</span>`;
-  };
-  girdi.addEventListener('input', ciz);
-  girdi.addEventListener('change', ciz);
-  ciz();
+  }
+  function ciz() {
+    const aranan = (girdi.value || '').trim();
+    if (!aranan) { kutu.style.display = 'none'; return; }
+    const hedef = _trLowerJs(aranan);
+    const eslesen = kayitlar
+      .filter(k => [k.name, ...(Array.isArray(k.aliases) ? k.aliases : [])]
+        .some(x => x && _trLowerJs(String(x)).includes(hedef)))
+      .filter(k => _trLowerJs(k.name || '') !== hedef)
+      .slice(0, 8);
+    if (!eslesen.length) { kutu.style.display = 'none'; return; }
+    kutu.style.display = 'flex';
+    kutu.innerHTML = eslesen.map(k =>
+      `<button type="button" class="btn btn-sm ac-oner" data-ad="${escapeHtml(k.name)}" style="padding:2px 8px;font-size:11.5px;">${escapeHtml(k.name)}</button>`
+    ).join('');
+    kutu.querySelectorAll('.ac-oner').forEach(b => b.addEventListener('click', () => {
+      girdi.value = b.dataset.ad;
+      kutu.style.display = 'none';
+      durumCiz();
+      girdi.dispatchEvent(new Event('input'));
+      girdi.dispatchEvent(new Event('change'));
+      girdi.focus();
+    }));
+  }
+  girdi.addEventListener('input', () => { ciz(); durumCiz(); });
+  girdi.addEventListener('change', durumCiz);
+  girdi.addEventListener('focus', ciz);
+  girdi.addEventListener('blur', () => setTimeout(() => { kutu.style.display = 'none'; }, 180));
+  durumCiz();
+}
+
+// KİŞİ ADI AUTOCOMPLETE: id'ye değil ELEMENTE bağlanır - KİŞİLER satırları
+// her cizKisiler() çağrısında yeniden yaratılıyor, id-bazlı wireXxx
+// fonksiyonları burada işe yaramaz (element her seferinde yeni). Kutu,
+// satırın flex düzenini bozmasın diye mutlak konumlu - ad input'unun
+// sarmalayıcısına asılır, satırın altına taşmaz.
+function wireKisiAdAutocomplete(girdiEl, kayitlar) {
+  const anchor = girdiEl.parentElement;
+  if (!anchor) return;
+  anchor.style.position = 'relative';
+  const kutu = document.createElement('div');
+  kutu.style.cssText = 'display:none;flex-direction:column;gap:2px;position:absolute;top:100%;left:0;z-index:20;background:var(--paper);border:1px solid var(--border);padding:4px;border-radius:4px;box-shadow:0 2px 6px rgba(0,0,0,.15);min-width:160px;';
+  anchor.appendChild(kutu);
+
+  function ciz() {
+    const aranan = (girdiEl.value || '').trim();
+    if (!aranan) { kutu.style.display = 'none'; return; }
+    const hedef = _trLowerJs(aranan);
+    const eslesen = kayitlar
+      .filter(k => [k.name, ...(Array.isArray(k.aliases) ? k.aliases : [])]
+        .some(x => x && _trLowerJs(String(x)).includes(hedef)))
+      .filter(k => _trLowerJs(k.name || '') !== hedef)
+      .slice(0, 6);
+    if (!eslesen.length) { kutu.style.display = 'none'; return; }
+    kutu.style.display = 'flex';
+    kutu.innerHTML = eslesen.map(k =>
+      `<button type="button" class="btn btn-sm ac-oner" data-ad="${escapeHtml(k.name)}" style="text-align:left;padding:2px 8px;font-size:11.5px;">${escapeHtml(k.name)}</button>`
+    ).join('');
+    kutu.querySelectorAll('.ac-oner').forEach(b => b.addEventListener('click', () => {
+      girdiEl.value = b.dataset.ad;
+      kutu.style.display = 'none';
+      girdiEl.dispatchEvent(new Event('input'));
+      girdiEl.dispatchEvent(new Event('change'));
+      girdiEl.focus();
+    }));
+  }
+  girdiEl.addEventListener('input', ciz);
+  girdiEl.addEventListener('focus', ciz);
+  girdiEl.addEventListener('blur', () => setTimeout(() => { kutu.style.display = 'none'; }, 180));
 }
 
 // VARLIK TANIMA: yazılan metinde geçen kayıtlı Kişi/Mekan/Nesne'leri bulur.
@@ -628,6 +698,18 @@ function wireSingleMatch(inputId, kayitlar) {
 // "Genç Mühendüs" yazarsan rozet çıkmaz (yazım hatası görünür), çıkan
 // rozete dokununca varlık doğrudan hücrenin listesine eklenir.
 // Takma adlar da taranır: "usta" yazınca İhtiyar Teknisyen yakalanır.
+// TÜRKÇE ÇEKİM EKİ ZİNCİRİ (çoğul + iyelik + hâl) - bilinçli olarak
+// YAPIM EKLERİNİ (usta+lık="ustalık" gibi YENİ bir kelime kuran ekleri)
+// içermez, yoksa "ustalık" içinde "usta" yanlışlıkla eşleşir (bkz.
+// tests/js/smoke.js "kelime sinirini gozetir"). Sadece isme bitişik
+// yazılmış (kesme işaretsiz) "Vicdanlardan", "Canlara" gibi gerçek
+// çekim eklerini ismin devamı sayar - kesme işaretli hâl zaten ayrı
+// bir dalda (her şeye izin verir, çünkü kesme zaten niyeti belli eder).
+const _TR_COKLUK = "lar|ler";
+const _TR_IYELIK = "ımız|imiz|umuz|ümüz|ınız|iniz|unuz|ünüz|ları|leri|ım|im|um|üm|ın|in|un|ün|sı|si|su|sü|ı|i|u|ü";
+const _TR_HAL = "dan|den|tan|ten|nın|nin|nun|nün|yla|yle|ya|ye|yı|yi|yu|yü|da|de|ta|te|ın|in|un|ün|la|le|a|e|ı|i|u|ü";
+const _TR_EK_ZINCIRI = `(?:${_TR_COKLUK})?(?:${_TR_IYELIK})?(?:${_TR_HAL})?`;
+
 function taraVarliklar(metin, kayitlar) {
   const hedef = _trLowerJs(metin || '');
   if (hedef.length < 2) return [];
@@ -637,8 +719,12 @@ function taraVarliklar(metin, kayitlar) {
       .filter(x => x && String(x).trim().length >= 3);
     for (const aday of adaylar) {
       const a = _trLowerJs(String(aday));
-      // Kelime sınırı: "usta" kelimesi "ustalık" içinde eşleşmesin.
-      const kalip = new RegExp(`(^|[^\\p{L}\\p{N}])${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\p{L}\\p{N}]|$)`, 'u');
+      // Kelime sınırı: "usta" kelimesi "ustalık" içinde eşleşmesin -
+      // ama "Vicdan'a"/"Vicdanın" gibi kesme işaretli ya da eklemeli
+      // (kesmesiz) hâl/iyelik/çoğul ekleri ismin parçası sayılmalı.
+      const kalip = new RegExp(
+        `(^|[^\\p{L}\\p{N}])${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` +
+        `(?:['\u2019][\\p{L}]*|${_TR_EK_ZINCIRI})(?=[^\\p{L}\\p{N}]|$)`, 'u');
       if (kalip.test(hedef)) { bulunan.push({ id: k.id, ad: k.name, gecen: String(aday) }); break; }
     }
   }
@@ -924,6 +1010,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     }).join('');
     kutu.querySelectorAll('.mc-k-ad').forEach(x => x.addEventListener('input', () => { kisiler[+x.dataset.i].ad = x.value; }));
     kutu.querySelectorAll('.mc-k-ad').forEach(x => x.addEventListener('change', () => { kisiler[+x.dataset.i].ad = x.value; cizKisiler(); cizYay(); }));
+    kutu.querySelectorAll('.mc-k-ad').forEach(x => wireKisiAdAutocomplete(x, varliklar.kisiler));
     kutu.querySelectorAll('.mc-k-a').forEach(x => x.addEventListener('input', () => { kisiler[+x.dataset.i].duygu.baslangic = x.value; }));
     kutu.querySelectorAll('.mc-k-b').forEach(x => x.addEventListener('input', () => { kisiler[+x.dataset.i].duygu.bitis = x.value; }));
     kutu.querySelectorAll('.mc-k-sil').forEach(x => x.addEventListener('click', () => { kisiler.splice(+x.dataset.i, 1); cizKisiler(); cizYay(); }));
