@@ -1013,7 +1013,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
             </span>
             <span style="font-size:11px;color:var(--text-muted);padding-top:8px;min-width:14px;">${i + 1}</span>` : ''}
             <div style="position:relative;flex:1;min-width:0;">
-              <textarea class="mc-beat" data-k="${k}" data-i="${i}" style="min-height:90px;width:100%;box-sizing:border-box;padding-bottom:14px;resize:vertical;">${escapeHtml(b.metin)}</textarea>
+              <textarea class="mc-beat" data-k="${k}" data-i="${i}" style="min-height:90px;width:100%;box-sizing:border-box;padding-bottom:14px;resize:none;overflow:hidden;">${escapeHtml(b.metin)}</textarea>
               <span class="mc-beat-sayac" data-k="${k}" data-i="${i}" style="position:absolute;right:5px;bottom:3px;font-size:9.5px;color:var(--text-muted);background:var(--paper);padding:0 3px;border-radius:2px;pointer-events:none;"></span>
             </div>
           </div>
@@ -1038,6 +1038,14 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
         <button class="btn btn-sm mc-beat-ekle" data-k="${k}" style="margin-top:2px;">+ ${etiket}</button>
       </div>`).join('');
 
+    // OTOMATİK YÜKSEKLİK: kutu, içeriğe göre kendini büyütür - manuel
+    // resize (sürükleme) kaldırıldı, artık gerek yok. min-height (90px)
+    // altına inmez; scrollHeight kadar büyür, taşma/iç kaydırma çubuğu
+    // (overflow:hidden) hiç oluşmaz.
+    const otomatikBuyut = (t) => {
+      t.style.height = 'auto';
+      t.style.height = `${Math.max(t.scrollHeight, 90)}px`;
+    };
     const sayacGuncelle = (t) => {
       const n = t.value.length;
       const s = kutu.querySelector(`.mc-beat-sayac[data-k="${t.dataset.k}"][data-i="${t.dataset.i}"]`);
@@ -1049,10 +1057,12 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     };
     kutu.querySelectorAll('.mc-beat').forEach(t => {
       sayacGuncelle(t);
+      otomatikBuyut(t);
       t.addEventListener('input', () => {
         beatler[t.dataset.k][+t.dataset.i].metin = t.value;
         sayacGuncelle(t);
         tanimaSeridi(t, t.value);
+        otomatikBuyut(t);
       });
       // "Kutu tamamlandıktan sonra" = kutudan çıkınca (blur). Her tuş
       // vuruşunda değil - yavaş/maliyetli olur.
