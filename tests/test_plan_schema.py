@@ -1807,6 +1807,36 @@ def test_draft_check_clean_text_passes(client, headers):
     assert r["denetim_sayisi"] == 5
 
 
+def test_draft_check_repetition_excludes_character_names(client, headers):
+    """Kişi/mekan/nesne adlarının kelimeleri (mühendis, ihtiyar, teknisyen
+    gibi) "Tekrar" uyarısına dahil edilmemeli - karaktere her göndermede
+    adının geçmesi yazım tiği değil, kaçınılmaz ve doğrudur."""
+    ch = _denetim_kur(client, headers)
+    metin = (
+        "Panelvandan indi Genç Mühendis. Etrafa bakındı, sonra Genç Mühendis "
+        "mendille alnını sildi. Az sonra Genç Mühendis binaya girdi ve "
+        "arkasından kapıyı kapattı Genç Mühendis."
+    )
+    r = client.post("/ai/draft-check", json={
+        "chapter_id": ch["id"], "text": metin}, headers=headers).json()
+    tekrarlar = [b["mesaj"] for b in r["bulgular"] if b["denetim"] == "Tekrar"]
+    assert not any("mühendis" in m.lower() for m in tekrarlar)
+
+
+def test_draft_check_repetition_still_catches_real_tics(client, headers):
+    """Karakter/mekan/nesne adı olmayan gerçek bir kelime tekrarı hâlâ
+    yakalanmalı - hariç tutma listesi sadece kayıtlı varlık adlarını
+    kapsamalı, genel af değil."""
+    ch = _denetim_kur(client, headers)
+    metin = (
+        "Genç Mühendis hafifçe gülümsedi. Mendille alnını hafifçe sildi. "
+        "Kapıyı hafifçe itti. Elini hafifçe kaldırdı. Binaya girdi."
+    )
+    r = client.post("/ai/draft-check", json={
+        "chapter_id": ch["id"], "text": metin}, headers=headers).json()
+    assert any(b["denetim"] == "Tekrar" and "hafifçe" in b["mesaj"] for b in r["bulgular"])
+
+
 def test_matrix_health_reports_structural_faults(client, headers):
     """Yapısal kusurlar denetim promptuna gitmeden, matris açılır açılmaz
     görünmeli - bağsız plan doldururken fark edilmeli, en sonda değil."""

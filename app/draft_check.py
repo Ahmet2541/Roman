@@ -188,10 +188,19 @@ def _sezdirme_ihlali(metin_kucuk, plan) -> list:
     return bulgular
 
 
-def _tekrar(metin) -> list:
-    """Aynı kelimenin ya da cümle başlangıcının aşırı tekrarı."""
+def _tekrar(metin, haric_kelimeler=None) -> list:
+    """Aynı kelimenin ya da cümle başlangıcının aşırı tekrarı.
+
+    haric_kelimeler: plan matrisindeki KİŞİLER/MEKAN/NESNELER adlarından
+    çıkarılmış kelime kümesi (küçük harf). Bir karakterin adı ("Genç
+    Mühendis", "İhtiyar Teknisyen") sahne boyunca doğal olarak defalarca
+    geçer - bu bir yazım tiği DEĞİL, karaktere gönderme yapmanın tek
+    yolu. Onları "tekrar" diye işaretlemek yanlış alarm üretir.
+    """
     bulgular = []
-    kelimeler = re.findall(r"[\wçğıöşüÇĞİÖŞÜ]{6,}", _tr_lower(metin))
+    haric = haric_kelimeler or set()
+    kelimeler = [w for w in re.findall(r"[\wçğıöşüÇĞİÖŞÜ]{6,}", _tr_lower(metin))
+                 if w not in haric]
     if kelimeler:
         for kelime, adet in Counter(kelimeler).most_common(3):
             # 6+ harfli bir kelime 4+ kez geçiyorsa göze batar
@@ -212,6 +221,22 @@ def _tekrar(metin) -> list:
     return bulgular
 
 
+def _varlik_kelimeleri(birlesik) -> set:
+    """KİŞİLER/MEKAN/NESNELER adlarındaki kelimeleri (küçük harf) tek
+    kümede toplar - _tekrar()'ın hariç tutması için. Çok kelimeli adlar
+    ("Genç Mühendis") kelime kelime ayrılır, tek harfli/çok kısa
+    parçalar (bağlaç riski) elenir."""
+    adlar = [k["ad"] for k in birlesik.get("kisiler", [])]
+    if birlesik.get("mekan"):
+        adlar.append(birlesik["mekan"])
+    adlar += [n["ad"] for n in birlesik.get("nesneler", [])]
+    kelimeler = set()
+    for ad in adlar:
+        for w in re.findall(r"[\wçğıöşüÇĞİÖŞÜ]{3,}", _tr_lower(ad or "")):
+            kelimeler.add(w)
+    return kelimeler
+
+
 def denetle(db, universe_id: int, novel_id: int, chapter_id: int, metin: str) -> dict:
     """Beş denetimi çalıştırır. Plan yoksa yalnızca tekrar denetimi koşar."""
     metin = (metin or "").strip()
@@ -219,12 +244,11 @@ def denetle(db, universe_id: int, novel_id: int, chapter_id: int, metin: str) ->
         return {"bulgular": [], "denetim_sayisi": 0}
 
     metin_kucuk = _tr_lower(metin)
-    bulgular = list(_tekrar(metin))
 
     hucreler = (db.query(models.MatrixCell)
                 .filter(models.MatrixCell.chapter_id == chapter_id).all())
     if not hucreler:
-        return {"bulgular": bulgular, "denetim_sayisi": 1}
+        return {"bulgular": _tekrar(metin), "denetim_sayisi": 1}
 
     # Bölüme birden çok hücre bağlıysa hepsinin varlıkları meşrudur;
     # beat kapsaması ise hücre hücre bakılır.
@@ -244,6 +268,7 @@ def denetle(db, universe_id: int, novel_id: int, chapter_id: int, metin: str) ->
         if z is not None and (sahne_zamani is None or z < sahne_zamani):
             sahne_zamani = z
 
+    bulgular = _tekrar(metin, _varlik_kelimeleri(birlesik))
     bulgular += _plana_sadakat(db, metin_kucuk, birlesik, universe_id, sahne_zamani)
     bulgular += _zaman_cizgisi(metin_kucuk, birlesik)
     bulgular += _beat_kapsama(metin_kucuk, birlesik)
