@@ -432,6 +432,13 @@ baştan uygula):
   anlatıcı, POV kişisinin konumu/bilgisi gereği BİLEMEYECEĞİ bir şeyi
   (başka bir odada olan biteni, başka birinin geçmişte yaşadığı bir anı
   o kişi anlatmadıkça) asla söylemez.
+- PHYSICAL RULES: Respect physical/spatial consistency at all times. A
+  character cannot perceive or describe a surface, side, or area that
+  is not currently visible from their actual physical position - for
+  example, do not describe the back of a statue, a person's back, or
+  the far side of an object until the character has actually moved to
+  where that side is visible. If a beat implies such a detail, either
+  move the character there first or drop the detail until they do.
 - DUYGU YAYI DAĞILIMI: KİŞİLER'de bir kişinin duygu yayı (başlangıç→bitiş)
   tanımlıysa, bu geçişi GİRİŞ/GELİŞME/SONUÇ'un doğal sırasına yay - GİRİŞ
   başlangıç duygusuna yakın dursun, GELİŞME kademeli değişimi taşısın,
@@ -633,6 +640,13 @@ later correction):
   character could not know (what's happening in another room, another
   person's unshared memory) unless that information reaches them
   in-scene.
+- PHYSICAL RULES: Respect physical/spatial consistency at all times. A
+  character cannot perceive or describe a surface, side, or area that
+  is not currently visible from their actual physical position - for
+  example, do not describe the back of a statue, a person's back, or
+  the far side of an object until the character has actually moved to
+  where that side is visible. If a beat implies such a detail, either
+  move the character there first or drop the detail until they do.
 - EMOTION ARC PACING: If a KİŞİLER entry defines an emotional arc
   (start→end) for a character, spread that transition across the
   natural order of GİRİŞ/GELİŞME/SONUÇ — GİRİŞ should sit close to the

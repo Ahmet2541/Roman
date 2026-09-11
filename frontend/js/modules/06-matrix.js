@@ -1100,7 +1100,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
             </span>
             <span style="font-size:11px;color:var(--text-muted);padding-top:8px;min-width:14px;">${i + 1}</span>` : ''}
             <div style="position:relative;flex:1;min-width:0;">
-              <textarea class="mc-beat" data-k="${k}" data-i="${i}" style="min-height:90px;width:100%;box-sizing:border-box;padding-bottom:14px;resize:none;overflow:hidden;">${escapeHtml(b.metin)}</textarea>
+              <textarea class="mc-beat" data-k="${k}" data-i="${i}" style="min-height:56px;width:100%;box-sizing:border-box;padding-bottom:14px;resize:none;overflow:hidden;">${escapeHtml(b.metin)}</textarea>
               <span class="mc-beat-sayac" data-k="${k}" data-i="${i}" style="position:absolute;right:5px;bottom:3px;font-size:9.5px;color:var(--text-muted);background:var(--paper);padding:0 3px;border-radius:2px;pointer-events:none;"></span>
             </div>
           </div>
@@ -1131,7 +1131,7 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     // (overflow:hidden) hiç oluşmaz.
     const otomatikBuyut = (t) => {
       t.style.height = 'auto';
-      t.style.height = `${Math.max(t.scrollHeight, 90)}px`;
+      t.style.height = `${Math.max(t.scrollHeight, 56)}px`;
     };
     const sayacGuncelle = (t) => {
       const n = t.value.length;
