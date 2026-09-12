@@ -901,10 +901,19 @@ function renderReader(chapter) {
       </div>`
     : '';
 
+  // Başlıkta ESKİDEN her zaman "Bölüm ${chapter.number}" yazıyordu - number
+  // romandaki TÜM girdilerin (Kısım+Alt Başlık+Bölüm) düz sırası olduğu
+  // için bir Kısım "Bölüm 1", ardından gelen Alt Başlık da "Bölüm 2"
+  // görünüyordu (ikisi de yanlış etiketle). Artık fihristteki hiyerarşik
+  // numara (chapterEntryNumber, örn. "1-1") ve türe göre doğru etiket
+  // kullanılıyor - sidebar'daki ile birebir aynı.
+  const entryKindLabel = { part: 'Kısım', subtitle: 'Alt Başlık', chapter: 'Bölüm' }[chapter.kind] || 'Bölüm';
+  const headerNumber = chapterEntryNumber || chapter.number;
+
   readerPane.innerHTML = `
     ${kindNote}
     <div style="display:flex;justify-content:space-between;align-items:center;">
-      <h2 style="margin:0;">Bölüm ${chapter.number}${chapter.title ? ' — ' + escapeHtml(stripMarkdownArtifacts(chapter.title)) : ''}</h2>
+      <h2 style="margin:0;">${entryKindLabel} ${headerNumber}${chapter.title ? ' — ' + escapeHtml(stripMarkdownArtifacts(chapter.title)) : ''}</h2>
       <button class="btn btn-sm" id="editTitleBtn">Başlığı düzenle</button>
     </div>
     <div id="chapterHealthStrip" style="margin-top:8px;"></div>
