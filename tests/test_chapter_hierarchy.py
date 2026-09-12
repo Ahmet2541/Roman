@@ -41,6 +41,24 @@ def test_resolve_chapters_for_part_sees_through_subtitles(client, headers, novel
     assert numbers == [3], "Alt Başlık'ın altındaki bölüm de bu Kısım'a ait sayılmalı"
 
 
+def test_resolve_chapters_for_part_includes_subtitle_with_own_text(client, headers, novel):
+    """Alt Başlık artık kendi metnini tutabiliyor (bkz. routers/chapters.py
+    paragraf kısıtının kaldırılması) - toplu Kısım taraması bu metni de
+    kapsamalı, yoksa oradaki içerik hiç taranmaz."""
+    novel_id = novel["id"]
+    r = client.post("/chapters/", json={"number": 1, "title": "KISIM", "kind": "part"}, headers=headers)
+    part = r.json()
+    r = client.post("/chapters/", json={"number": 2, "title": "Kendi metni olan Alt Başlık", "kind": "subtitle"}, headers=headers)
+    sub = r.json()
+    client.put(f"/chapters/{sub['id']}/paragraphs/1", json={"number": 1, "text": "Alt Başlık'ın kendi metni."}, headers=headers)
+    # Metni OLMAYAN bir Alt Başlık da eklensin - o dahil edilmemeli
+    client.post("/chapters/", json={"number": 3, "title": "Boş Alt Başlık", "kind": "subtitle"}, headers=headers)
+
+    db = _db()
+    chapters = resolve_chapters_for_part(db, novel_id, part["id"])
+    assert [c.id for c in chapters] == [sub["id"]]
+
+
 def test_resolve_chapters_for_part_with_no_chapters_returns_empty(client, headers, novel):
     novel_id = novel["id"]
     r = client.post("/chapters/", json={"number": 1, "title": "Boş Kısım", "kind": "part"}, headers=headers)

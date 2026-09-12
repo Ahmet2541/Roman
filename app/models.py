@@ -315,12 +315,17 @@ class Rule(Base):
 # ---- Roman metni: Bölümler / Paragraflar (KİTABA özel, evrene değil) ------
 
 class Chapter(Base):
-    """kind: 'chapter' (normal bölüm, paragrafları olur) | 'part' (KISIM /
-    büyük başlık - ör. 'BİRİNCİ KISIM') | 'subtitle' (alt başlık - bir
-    bölüm grubunun içindeki daha küçük ayraç). 'part' ve 'subtitle'
-    girdilerinin paragrafı olmaz, sadece fihristte/okuyucuda bir ayraç
-    satırı olarak görünürler ve AI bağlam katmanlarına (fihrist özeti,
-    full-scan) dahil EDİLMEZLER - çünkü içerikleri yok, sadece yapı.
+    """kind: 'chapter' (normal bölüm) | 'part' (KISIM / büyük başlık - ör.
+    'BİRİNCİ KISIM') | 'subtitle' (alt başlık - bir bölüm grubunun
+    içindeki daha küçük ayraç). ESKİDEN 'part' ve 'subtitle' girdilerinin
+    paragrafı OLAMAZDI (sadece yapısal ayraç sayılırlardı). Bu kısıt
+    kaldırıldı (Scrivener/Ulysses gibi araçlarda da böyle bir ayrım yok -
+    bir klasör/grup kendisi de metin tutabilir): artık HER üç tür de
+    kendi paragraflarını tutabilir. 'kind' sadece fihrist/okuyucuda nasıl
+    gösterileceğini (kalın/büyük harf, italik, düz) belirleyen bir
+    biçim ipucudur - içerik kapasitesini kısıtlamaz. Bir girdinin gerçek
+    metni varsa (paragraphs doluysa) AI bağlam katmanlarına (fihrist
+    özeti, full-scan, üslup taraması) türü ne olursa olsun dahil edilir.
     number, TÜM girdiler (bölüm+başlık+alt başlık) arasındaki sırayı
     belirler - "bölüm numarası" değil "sıra" olarak düşünülmeli.
 

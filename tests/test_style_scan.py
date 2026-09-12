@@ -95,6 +95,28 @@ def test_scan_counts_suffixed_forms_and_caches(client, headers):
     assert cached_gibi["count"] == 8
 
 
+def test_scan_includes_text_written_directly_on_a_heading(client, headers):
+    """Kısım/Alt Başlık artık kendi metnini tutabiliyor (bkz.
+    routers/chapters.py) - üslup taraması kind='chapter' ile sınırlı
+    kalırsa oraya yazılan yazım tikleri hiç görülmez. Bu test o metnin de
+    taramaya girdiğini doğrular."""
+    tik = ("Bina bir dev gibi duruyordu. Cam bir ayna gibiydi. Rüzgar bir çığlık "
+           "gibi esiyordu. Kapı bir ağız gibiydi. Işık bir bıçak gibi kesiyordu. "
+           "Gece bir örtü gibiydi. Ses bir fısıltı gibi geliyordu. Sabah bir vaat gibiydi. ")
+    sub = client.post(
+        "/chapters/", json={"number": 1, "title": "Ara Başlık", "kind": "subtitle"}, headers=headers
+    ).json()
+    r = client.put(
+        f"/chapters/{sub['id']}/paragraphs/1", json={"number": 1, "text": tik + _FILLER}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+
+    report = client.post("/style/scan", headers=headers).json()
+    assert report["chapter_count"] == 1
+    gibi = next(p for p in report["patterns"] if "gibi" in p["name"])
+    assert gibi["count"] == 8
+
+
 def test_min_count_guards_short_text_false_alarm(client, headers):
     # ~55 kelimede TEK "sanki": binde ~18 (eşik 1.5'in çok üstünde) ama
     # mutlak sayı 1 < min_count 4 -> exceeded OLMAMALI. Bu, kısa metinde

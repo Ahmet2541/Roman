@@ -890,25 +890,19 @@ function renderReader(chapter) {
       </div>
     </div>`).join('');
 
-  // Uyarı SADECE gerçek sorun varsa: başlık türünde VE içinde paragraf
-  // varken. Ayrıca ✕ ile kapatılırsa bölüm bazında KALICI kapanır (her
-  // dönüşte tekrar çıkıp gürültü yapmasın) ve elle 3 adımlı tarif yerine
-  // tek tıkla düzelten bir düğme var.
-  let kindWarnDismissed = false;
-  try {
-    kindWarnDismissed = JSON.parse(localStorage.getItem('roman_kindwarn_dismissed') || '[]').includes(chapter.id);
-  } catch (e) { /* yoksay */ }
-  const kindWarning = (chapter.kind !== 'chapter' && (chapter.paragraphs || []).length > 0 && !kindWarnDismissed)
-    ? `<div class="panel" id="kindWarningBanner" style="border-color:var(--danger);background:#fdf1f0;margin-bottom:12px;position:relative;">
-        <button id="dismissKindWarningBtn" title="Kapat (bir daha gösterme)" style="position:absolute;top:8px;right:10px;background:none;border:none;cursor:pointer;font-size:15px;color:var(--danger);line-height:1;">✕</button>
-        <strong style="font-size:12.5px;color:var(--danger);padding-right:20px;display:block;">⚠ Bu bir ${chapter.kind === 'part' ? 'Kısım' : 'Alt Başlık'} ama içinde metin var.</strong>
-        <div style="font-size:12px;margin-top:4px;">Kısım/Alt Başlık bir ayraçtır; metin normalde Bölüm'de durur (fihrist ve AI bağlamı buna göre çalışır).</div>
-        <button class="btn btn-sm btn-primary" id="moveParagraphsOutBtn" style="margin-top:8px;">↓ Metni yeni bir Bölüm'e taşı</button>
+  // ESKİDEN burada kırmızı bir "⚠ hata" bandı vardı: Kısım/Alt Başlık'ın
+  // kendi metni olması bir ANOMALİ sayılıyordu. Artık bilinçli desteklenen
+  // bir özellik (bkz. routers/chapters.py) - o yüzden alarm değil, nötr bir
+  // bilgi notu + isteğe bağlı "ayrı Bölüm'e taşı" kısayolu gösteriliyor.
+  const kindNote = (chapter.kind !== 'chapter' && (chapter.paragraphs || []).length > 0)
+    ? `<div class="panel" style="margin-bottom:12px;">
+        <div style="font-size:12px;color:var(--text-muted);">Bu bir ${chapter.kind === 'part' ? 'Kısım' : 'Alt Başlık'} - kendi metnini tutuyor. Fihrist ve AI bağlamı bu metni normal bir bölüm gibi işler.</div>
+        <button class="btn btn-sm" id="moveParagraphsOutBtn" style="margin-top:8px;">↓ İstersen ayrı bir Bölüm'e taşı</button>
       </div>`
     : '';
 
   readerPane.innerHTML = `
-    ${kindWarning}
+    ${kindNote}
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <h2 style="margin:0;">Bölüm ${chapter.number}${chapter.title ? ' — ' + escapeHtml(stripMarkdownArtifacts(chapter.title)) : ''}</h2>
       <button class="btn btn-sm" id="editTitleBtn">Başlığı düzenle</button>
@@ -1053,20 +1047,9 @@ function renderReader(chapter) {
       await loadChapterList(created.id);
     } catch (err) {
       alert(err.message);
-      btn.disabled = false; btn.textContent = '↓ Metni yeni bir Bölüm\'e taşı';
+      btn.disabled = false; btn.textContent = '↓ İstersen ayrı bir Bölüm\'e taşı';
     }
   });
-  const dismissKindWarningBtn = document.getElementById('dismissKindWarningBtn');
-  if (dismissKindWarningBtn) {
-    dismissKindWarningBtn.addEventListener('click', () => {
-      try {
-        const key = 'roman_kindwarn_dismissed';
-        const list = JSON.parse(localStorage.getItem(key) || '[]');
-        if (!list.includes(chapter.id)) { list.push(chapter.id); localStorage.setItem(key, JSON.stringify(list)); }
-      } catch (e) { /* yoksay */ }
-      el('kindWarningBanner').style.display = 'none';
-    });
-  }
   el('editTitleBtn').addEventListener('click', async () => {
     const newTitle = prompt('Yeni bölüm başlığı:', chapter.title || '');
     if (newTitle === null) return;

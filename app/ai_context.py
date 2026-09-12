@@ -1359,7 +1359,11 @@ def build_outline_layer(db: Session, universe_id: int, current_novel_id: int) ->
             para_count = len([p for p in c.paragraphs if (p.text or "").strip()])
             extra = f", {para_count} paragraf" if para_count else ", metin yok"
             seviye = f"seviye {level + 1}"
-            tur = "METİN BÖLÜMÜ" if (c.kind == "chapter" and not is_container) else "BAŞLIK"
+            # Kısım/Alt Başlık artık kendi metnini de tutabiliyor (bkz.
+            # routers/chapters.py) - gerçekten paragrafı olan bir girdi,
+            # türü ne olursa olsun AI'ya "METİN BÖLÜMÜ" olarak görünmeli;
+            # yoksa AI o metni salt yapısal bir ayraç sanıp atlayabilir.
+            tur = "METİN BÖLÜMÜ" if ((c.kind == "chapter" and not is_container) or para_count > 0) else "BAŞLIK"
             lines.append(f"{code} · {title} [{seviye}, {tur}, {extra.lstrip(', ')}] (sistem no: {c.number})")
     return "\n".join(lines)
 

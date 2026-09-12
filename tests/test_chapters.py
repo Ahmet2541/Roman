@@ -15,11 +15,11 @@ def test_paragraph_can_be_added_to_heading_that_already_has_text(client, headers
     guncel = client.get(f"/chapters/{ch['id']}", headers=headers).json()
     assert len(guncel["paragraphs"]) == 2
 
-    # BOŞ başlık hâlâ korunur - yanlışlıkla metin yazılmasın
+    # BOŞ başlığa da artık metin yazılabilir - "kap türüne göre içerik
+    # yasağı" tamamen kaldırıldı (bkz. routers/chapters.py).
     bos = client.post("/chapters/", json={"number": 5, "kind": "part", "title": "Ayraç"}, headers=headers).json()
     r2 = client.put(f"/chapters/{bos['id']}/paragraphs/1", json={"number": 1, "text": "Metin"}, headers=headers)
-    assert r2.status_code == 400
-    assert "henüz metni yok" in r2.json()["detail"]
+    assert r2.status_code == 200, r2.text
 
 
 def test_empty_paragraph_text_rejected(client, headers):

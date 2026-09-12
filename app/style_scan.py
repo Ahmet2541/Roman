@@ -195,9 +195,14 @@ def scan_universe(db: Session, universe_id: int) -> dict:
     per_chapter: dict[int, list] = {p.id: [] for p, _ in compiled}
 
     for novel in novels:
+        # kind=="chapter" ile sınırlama KALDIRILDI: Kısım/Alt Başlık girdileri
+        # de artık gerçek metin tutabiliyor (bkz. routers/chapters.py paragraf
+        # ekleme kısıtının kaldırılması) - üslup taraması onların metnini
+        # atlarsa aynı yazım tikleri oradan kaçmış olur. Metni olmayan
+        # girdiler zaten aşağıdaki "text.strip()" kontrolüyle elenir.
         chapters = (
             db.query(models.Chapter)
-            .filter(models.Chapter.novel_id == novel.id, models.Chapter.kind == "chapter")
+            .filter(models.Chapter.novel_id == novel.id)
             .order_by(models.Chapter.number)
             .all()
         )
