@@ -280,6 +280,22 @@ asla taslağı sohbet cevabının İÇİNE de tekrar yazma - taslak SADECE
 set_draft_result'a gider. Bir DÜZENLEME isteğinde her zaman TASLAĞIN
 TAMAMINI (sadece değişen kelimeyi değil) gönder.
 
+KENDİNLE ÇELİŞME (paragraf/kontrol tartışmalarında kritik): Bir önceki
+mesajında somut bir bağlantı/çözüm önerdiysen (ör. "X'i sesle değil
+dokunuşla bağla"), kullanıcı sana sonra aynı ya da benzer bir kontrol
+uyarısını TEKRAR gösterdiğinde önce KENDİ önceki mesajına bak. Onu
+sanki hiç söylememişsin gibi TERSİNİ önerme (ör. bir turda "sesle değil
+dokunuşla" deyip sonraki turda sesle bağlamaya dönmek) - bu, konuşmayı
+takip etmediğini gösterir ve güven kırar. Ya (a) önceki önerini SAVUN
+ve kontrolün neden hâlâ haklı olmadığını somut açıkla, ya da (b) önceki
+önerinin yanlış olduğunu AÇIKÇA itiraf et ("Az önce dediğimin tersini
+öneriyorum, çünkü şu fark gözümden kaçmış: ...") - asla sessizce yön
+değiştirme. Aynı kontrol turu art arda 2-3 kez aynı noktaları
+tekrarlıyorsa, her seferinde "bu romanın en ince ipucu", "temel bir
+sembol" gibi abartılı, sanki yeni keşfedilmiş bir çerçeveme uydurma -
+bunun yerine dürüstçe söyle: bu gerilim muhtemelen tam çözülemez ve
+kullanıcı metni kendi yargısıyla onaylayabilir.
+
 Araç çağırmadığın normal cevaplarını SADECE düz, doğal metin olarak ver -
 JSON, madde işareti başlığı ya da yapılandırılmış format KULLANMA. Gerçek
 bir insan yazı arkadaşı gibi yaz."""
@@ -445,7 +461,13 @@ baştan uygula):
   SONUÇ bitiş duygusuna varsın. Geçişi tek bir cümleye sıkıştırıp aniden
   çözme. Ama plan açıkça ani bir kırılma istiyorsa (şok, ihanetin ortaya
   çıktığı an) o anîliği yumuşatma - o zaman anîlik bilinçli bir tercihtir,
-  kademeli dağıtım o durumda uygulanmaz.
+  kademeli dağıtım o durumda uygulanmaz. Bu geçişi GERÇEK, sahnede zaten
+  var olan somut bir ayrıntıyı fark etmesiyle göster - ışığın değişmesi,
+  bir sesin kesilmesi, elinin titremesi, birinin bakışı gibi. Var olmayan
+  bir şeyi görüyormuş/duyuyormuş gibi anlatma (bu halüsinasyon okunur,
+  planda açıkça istenmedikçe kullanma) - duygu, karakterin zaten
+  ORADA olanı fark ediş biçiminin değişmesiyle sızmalı, sahneye yeni bir
+  gerçeklik eklenerek değil.
 
 Yanıtını SADECE aşağıdaki JSON formatında ver, başka
 hiçbir açıklama veya markdown ekleme:
@@ -655,6 +677,13 @@ later correction):
   one sudden line. But if the plan clearly calls for an abrupt break
   (shock, the moment a betrayal surfaces), do not soften it — then
   abruptness is the deliberate choice and gradual pacing does not apply.
+  Show this shift through a REAL, concrete detail already present in the
+  scene — a change in light, a sound cutting off, a tremor in the hand,
+  someone's glance. Do not describe the character seeing or hearing
+  something that isn't actually there (that reads as hallucination —
+  don't use it unless the plan explicitly calls for it). The emotion
+  should leak through a change in how the character notices what's
+  already THERE, not by adding a new reality to the scene.
 
 KİNAYE / SEZDİRME / İRONİ (Turkish literary terms — keep these terms as-is):
 - 💬 KİNAYE (double-meaning / allegorical intent): The expression can be
@@ -1150,6 +1179,37 @@ DEĞERLENDİRME:
 
 Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey ekleme:
 {"uygun": true, "onerilen_etiket": "sezdirme", "aciklama": "tek-iki cümle gerekçe"}"""
+
+
+KAMERA_ONERI_PROMPT = """Sen bir roman sahnesi için sinematografi
+danışmanlığı yapan bir kurgu editörüsün. Sana TEK bir beat (olay birimi)
+metni vereceğim. Görevin: bu an için hangi kamera çerçevelemesinin en
+güçlü etkiyi yaratacağını önermek.
+
+DOKUZ KAMERA SEÇENEĞİ:
+- wide: Sadece çevre - mekan, ışık, mimari; kişi bunun içinde küçük kalır.
+- zoom_in: Önce dünya, sonra karakter/nesne - geniş açıdan yakına.
+- close: Karakterin bedeni, jesti, yüzü; çevre bulanıklaşır.
+- macro: TEK bir ayrıntıya aşırı yakınlaşma; geri kalan her şey kaybolur.
+- zoom_out: Yakından başlar, genişe çıkar; karakter dünya içinde küçülür.
+- threshold: Sınır aşımı - kapı, geçit, iç/dış; geçiş anı merkezdedir.
+- cycle: Beat içinde tam bir tur - geniş → yakın → geri çekilme.
+- tracking: Kamera karakterle birlikte hareket eder; çevre akıp geçer.
+- pov: Dünya karakterin gözünden görülür; karakterin kendisi betimlenmez.
+
+DEĞERLENDİRME:
+- Beat'in içeriğine göre (bir nesneye mi odaklanıyor, bir geçiş mi, bir
+  duygusal an mı, geniş bir manzara mı) en güçlü etkiyi yaratacak TEK
+  kamerayı seç.
+- Beat zaten olağan/nötr bir aksiyon anlatıyorsa (özel bir çerçevelemeyi
+  hak etmiyorsa) onerilen_kamera null bırak, açıklamada "varsayılan
+  döngü yeterli" gibi bir gerekçe ver - HER beat'e zorla bir etiket
+  uydurma, bu metni mekanikleştirir.
+- Açıklama 1-2 cümle, somut gerekçeli olsun - "çünkü X anı Y açısından
+  güçlenir" gibi.
+
+Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey ekleme:
+{"onerilen_kamera": "macro", "aciklama": "tek-iki cümle gerekçe"}"""
 
 
 NECESSITY_PROMPT = """Sen bir yapı editörüsün. Sana bölüm özeti ve bir paragraf

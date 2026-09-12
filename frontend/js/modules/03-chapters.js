@@ -1273,7 +1273,19 @@ function renderReader(chapter) {
     });
   });
   el('addParaBtn').addEventListener('click', () => {
-    const nextNumber = chapter.paragraphs.length ? Math.max(...chapter.paragraphs.map(p => p.number)) + 1 : 1;
+    // Sadece chapter.paragraphs'a değil, DOM'da ZATEN duran (henüz
+    // kaydedilmemiş) boş kutulara da bak - yoksa "Kaydet"e basmadan art
+    // arda birkaç kez "+ Yeni paragraf"a tıklayınca hepsi AYNI numarayı
+    // alıyordu (chapter.paragraphs sayfa yenilenene kadar değişmiyor).
+    // Aynı numaraya sahip iki kutu kaydedilince biri diğerinin üzerine
+    // yazıyordu - "kaydedilmiyor" ve "numaralar değişmiyor" şikayetlerinin
+    // ikisi de bu tek çakışmadan kaynaklanıyordu.
+    const numaralar = [
+      ...chapter.paragraphs.map(p => p.number),
+      ...Array.from(document.querySelectorAll('.paragraph-text[data-number]'))
+        .map(el2 => parseInt(el2.dataset.number, 10)).filter(n => !isNaN(n)),
+    ];
+    const nextNumber = numaralar.length ? Math.max(...numaralar) + 1 : 1;
     addEmptyParagraphBlock(nextNumber);
   });
 }

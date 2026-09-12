@@ -335,6 +335,7 @@ def test_tool_names_never_leak_to_user():
     # Prompt seviyesinde de yasak
     assert "ARAÇ ADLARINI KULLANICIYA ASLA SÖYLEME" in CHAT_SYSTEM_PROMPT
     assert "İZİN İSTEME, ÜRET" in CHAT_SYSTEM_PROMPT
+    assert "KENDİNLE ÇELİŞME" in CHAT_SYSTEM_PROMPT
 
 
 def test_hybrid_system_prompt_flag_selects_correct_prompt(monkeypatch):
@@ -397,6 +398,8 @@ def test_camera_system_rules_present_in_both_prompts():
     assert "EMOTION ARC PACING" in SYSTEM_PROMPT_HYBRID
     assert "PHYSICAL RULES" in SYSTEM_PROMPT
     assert "PHYSICAL RULES" in SYSTEM_PROMPT_HYBRID
+    assert "halüsinasyon okunur" in SYSTEM_PROMPT
+    assert "reads as hallucination" in SYSTEM_PROMPT_HYBRID
 
 
 def test_context_preview_respects_hybrid_toggle(client, headers, monkeypatch):

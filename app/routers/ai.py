@@ -9,7 +9,7 @@ from .. import schemas, models
 from ..qwen_client import (
     build_context, ask_qwen, full_scan, chat_with_qwen, reader_test_chapter,
     suggest_paragraph_entities, trim_chat_history, estimate_context_size, literary_review, structure_scan, verify_paragraph_rewrite, retest_paragraph, motif_map, paragraph_roles, fuse_diagnoses, evaluate_tradeoff, paragraph_necessity, plan_from_text, micro_edit, extract_knowledge_map, review_arc, scan_voice, review_options, strip_tool_leaks, dogrula_beat_etiketi,
-    get_hybrid_prompt_enabled, set_hybrid_prompt_enabled,
+    get_hybrid_prompt_enabled, set_hybrid_prompt_enabled, oner_kamera,
 )
 from ..entities import ENTITY_MODELS
 from ..sections import SECTIONS_BY_ENTITY_TYPE, _tr_lower
@@ -660,6 +660,22 @@ def beat_etiket_dogrula_endpoint(
         raise HTTPException(400, "Boş beat metni doğrulanamaz")
     try:
         return schemas.BeatEtiketDogrulaResponse(**dogrula_beat_etiketi(payload.metin, payload.etiket))
+    except Exception as exc:
+        raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
+
+
+@router.post("/beat-kamera-oner", response_model=schemas.KameraOneriResponse)
+def beat_kamera_oner_endpoint(
+    payload: schemas.KameraOneriRequest,
+    _user=Depends(rate_limit(max_calls=30, window_seconds=60, label="beat kamera önerisi")),
+):
+    """Plan matrisinde bir beat için 'bu ana en iyi kamera hangisi olmalı'
+    sorusuna AI'dan öneri alır - etiket doğrulamadan farklı olarak seçim
+    şartı yok, kamera dropdown'u boşken de tetiklenebilir."""
+    if not payload.metin.strip():
+        raise HTTPException(400, "Boş beat metni için kamera önerilemez")
+    try:
+        return schemas.KameraOneriResponse(**oner_kamera(payload.metin))
     except Exception as exc:
         raise HTTPException(502, f"Qwen API'ye ulaşılamadı: {exc}")
 

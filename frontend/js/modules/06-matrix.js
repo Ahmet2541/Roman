@@ -1124,9 +1124,11 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
               ${b.pov && !kisiler.some(x => (x.ad || '').trim() === b.pov) ? `<option value="${escapeHtml(b.pov)}" selected>👁 ${escapeHtml(b.pov)} (KİŞİLER'de yok!)</option>` : ''}
             </select>
             <button class="btn-icon-sm mc-beat-dogrula-btn" data-k="${k}" data-i="${i}" style="${b.etiket ? '' : 'visibility:hidden;'}min-width:24px;flex-shrink:0;" title="Bu etiketi AI'ya kontrol ettir">🔍</button>
+            <button class="btn-icon-sm mc-beat-kamera-oner-btn" data-k="${k}" data-i="${i}" style="${b.metin.trim() ? '' : 'visibility:hidden;'}min-width:24px;flex-shrink:0;" title="Bu an için en iyi kamerayı AI'ya sor">💡</button>
             ${beatler[k].length > 1 ? `<button class="btn-icon-sm mc-beat-sil" data-k="${k}" data-i="${i}" style="flex-shrink:0;" title="Bu beat'i kaldır">✕</button>` : ''}
           </div>
-          <div class="mc-beat-dogrulama" data-k="${k}" data-i="${i}" style="font-size:11.5px;margin-top:2px;"></div>`).join('')}
+          <div class="mc-beat-dogrulama" data-k="${k}" data-i="${i}" style="font-size:11.5px;margin-top:2px;"></div>
+          <div class="mc-beat-kamera-oneri" data-k="${k}" data-i="${i}" style="font-size:11.5px;margin-top:2px;"></div>`).join('')}
         <button class="btn btn-sm mc-beat-ekle" data-k="${k}" style="margin-top:2px;">+ ${etiket}</button>
       </div>`).join('');
 
@@ -1150,11 +1152,13 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     kutu.querySelectorAll('.mc-beat').forEach(t => {
       sayacGuncelle(t);
       otomatikBuyut(t);
+      const kameraOnerBtn0 = kutu.querySelector(`.mc-beat-kamera-oner-btn[data-k="${t.dataset.k}"][data-i="${t.dataset.i}"]`);
       t.addEventListener('input', () => {
         beatler[t.dataset.k][+t.dataset.i].metin = t.value;
         sayacGuncelle(t);
         tanimaSeridi(t, t.value);
         otomatikBuyut(t);
+        if (kameraOnerBtn0) kameraOnerBtn0.style.visibility = t.value.trim() ? 'visible' : 'hidden';
       });
       // "Kutu tamamlandıktan sonra" = kutudan çıkınca (blur). Her tuş
       // vuruşunda değil - yavaş/maliyetli olur.
@@ -1185,6 +1189,9 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
     });
     kutu.querySelectorAll('.mc-beat-dogrula-btn').forEach(btn => {
       btn.addEventListener('click', () => dogrulaBeat(btn.dataset.k, +btn.dataset.i, { zorla: true }));
+    });
+    kutu.querySelectorAll('.mc-beat-kamera-oner-btn').forEach(btn => {
+      btn.addEventListener('click', () => onerKamera(btn.dataset.k, +btn.dataset.i));
     });
     kutu.querySelectorAll('.mc-beat-ekle').forEach(b => b.addEventListener('click', () => {
       beatler[b.dataset.k].push({ metin: '', etiket: '', kamera: '', pov: '' }); cizYay();
@@ -1272,6 +1279,50 @@ async function openMatrixCellEditor(m, colId, rowId, cellMap) {
       btn.title = 'Yazar bu etiketi onayladı';
     });
   }
+
+  // KAMERA ÖNERİSİ: "bu ana en iyi kamera hangisi olmalı" - etiket
+  // doğrulamadan FARKLI, seçim şartı yok, dropdown boşken de çalışır.
+  // Kendi kutusuna (mc-beat-kamera-oneri) yazar, dogrulama kutusuyla
+  // karışmaz - ikisi aynı beat'te aynı anda açık olabilir.
+  async function onerKamera(k, i) {
+    const b = beatler[k] && beatler[k][i];
+    const kutu = document.getElementById('mcYay');
+    if (!kutu) return;
+    const box = kutu.querySelector(`.mc-beat-kamera-oneri[data-k="${k}"][data-i="${i}"]`);
+    const btn = kutu.querySelector(`.mc-beat-kamera-oner-btn[data-k="${k}"][data-i="${i}"]`);
+    if (!b || !box || !btn || !b.metin.trim()) return;
+    const eskiMetin = btn.textContent;
+    btn.textContent = '⏳';
+    btn.title = 'Kamera önerisi isteniyor…';
+    let sonuc;
+    try {
+      sonuc = await api.post('/ai/beat-kamera-oner', { metin: b.metin.trim() });
+    } catch (err) {
+      btn.textContent = '⚠';
+      btn.title = 'Öneri alınamadı (bağlantı hatası) - tekrar denemek için tıkla';
+      return;
+    }
+    btn.textContent = eskiMetin;
+    btn.title = "Bu an için en iyi kamerayı AI'ya sor";
+    if (!sonuc.onerilen_kamera) {
+      box.innerHTML = `<div style="color:var(--text-muted);padding:2px 0;">💡 AI: özel bir çerçeveleme gerekmiyor - varsayılan döngü yeterli.${sonuc.aciklama ? ' ' + escapeHtml(sonuc.aciklama) : ''}</div>`;
+      return;
+    }
+    const onerilenGorunen = (KAMERA_ETIKETLERI.find(([v]) => v === sonuc.onerilen_kamera) || [null, sonuc.onerilen_kamera])[1];
+    box.innerHTML = `
+      <div style="border:1px solid var(--gold);border-radius:4px;padding:5px 7px;background:var(--paper-dim);">
+        💡 AI önerisi: <b>${escapeHtml(onerilenGorunen)}</b>.
+        <div style="color:var(--text-muted);margin:2px 0 4px;">${escapeHtml(sonuc.aciklama || '')}</div>
+        <button class="btn btn-sm mc-beat-kamera-oneri-uygula" data-k="${k}" data-i="${i}" data-onerilen="${sonuc.onerilen_kamera}">Uygula</button>
+        <button class="btn btn-sm mc-beat-kamera-oneri-kapat" data-k="${k}" data-i="${i}">Kapat</button>
+      </div>`;
+    box.querySelector('.mc-beat-kamera-oneri-uygula').addEventListener('click', () => {
+      beatler[k][i].kamera = sonuc.onerilen_kamera;
+      cizYay();
+    });
+    box.querySelector('.mc-beat-kamera-oneri-kapat').addEventListener('click', () => { box.innerHTML = ''; });
+  }
+
   cizYay();
   tumTanimalariTazele();
 

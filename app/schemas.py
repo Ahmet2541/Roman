@@ -1261,6 +1261,17 @@ class BeatEtiketDogrulaResponse(BaseModel):
     aciklama: str = ""
 
 
+class KameraOneriRequest(BaseModel):
+    metin: str
+
+
+class KameraOneriResponse(BaseModel):
+    """Bir beat için en iyi kamera çerçevelemesini önerir - etiket
+    doğrulamanın aksine seçim şartı yok, boş dropdown'da da çalışır."""
+    onerilen_kamera: Optional[str] = None
+    aciklama: str = ""
+
+
 class KnowledgeFactCreate(BaseModel):
     information: str
     notes: str = ""

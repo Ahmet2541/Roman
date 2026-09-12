@@ -802,6 +802,40 @@ def test_beat_etiket_dogrula_rejects_empty_text(client, headers):
     assert r.status_code == 400
 
 
+def test_beat_kamera_oner_returns_suggestion(client, headers):
+    """Kamera dropdown'u boşken de çalışır - etiket doğrulamanın aksine
+    'şu an ne var' değil 'en iyisi ne olurdu' sorusuna cevap verir."""
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "onerilen_kamera": "macro",
+            "aciklama": "Avuçtaki şişlik tek bir mikro ayrıntı, kamera oraya kilitlenmeli.",
+        })
+        r = client.post("/ai/beat-kamera-oner", json={
+            "metin": "Avucundaki şişliği ilk kez fark etti.",
+        }, headers=headers)
+    d = r.json()
+    assert d["onerilen_kamera"] == "macro"
+    assert d["aciklama"]
+
+
+def test_beat_kamera_oner_rejects_invalid_camera_key(client, headers):
+    """Model uydurma bir kamera anahtarı dönerse (kamera dışı bir isim gibi)
+    None'a düşülür - arayüz bilinmeyen bir seçenekle bozulmaz."""
+    with patch("app.qwen_client.get_client") as mc:
+        mc.return_value.chat.completions.create.return_value = _fake_qwen({
+            "onerilen_kamera": "uydurma_deger", "aciklama": "x",
+        })
+        r = client.post("/ai/beat-kamera-oner", json={
+            "metin": "Kapıyı yavaşça itti.",
+        }, headers=headers)
+    assert r.json()["onerilen_kamera"] is None
+
+
+def test_beat_kamera_oner_rejects_empty_text(client, headers):
+    r = client.post("/ai/beat-kamera-oner", json={"metin": "   "}, headers=headers)
+    assert r.status_code == 400
+
+
 def test_necessity_blocks_deletion_of_load_bearing_paragraph(client, headers):
     """Silme testi: karakter değişimi ya da ön sezdirme taşıyan paragraf
     için silme ASLA önerilmez; 'zayıf ama gerekli' ise güçlendirilir."""

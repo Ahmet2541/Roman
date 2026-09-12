@@ -33,6 +33,7 @@ from .prompts import (
     TRADEOFF_PROMPT,
     NECESSITY_PROMPT,
     BEAT_ETIKET_DOGRULAMA_PROMPT,
+    KAMERA_ONERI_PROMPT,
     SYSTEM_PROMPT_HYBRID,
     PLAN_FROM_TEXT_PROMPT,
     MICRO_EDIT_PROMPT,
@@ -2493,6 +2494,38 @@ def dogrula_beat_etiketi(metin: str, etiket: str) -> dict:
     return {
         "uygun": bool(data.get("uygun", True)),
         "onerilen_etiket": onerilen,
+        "aciklama": (data.get("aciklama") or "")[:300],
+    }
+
+
+_KAMERA_ANAHTARLARI = {
+    "wide", "zoom_in", "close", "macro", "zoom_out",
+    "threshold", "cycle", "tracking", "pov",
+}
+
+
+def oner_kamera(metin: str) -> dict:
+    """TEK bir beat için en iyi kamerayı önerir - bkz. prompts.py
+    KAMERA_ONERI_PROMPT. Etiket doğrulamadan farklı olarak "şu an seçili
+    olan doğru mu" değil, "hiç seçim yokken en iyisi ne olurdu" sorusuna
+    cevap verir - kamera dropdown'u boşken de çağrılabilir."""
+    if not metin.strip():
+        return {"onerilen_kamera": None, "aciklama": ""}
+    user = f"BEAT METNİ: \"{metin.strip()}\""
+    client = get_client()
+    response = client.chat.completions.create(
+        model=settings.qwen_model,
+        messages=[
+            {"role": "system", "content": KAMERA_ONERI_PROMPT},
+            {"role": "user", "content": user},
+        ],
+    )
+    data = _parse_json_lenient(response.choices[0].message.content) or {}
+    onerilen = data.get("onerilen_kamera")
+    if onerilen not in _KAMERA_ANAHTARLARI:
+        onerilen = None
+    return {
+        "onerilen_kamera": onerilen,
         "aciklama": (data.get("aciklama") or "")[:300],
     }
 
