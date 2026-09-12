@@ -1342,11 +1342,45 @@ function addEmptyParagraphBlock(number) {
   div.innerHTML = `<div class="paragraph-number">${number}</div>
     <div style="flex:1;">
       <div class="paragraph-text" contenteditable="true" data-number="${number}"></div>
-      <div class="paragraph-actions"><button class="btn btn-sm save-para-btn" data-number="${number}">Kaydet</button></div>
+      <div></div>
+      <div class="paragraph-actions">
+        <button class="btn btn-sm save-para-btn" data-number="${number}" disabled title="Değişiklik yapılmadı - paragraf zaten kayıtlı">Kaydet</button>
+        <span class="para-save-state" data-number="${number}"></span>
+      </div>
     </div>`;
   readerPane.insertBefore(div, addBtn);
-  div.querySelector('.save-para-btn').addEventListener('click', () => saveParagraph(currentChapter.id, number));
-  div.querySelector('.paragraph-text').focus();
+
+  const el = div.querySelector('.paragraph-text');
+  const saveBtn = div.querySelector('.save-para-btn');
+  const state = div.querySelector('.para-save-state');
+  el.dataset.original = '';
+
+  // Elle girilen YENİ paragraf da var olan paragraflarla AYNI oto-kayıt
+  // kalıbını izler (dirty-check + blur autosave, bkz. renderReader):
+  // boşken hiç istek atılmaz, yazılınca "Kaydet" aktifleşir, odaktan
+  // çıkınca (blur) otomatik kaydedilir - elle "Kaydet"e basmak zorunlu
+  // değildir. Önceden bu blok yalnızca manuel Kaydet düğmesiyle kaydediliyordu.
+  const setDirty = (dirty) => {
+    saveBtn.disabled = !dirty;
+    saveBtn.title = dirty ? 'Değişiklikleri kaydet' : 'Değişiklik yapılmadı - paragraf zaten kayıtlı';
+    if (state) {
+      state.textContent = dirty ? '• kaydedilmedi' : '';
+      state.style.color = 'var(--danger)';
+    }
+    el.classList.toggle('dirty', dirty);
+  };
+  el.addEventListener('input', () => setDirty(el.innerText.trim() !== el.dataset.original));
+  el.addEventListener('blur', async () => {
+    const metin = el.innerText.trim();
+    if (metin === el.dataset.original) return; // hâlâ boş / değişmedi -> istek yok
+    if (wordCount(metin) >= PARA_WORD_LIMIT) {
+      const devam = await paragraphLengthGate(currentChapter, number, metin, el);
+      if (!devam) return; // bölünerek kaydedildi
+    }
+    autoSaveParagraph(currentChapter, number, el, state, saveBtn);
+  });
+  saveBtn.addEventListener('click', () => saveParagraph(currentChapter.id, number));
+  el.focus();
 }
 
 // Otomatik kayıt: tam sayfa yenilemeden kaydeder, rozetleri yerinde
