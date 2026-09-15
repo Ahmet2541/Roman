@@ -888,6 +888,10 @@ function renderReader(chapter) {
         <div class="paragraph-ai-panel" data-number="${p.number}" style="display:none;margin-top:8px;"></div>
         <div class="paragraph-history-panel" data-number="${p.number}" style="display:none;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);"></div>
       </div>
+    </div>
+    <div style="text-align:center;margin:2px 0;">
+      <button class="insert-para-between-btn" data-after="${p.number}" title="Bu paragrafla bir sonraki arasına yeni paragraf ekle"
+        style="background:none;border:1px dashed var(--border);border-radius:4px;color:var(--text-muted);font-size:11px;padding:1px 8px;cursor:pointer;opacity:0.55;">+ araya ekle</button>
     </div>`).join('');
 
   // ESKİDEN burada kırmızı bir "⚠ hata" bandı vardı: Kısım/Alt Başlık'ın
@@ -1264,6 +1268,9 @@ function renderReader(chapter) {
       } catch (err) { alert(err.message); }
     });
   });
+  readerPane.querySelectorAll('.insert-para-between-btn').forEach(btn => {
+    btn.addEventListener('click', () => insertParagraphAfter(chapter, parseInt(btn.dataset.after, 10)));
+  });
   el('addParaBtn').addEventListener('click', () => {
     // Sadece chapter.paragraphs'a değil, DOM'da ZATEN duran (henüz
     // kaydedilmemiş) boş kutulara da bak - yoksa "Kaydet"e basmadan art
@@ -1326,9 +1333,10 @@ async function loadParagraphHistory(chapterId, number) {
   }
 }
 
-function addEmptyParagraphBlock(number) {
-  const readerPane = document.getElementById('readerPane');
-  const addBtn = document.getElementById('addParaBtn');
+// Boş, düzenlenebilir bir paragraf kutusu üretir (DOM'a eklemez, sadece
+// oluşturup autosave dinleyicilerini bağlar). addEmptyParagraphBlock (sona
+// ekle) ve insertParagraphAfter (araya ekle) bu ortak yapıcıyı paylaşır.
+function buildEmptyParagraphNode(number) {
   const div = document.createElement('div');
   div.className = 'paragraph-block';
   div.innerHTML = `<div class="paragraph-number">${number}</div>
@@ -1340,7 +1348,6 @@ function addEmptyParagraphBlock(number) {
         <span class="para-save-state" data-number="${number}"></span>
       </div>
     </div>`;
-  readerPane.insertBefore(div, addBtn);
 
   const el = div.querySelector('.paragraph-text');
   const saveBtn = div.querySelector('.save-para-btn');
@@ -1351,7 +1358,7 @@ function addEmptyParagraphBlock(number) {
   // kalıbını izler (dirty-check + blur autosave, bkz. renderReader):
   // boşken hiç istek atılmaz, yazılınca "Kaydet" aktifleşir, odaktan
   // çıkınca (blur) otomatik kaydedilir - elle "Kaydet"e basmak zorunlu
-  // değildir. Önceden bu blok yalnızca manuel Kaydet düğmesiyle kaydediliyordu.
+  // değildir.
   const setDirty = (dirty) => {
     saveBtn.disabled = !dirty;
     saveBtn.title = dirty ? 'Değişiklikleri kaydet' : 'Değişiklik yapılmadı - paragraf zaten kayıtlı';
@@ -1372,7 +1379,43 @@ function addEmptyParagraphBlock(number) {
     autoSaveParagraph(currentChapter, number, el, state, saveBtn);
   });
   saveBtn.addEventListener('click', () => saveParagraph(currentChapter.id, number));
-  el.focus();
+  return div;
+}
+
+function addEmptyParagraphBlock(number) {
+  const readerPane = document.getElementById('readerPane');
+  const addBtn = document.getElementById('addParaBtn');
+  const div = buildEmptyParagraphNode(number);
+  readerPane.insertBefore(div, addBtn);
+  div.querySelector('.paragraph-text').focus();
+}
+
+// Paragraflar ARASINA ekleme: önce backend'de `number`'dan sonraki tüm
+// paragrafları 1 kaydırır (bkz. insert-empty-after), sonra okuyucuyu
+// kaydırılmış numaralarla yeniden çizer ve boşalan yuvaya (number+1) yeni
+// bir düzenlenebilir kutu yerleştirir. Kutuya yazılan metin normal
+// autosave akışıyla (blur) gerçek paragrafa dönüşür.
+async function insertParagraphAfter(chapter, number) {
+  try {
+    const updated = await api.post(`/chapters/${chapter.id}/paragraphs/${number}/insert-empty-after`, {});
+    currentChapter = updated;
+    renderReader(updated);
+    const yeniNo = number + 1;
+    const ankraj = document.querySelector(`.paragraph-block .paragraph-text[data-number="${number}"]`)?.closest('.paragraph-block');
+    const yeniKutu = buildEmptyParagraphNode(yeniNo);
+    if (ankraj && ankraj.parentNode) {
+      ankraj.parentNode.insertBefore(yeniKutu, ankraj.nextSibling);
+    } else {
+      // Ankraj bulunamadıysa (ör. 0. paragraftan sonra ekleniyorsa) en
+      // başa koy.
+      const readerPane = document.getElementById('readerPane');
+      const ilkParaBlok = readerPane.querySelector('.paragraph-block');
+      readerPane.insertBefore(yeniKutu, ilkParaBlok || readerPane.firstChild);
+    }
+    yeniKutu.querySelector('.paragraph-text').focus();
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 // Otomatik kayıt: tam sayfa yenilemeden kaydeder, rozetleri yerinde
