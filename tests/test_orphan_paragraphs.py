@@ -1,8 +1,10 @@
-"""Kısım/Alt Başlık normalde sadece bir ayraç - ama backend eskiden hiçbir
-yerde bunlara paragraf eklenmesini engellemiyordu. Yanlışlıkla (ör. 'Yeni
-Bölüm' yerine 'Yeni Başlık (Kısım)' seçilip metin yazılırsa) bu içerik
-fihristten hiç erişilemez hale geliyordu. Bu testler hem tespiti
-(paragraph_count) hem de yeni engeli (sadece YENİ paragraf için) doğrular."""
+"""Kısım/Alt Başlık ESKİDEN sadece bir ayraç sayılıyordu ve backend yeni
+paragraf eklemeyi 400 ile reddediyordu. Scrivener/Ulysses gibi yazım
+araçlarının hiçbirinde "kap türüne göre içerik yasağı" yok - bir klasör/grup
+kendisi de metin tutabilir, aynı zamanda alt girdileri de olabilir. Bu
+yüzden kısıt TAMAMEN kaldırıldı: Kısım/Alt Başlık'a da doğrudan paragraf
+yazılabilir. Bu testler artık bunun ÇALIŞTIĞINI doğruluyor (eskiden
+reddedildiğini değil)."""
 
 
 def test_part_paragraph_count_is_zero_by_default(client, headers):
@@ -14,22 +16,26 @@ def test_part_paragraph_count_is_zero_by_default(client, headers):
     assert part_row["paragraph_count"] == 0
 
 
-def test_new_paragraph_on_part_is_rejected(client, headers):
+def test_new_paragraph_on_part_is_allowed(client, headers):
     r = client.post("/chapters/", json={"number": 1, "title": "BİRİNCİ KISIM", "kind": "part"}, headers=headers)
     part_id = r.json()["id"]
 
-    r = client.put(f"/chapters/{part_id}/paragraphs/1", json={"number": 1, "text": "yanlış yer"}, headers=headers)
-    assert r.status_code == 400
-    assert "Kısım" in r.json()["detail"]
+    r = client.put(f"/chapters/{part_id}/paragraphs/1", json={"number": 1, "text": "artık serbest"}, headers=headers)
+    assert r.status_code == 200
+    assert r.json()["text"] == "artık serbest"
+
+    r = client.get("/chapters/", headers=headers)
+    part_row = next(c for c in r.json() if c["id"] == part_id)
+    assert part_row["paragraph_count"] == 1
 
 
-def test_new_paragraph_on_subtitle_is_rejected(client, headers):
+def test_new_paragraph_on_subtitle_is_allowed(client, headers):
     r = client.post("/chapters/", json={"number": 1, "title": "Uyanış", "kind": "subtitle"}, headers=headers)
     sub_id = r.json()["id"]
 
-    r = client.put(f"/chapters/{sub_id}/paragraphs/1", json={"number": 1, "text": "yanlış yer"}, headers=headers)
-    assert r.status_code == 400
-    assert "Alt Başlık" in r.json()["detail"]
+    r = client.put(f"/chapters/{sub_id}/paragraphs/1", json={"number": 1, "text": "artık serbest"}, headers=headers)
+    assert r.status_code == 200
+    assert r.json()["text"] == "artık serbest"
 
 
 def test_new_paragraph_on_real_chapter_still_works(client, headers):

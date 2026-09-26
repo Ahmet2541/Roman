@@ -710,31 +710,10 @@ async function insertAfterNumber(anchorNumber) {
   return anchorNumber + 1;
 }
 
-// Belge içindeki tüm EN ÜST seviye ayraçları (Kısım ya da kapsayıcı Bölüm)
-// listeler - "Yeni Alt Başlık/Bölüm" modalında Kısım kutusunun DOĞRU
-// seçeneklerini sunmak için. getCurrentContext() sadece "şu an neredesin"
-// diyor; kullanıcı başka bir bölümdeyken (ör. 2. bölümdeyken 1. bölüme
-// alt başlık eklemek istiyorsa) otomatik tahmin YANLIŞ olabilir - bu
-// yüzden kutu artık kilitli değil, bu listeden seçilebilir.
-function getTopLevelDividers() {
-  const hierarchy = buildChapterHierarchy(lastLoadedChapters);
-  return hierarchy.filter(it => it.ancestorIds.length === 0 &&
-    (it.chapter.kind === 'part' || (it.chapter.kind === 'chapter' && it.hasChildren)));
-}
-
-function getSubtitlesUnderPart(partId) {
-  const hierarchy = buildChapterHierarchy(lastLoadedChapters);
-  return hierarchy.filter(it => it.chapter.kind === 'subtitle' && (it.ancestorIds[0] || null) === (partId || null));
-}
-
 function openCreateItemModal(kind) {
   kind = kind || 'chapter';
   const kindLabel = kind === 'part' ? 'Başlık (Kısım)' : kind === 'subtitle' ? 'Alt Başlık' : 'Bölüm';
   const ctx = getCurrentContext();
-  // Seçilebilir bağlam - başlangıçta "şu an neredesin"e göre tahmin
-  // edilir ama kullanıcı değiştirebilir (aşağıdaki select'ler).
-  let seciliPartId = ctx.partId || null;
-  let seciliSubtitleId = ctx.subtitleId || null;
 
   // Her kutunun durumu: { value, locked } - locked=true ise input disabled.
   let box1, box2, box3; // Kısım# / Alt Başlık# / Bölüm#
@@ -742,37 +721,17 @@ function openCreateItemModal(kind) {
     box1 = { value: countExistingInScope('part') + 1, locked: false };
     box2 = null; box3 = null;
   } else if (kind === 'subtitle') {
-    box1 = { secilebilir: 'part' };
-    box2 = { value: countExistingInScope('subtitle', seciliPartId, null) + 1, locked: false };
+    box1 = ctx.partId ? { value: ctx.partNum, locked: true } : { value: '—', locked: true, na: true };
+    box2 = { value: countExistingInScope('subtitle', ctx.partId, null) + 1, locked: false };
     box3 = null;
   } else {
-    box1 = { secilebilir: 'part' };
-    box2 = { secilebilir: 'subtitle' };
-    box3 = { value: countExistingInScope('chapter', seciliPartId, seciliSubtitleId) + 1, locked: false };
+    box1 = ctx.partId ? { value: ctx.partNum, locked: true } : { value: '—', locked: true, na: true };
+    box2 = ctx.subtitleId ? { value: ctx.subNum, locked: true } : { value: '—', locked: true, na: true };
+    box3 = { value: countExistingInScope('chapter', ctx.partId, ctx.subtitleId) + 1, locked: false };
   }
 
   const renderBox = (label, box) => {
     if (!box) return `<div style="flex:1;min-width:0;"></div>`;
-    if (box.secilebilir === 'part') {
-      const dividers = getTopLevelDividers();
-      return `<div style="flex:1;min-width:0;text-align:center;">
-        <div style="font-size:10.5px;color:var(--text-muted);margin-bottom:3px;">${label}</div>
-        <select class="pos-box" id="posBoxPart" style="width:100%;padding:8px 2px;border-radius:8px;border:1px solid var(--border);background:#fff;font-weight:600;">
-          <option value="">— (üst seviye, Kısımsız)</option>
-          ${dividers.map(d => `<option value="${d.chapter.id}" ${String(d.chapter.id) === String(seciliPartId) ? 'selected' : ''}>${d.displayNumber} — ${escapeHtml(d.chapter.title || '(başlıksız)')}</option>`).join('')}
-        </select>
-      </div>`;
-    }
-    if (box.secilebilir === 'subtitle') {
-      const subs = getSubtitlesUnderPart(seciliPartId);
-      return `<div style="flex:1;min-width:0;text-align:center;">
-        <div style="font-size:10.5px;color:var(--text-muted);margin-bottom:3px;">${label}</div>
-        <select class="pos-box" id="posBoxSubtitle" style="width:100%;padding:8px 2px;border-radius:8px;border:1px solid var(--border);background:#fff;font-weight:600;">
-          <option value="">— (doğrudan Kısım altında)</option>
-          ${subs.map(s => `<option value="${s.chapter.id}" ${String(s.chapter.id) === String(seciliSubtitleId) ? 'selected' : ''}>${s.displayNumber} — ${escapeHtml(s.chapter.title || '(başlıksız)')}</option>`).join('')}
-        </select>
-      </div>`;
-    }
     return `<div style="flex:1;min-width:0;text-align:center;">
       <div style="font-size:10.5px;color:var(--text-muted);margin-bottom:3px;">${label}</div>
       <input type="text" class="pos-box" value="${box.value}" ${box.locked ? 'disabled' : ''}
@@ -782,8 +741,7 @@ function openCreateItemModal(kind) {
   };
 
   const overlay = ensureModalOverlay();
-  const ciz = () => {
-    overlay.innerHTML = `
+  overlay.innerHTML = `
     <div class="panel" style="width:340px;max-width:92vw;">
       <strong style="font-size:13px;">Yeni ${kindLabel}</strong>
       <div style="display:flex;gap:8px;margin:12px 0;">
@@ -791,7 +749,7 @@ function openCreateItemModal(kind) {
         ${renderBox('Alt Başlık', box2)}
         ${renderBox('Bölüm', box3)}
       </div>
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Kısım/Alt Başlık, şu an bulunduğun bağlama göre önceden seçilmiştir - başka bir yere eklemek istiyorsan değiştirebilirsin.</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Gri kutular şu an içinde bulunduğun bağlamı gösterir, değiştirilemez - sadece koyu renkli kutu düzenlenebilir.</div>
       <div class="field">
         <label>${kindLabel} metni${kind === 'chapter' ? ' (opsiyonel)' : ''}</label>
         <input type="text" id="createItemTitle" placeholder="${kind === 'chapter' ? 'Boş bırakabilirsin' : 'Zorunlu'}">
@@ -802,49 +760,30 @@ function openCreateItemModal(kind) {
       </div>
       <div id="createItemError" class="error-text"></div>
     </div>`;
-    const partSel = document.getElementById('posBoxPart');
-    if (partSel) {
-      partSel.addEventListener('change', () => {
-        seciliPartId = partSel.value || null;
-        seciliSubtitleId = null; // Kısım değişti - Alt Başlık seçimi artık geçersiz
-        if (kind === 'subtitle') box2.value = countExistingInScope('subtitle', seciliPartId, null) + 1;
-        if (kind === 'chapter') box3.value = countExistingInScope('chapter', seciliPartId, seciliSubtitleId) + 1;
-        ciz();
-      });
-    }
-    const subSel = document.getElementById('posBoxSubtitle');
-    if (subSel) {
-      subSel.addEventListener('change', () => {
-        seciliSubtitleId = subSel.value || null;
-        box3.value = countExistingInScope('chapter', seciliPartId, seciliSubtitleId) + 1;
-        ciz();
-      });
-    }
-    el('createItemCancelBtn').addEventListener('click', () => { overlay.style.display = 'none'; });
-    el('createItemConfirmBtn').addEventListener('click', async (e) => {
-      const rawTitle = el('createItemTitle').value;
-      if (kind !== 'chapter' && !rawTitle.trim()) {
-        el('createItemError').textContent = `${kindLabel} için bir metin gerekli.`;
-        return;
-      }
-      const title = stripMarkdownArtifacts(rawTitle);
-      e.target.disabled = true;
-      try {
-        const gercekCtx = { partId: seciliPartId, subtitleId: seciliSubtitleId };
-        const anchorNumber = findInsertionAnchorNumber(kind, gercekCtx);
-        const newNumber = await insertAfterNumber(anchorNumber);
-        const chapter = await api.post('/chapters/', { number: newNumber, title, kind });
-        overlay.style.display = 'none';
-        await loadChapterList(chapter.id);
-      } catch (err) {
-        el('createItemError').textContent = err.message;
-        e.target.disabled = false;
-      }
-    });
-  };
-  ciz();
   overlay.style.display = 'flex';
+
+  el('createItemCancelBtn').addEventListener('click', () => { overlay.style.display = 'none'; });
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; }, { once: true });
+
+  el('createItemConfirmBtn').addEventListener('click', async (e) => {
+    const rawTitle = el('createItemTitle').value;
+    if (kind !== 'chapter' && !rawTitle.trim()) {
+      el('createItemError').textContent = `${kindLabel} için bir metin gerekli.`;
+      return;
+    }
+    const title = stripMarkdownArtifacts(rawTitle);
+    e.target.disabled = true;
+    try {
+      const anchorNumber = findInsertionAnchorNumber(kind, ctx);
+      const newNumber = await insertAfterNumber(anchorNumber);
+      const chapter = await api.post('/chapters/', { number: newNumber, title, kind });
+      overlay.style.display = 'none';
+      await loadChapterList(chapter.id);
+    } catch (err) {
+      el('createItemError').textContent = err.message;
+      e.target.disabled = false;
+    }
+  });
 }
 
 async function selectChapter(id) {
@@ -949,31 +888,21 @@ function renderReader(chapter) {
         <div class="paragraph-ai-panel" data-number="${p.number}" style="display:none;margin-top:8px;"></div>
         <div class="paragraph-history-panel" data-number="${p.number}" style="display:none;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);"></div>
       </div>
-    </div>
-    <div style="text-align:center;margin:2px 0;">
-      <button class="insert-para-between-btn" data-after="${p.number}" title="Bu paragrafla bir sonraki arasına yeni paragraf ekle"
-        style="background:none;border:1px dashed var(--border);border-radius:4px;color:var(--text-muted);font-size:11px;padding:1px 8px;cursor:pointer;opacity:0.55;">+ araya ekle</button>
     </div>`).join('');
 
-  // Uyarı SADECE gerçek sorun varsa: başlık türünde VE içinde paragraf
-  // varken. Ayrıca ✕ ile kapatılırsa bölüm bazında KALICI kapanır (her
-  // dönüşte tekrar çıkıp gürültü yapmasın) ve elle 3 adımlı tarif yerine
-  // tek tıkla düzelten bir düğme var.
-  let kindWarnDismissed = false;
-  try {
-    kindWarnDismissed = JSON.parse(localStorage.getItem('roman_kindwarn_dismissed') || '[]').includes(chapter.id);
-  } catch (e) { /* yoksay */ }
-  const kindWarning = (chapter.kind !== 'chapter' && (chapter.paragraphs || []).length > 0 && !kindWarnDismissed)
-    ? `<div class="panel" id="kindWarningBanner" style="border-color:var(--danger);background:#fdf1f0;margin-bottom:12px;position:relative;">
-        <button id="dismissKindWarningBtn" title="Kapat (bir daha gösterme)" style="position:absolute;top:8px;right:10px;background:none;border:none;cursor:pointer;font-size:15px;color:var(--danger);line-height:1;">✕</button>
-        <strong style="font-size:12.5px;color:var(--danger);padding-right:20px;display:block;">⚠ Bu bir ${chapter.kind === 'part' ? 'Kısım' : 'Alt Başlık'} ama içinde metin var.</strong>
-        <div style="font-size:12px;margin-top:4px;">Kısım/Alt Başlık bir ayraçtır; metin normalde Bölüm'de durur (fihrist ve AI bağlamı buna göre çalışır).</div>
-        <button class="btn btn-sm btn-primary" id="moveParagraphsOutBtn" style="margin-top:8px;">↓ Metni yeni bir Bölüm'e taşı</button>
+  // ESKİDEN burada kırmızı bir "⚠ hata" bandı vardı: Kısım/Alt Başlık'ın
+  // kendi metni olması bir ANOMALİ sayılıyordu. Artık bilinçli desteklenen
+  // bir özellik (bkz. routers/chapters.py) - o yüzden alarm değil, nötr bir
+  // bilgi notu + isteğe bağlı "ayrı Bölüm'e taşı" kısayolu gösteriliyor.
+  const kindNote = (chapter.kind !== 'chapter' && (chapter.paragraphs || []).length > 0)
+    ? `<div class="panel" style="margin-bottom:12px;">
+        <div style="font-size:12px;color:var(--text-muted);">Bu bir ${chapter.kind === 'part' ? 'Kısım' : 'Alt Başlık'} - kendi metnini tutuyor. Fihrist ve AI bağlamı bu metni normal bir bölüm gibi işler.</div>
+        <button class="btn btn-sm" id="moveParagraphsOutBtn" style="margin-top:8px;">↓ İstersen ayrı bir Bölüm'e taşı</button>
       </div>`
     : '';
 
   readerPane.innerHTML = `
-    ${kindWarning}
+    ${kindNote}
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <h2 style="margin:0;">Bölüm ${chapter.number}${chapter.title ? ' — ' + escapeHtml(stripMarkdownArtifacts(chapter.title)) : ''}</h2>
       <button class="btn btn-sm" id="editTitleBtn">Başlığı düzenle</button>
@@ -1118,20 +1047,9 @@ function renderReader(chapter) {
       await loadChapterList(created.id);
     } catch (err) {
       alert(err.message);
-      btn.disabled = false; btn.textContent = '↓ Metni yeni bir Bölüm\'e taşı';
+      btn.disabled = false; btn.textContent = '↓ İstersen ayrı bir Bölüm\'e taşı';
     }
   });
-  const dismissKindWarningBtn = document.getElementById('dismissKindWarningBtn');
-  if (dismissKindWarningBtn) {
-    dismissKindWarningBtn.addEventListener('click', () => {
-      try {
-        const key = 'roman_kindwarn_dismissed';
-        const list = JSON.parse(localStorage.getItem(key) || '[]');
-        if (!list.includes(chapter.id)) { list.push(chapter.id); localStorage.setItem(key, JSON.stringify(list)); }
-      } catch (e) { /* yoksay */ }
-      el('kindWarningBanner').style.display = 'none';
-    });
-  }
   el('editTitleBtn').addEventListener('click', async () => {
     const newTitle = prompt('Yeni bölüm başlığı:', chapter.title || '');
     if (newTitle === null) return;
@@ -1337,9 +1255,6 @@ function renderReader(chapter) {
       } catch (err) { alert(err.message); }
     });
   });
-  readerPane.querySelectorAll('.insert-para-between-btn').forEach(btn => {
-    btn.addEventListener('click', () => insertParagraphAfter(chapter, parseInt(btn.dataset.after, 10)));
-  });
   el('addParaBtn').addEventListener('click', () => {
     // Sadece chapter.paragraphs'a değil, DOM'da ZATEN duran (henüz
     // kaydedilmemiş) boş kutulara da bak - yoksa "Kaydet"e basmadan art
@@ -1402,22 +1317,21 @@ async function loadParagraphHistory(chapterId, number) {
   }
 }
 
-// Boş, düzenlenebilir bir paragraf kutusu üretir (DOM'a eklemez, sadece
-// oluşturup autosave dinleyicilerini bağlar). addEmptyParagraphBlock (sona
-// ekle) ve insertParagraphAfter (araya ekle) bu ortak yapıcıyı paylaşır.
-function buildEmptyParagraphNode(number) {
+function addEmptyParagraphBlock(number) {
+  const readerPane = document.getElementById('readerPane');
+  const addBtn = document.getElementById('addParaBtn');
   const div = document.createElement('div');
   div.className = 'paragraph-block';
   div.innerHTML = `<div class="paragraph-number">${number}</div>
     <div style="flex:1;">
       <div class="paragraph-text" contenteditable="true" data-number="${number}"></div>
-      <div class="paragraph-actions"><button class="btn btn-sm save-para-btn" data-number="${number}">Kaydet</button></div>
+      <div></div>
+      <div class="paragraph-actions">
+        <button class="btn btn-sm save-para-btn" data-number="${number}" disabled title="Değişiklik yapılmadı - paragraf zaten kayıtlı">Kaydet</button>
+        <span class="para-save-state" data-number="${number}"></span>
+      </div>
     </div>`;
-<<<<<<< HEAD
   readerPane.insertBefore(div, addBtn);
-  div.querySelector('.save-para-btn').addEventListener('click', () => saveParagraph(currentChapter.id, number));
-  div.querySelector('.paragraph-text').focus();
-=======
 
   const el = div.querySelector('.paragraph-text');
   const saveBtn = div.querySelector('.save-para-btn');
@@ -1428,7 +1342,7 @@ function buildEmptyParagraphNode(number) {
   // kalıbını izler (dirty-check + blur autosave, bkz. renderReader):
   // boşken hiç istek atılmaz, yazılınca "Kaydet" aktifleşir, odaktan
   // çıkınca (blur) otomatik kaydedilir - elle "Kaydet"e basmak zorunlu
-  // değildir.
+  // değildir. Önceden bu blok yalnızca manuel Kaydet düğmesiyle kaydediliyordu.
   const setDirty = (dirty) => {
     saveBtn.disabled = !dirty;
     saveBtn.title = dirty ? 'Değişiklikleri kaydet' : 'Değişiklik yapılmadı - paragraf zaten kayıtlı';
@@ -1449,44 +1363,7 @@ function buildEmptyParagraphNode(number) {
     autoSaveParagraph(currentChapter, number, el, state, saveBtn);
   });
   saveBtn.addEventListener('click', () => saveParagraph(currentChapter.id, number));
-  return div;
-}
-
-function addEmptyParagraphBlock(number) {
-  const readerPane = document.getElementById('readerPane');
-  const addBtn = document.getElementById('addParaBtn');
-  const div = buildEmptyParagraphNode(number);
-  readerPane.insertBefore(div, addBtn);
-  div.querySelector('.paragraph-text').focus();
-}
-
-// Paragraflar ARASINA ekleme: önce backend'de `number`'dan sonraki tüm
-// paragrafları 1 kaydırır (bkz. insert-empty-after), sonra okuyucuyu
-// kaydırılmış numaralarla yeniden çizer ve boşalan yuvaya (number+1) yeni
-// bir düzenlenebilir kutu yerleştirir. Kutuya yazılan metin normal
-// autosave akışıyla (blur) gerçek paragrafa dönüşür.
-async function insertParagraphAfter(chapter, number) {
-  try {
-    const updated = await api.post(`/chapters/${chapter.id}/paragraphs/${number}/insert-empty-after`, {});
-    currentChapter = updated;
-    renderReader(updated);
-    const yeniNo = number + 1;
-    const ankraj = document.querySelector(`.paragraph-block .paragraph-text[data-number="${number}"]`)?.closest('.paragraph-block');
-    const yeniKutu = buildEmptyParagraphNode(yeniNo);
-    if (ankraj && ankraj.parentNode) {
-      ankraj.parentNode.insertBefore(yeniKutu, ankraj.nextSibling);
-    } else {
-      // Ankraj bulunamadıysa (ör. 0. paragraftan sonra ekleniyorsa) en
-      // başa koy.
-      const readerPane = document.getElementById('readerPane');
-      const ilkParaBlok = readerPane.querySelector('.paragraph-block');
-      readerPane.insertBefore(yeniKutu, ilkParaBlok || readerPane.firstChild);
-    }
-    yeniKutu.querySelector('.paragraph-text').focus();
-  } catch (err) {
-    alert(err.message);
-  }
->>>>>>> bba0a9eaf1c956e28ed8ebdf7f90f46c1a676c74
+  el.focus();
 }
 
 // Otomatik kayıt: tam sayfa yenilemeden kaydeder, rozetleri yerinde

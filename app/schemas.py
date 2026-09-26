@@ -381,7 +381,6 @@ class ChapterCreate(BaseModel):
 
 
 class ChapterUpdate(BaseModel):
-    number: Optional[int] = None
     title: Optional[str] = None
     summary: Optional[str] = None
     kind: Optional[str] = None

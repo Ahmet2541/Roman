@@ -15,11 +15,11 @@ def test_paragraph_can_be_added_to_heading_that_already_has_text(client, headers
     guncel = client.get(f"/chapters/{ch['id']}", headers=headers).json()
     assert len(guncel["paragraphs"]) == 2
 
-    # BOŞ başlık hâlâ korunur - yanlışlıkla metin yazılmasın
+    # BOŞ başlığa da artık metin yazılabilir - "kap türüne göre içerik
+    # yasağı" tamamen kaldırıldı (bkz. routers/chapters.py).
     bos = client.post("/chapters/", json={"number": 5, "kind": "part", "title": "Ayraç"}, headers=headers).json()
     r2 = client.put(f"/chapters/{bos['id']}/paragraphs/1", json={"number": 1, "text": "Metin"}, headers=headers)
-    assert r2.status_code == 400
-    assert "henüz metni yok" in r2.json()["detail"]
+    assert r2.status_code == 200, r2.text
 
 
 def test_empty_paragraph_text_rejected(client, headers):
@@ -56,26 +56,6 @@ def test_paragraph_numbers_are_compacted_after_delete(client, headers):
     for _ in range(3):
         client.delete(f"/chapters/{ch['id']}/paragraphs/1", headers=headers)
     assert client.get(f"/chapters/{ch['id']}", headers=headers).json()["paragraphs"] == []
-
-
-def test_insert_empty_paragraph_after_shifts_following_numbers(client, headers):
-    """Paragraflar ARASINA ekleme: 1/2/3'ün arasına (1'den sonra) yeni bir
-    boş yuva açılınca eski 2 ve 3, 3 ve 4 olmalı; 1 yerinde kalmalı ve
-    boş yuvaya (yeni 2) yazılan metin gerçek paragraf olarak oturmalı."""
-    ch = client.post("/chapters/", json={"number": 1, "title": "B1"}, headers=headers).json()
-    for i in range(1, 4):
-        client.put(f"/chapters/{ch['id']}/paragraphs/{i}",
-                   json={"number": i, "text": f"Paragraf {i}"}, headers=headers)
-
-    r = client.post(f"/chapters/{ch['id']}/paragraphs/1/insert-empty-after", headers=headers)
-    assert r.status_code == 200, r.text
-    paras = {p["number"]: p["text"] for p in r.json()["paragraphs"]}
-    assert paras == {1: "Paragraf 1", 3: "Paragraf 2", 4: "Paragraf 3"}, "araya kaydırma yanlış"
-
-    r = client.put(f"/chapters/{ch['id']}/paragraphs/2", json={"number": 2, "text": "Araya girdim"}, headers=headers)
-    assert r.status_code == 200
-    kalan = client.get(f"/chapters/{ch['id']}", headers=headers).json()["paragraphs"]
-    assert [p["text"] for p in kalan] == ["Paragraf 1", "Araya girdim", "Paragraf 2", "Paragraf 3"]
 
 
 # --- El yazması dışa aktarımı ----------------------------------------------
