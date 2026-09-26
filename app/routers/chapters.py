@@ -573,6 +573,16 @@ def update_chapter(chapter_id: int, payload: schemas.ChapterUpdate, db: Session 
     if not chapter:
         raise HTTPException(404, "Bölüm bulunamadı")
     data = payload.model_dump(exclude_unset=True)
+    if "number" in data:
+        if data["number"] is None or data["number"] < 1:
+            raise HTTPException(400, "Bölüm sıra numarası pozitif bir tam sayı olmalı")
+        occupied = db.query(models.Chapter).filter(
+            models.Chapter.novel_id == novel_id,
+            models.Chapter.number == data["number"],
+            models.Chapter.id != chapter_id,
+        ).first()
+        if occupied:
+            raise HTTPException(400, "Bu numarada bir bölüm/başlık zaten var")
     if "kind" in data and data["kind"] not in ("chapter", "part", "subtitle"):
         raise HTTPException(400, "kind sadece 'chapter', 'part' ya da 'subtitle' olabilir")
     for field, value in data.items():
@@ -595,41 +605,6 @@ def delete_chapter(chapter_id: int, db: Session = Depends(get_db), _user=Depends
     db.delete(chapter)
     db.commit()
     return None
-
-
-@router.post("/{chapter_id}/paragraphs/{number}/insert-empty-after", response_model=schemas.ChapterOut)
-def insert_empty_paragraph_after(
-    chapter_id: int, number: int,
-    db: Session = Depends(get_db), _user=Depends(get_current_user),
-    novel_id: int = Depends(get_novel_id),
-):
-    """Paragraflar ARASINA yeni paragraf eklemek için: `number`'dan sonraki
-    tüm paragrafların numarasını 1 kaydırır, böylece number+1 konumu
-    boşalır. Boş paragraf burada OLUŞTURULMAZ (DB'de boş metinli paragraf
-    tutulmaz, bkz. upsert_paragraph'taki boş-metin koruması) - frontend bu
-    boş yuvaya yeni bir düzenlenebilir kutu gösterir, kullanıcı yazıp
-    odaktan çıkınca (autosave) gerçek satır oluşur. Böylece aradaki tüm
-    paragrafları elle kaydırmaya gerek kalmaz."""
-    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id, models.Chapter.novel_id == novel_id).first()
-    if not chapter:
-        raise HTTPException(404, "Bölüm bulunamadı")
-    sonrakiler = (
-        db.query(models.Paragraph)
-        .filter(models.Paragraph.chapter_id == chapter_id, models.Paragraph.number > number)
-        .order_by(models.Paragraph.number.desc())
-        .all()
-    )
-    # BÜYÜKTEN küçüğe kaydır VE her adımda ayrı flush et - SQLAlchemy aynı
-    # tabloya art arda gelen UPDATE'leri tek bir executemany'de toplayabilir;
-    # bu durumda unique(chapter_id, number) sıraya bakmaksızın anlık çakışma
-    # sanıp hata verebiliyor. Her paragrafı teker teker flush etmek bunu
-    # engelliyor.
-    for p in sonrakiler:
-        p.number += 1
-        db.flush()
-    db.commit()
-    db.refresh(chapter)
-    return chapter
 
 
 @router.put("/{chapter_id}/paragraphs/{number}", response_model=schemas.ParagraphOut)
