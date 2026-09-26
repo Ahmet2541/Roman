@@ -15,11 +15,37 @@ def test_paragraph_can_be_added_to_heading_that_already_has_text(client, headers
     guncel = client.get(f"/chapters/{ch['id']}", headers=headers).json()
     assert len(guncel["paragraphs"]) == 2
 
-    # BOŞ başlığa da artık metin yazılabilir - "kap türüne göre içerik
-    # yasağı" tamamen kaldırıldı (bkz. routers/chapters.py).
+    # BOŞ başlık hâlâ korunur - yanlışlıkla metin yazılmasın
     bos = client.post("/chapters/", json={"number": 5, "kind": "part", "title": "Ayraç"}, headers=headers).json()
     r2 = client.put(f"/chapters/{bos['id']}/paragraphs/1", json={"number": 1, "text": "Metin"}, headers=headers)
-    assert r2.status_code == 200, r2.text
+    assert r2.status_code == 400
+    assert "henüz metni yok" in r2.json()["detail"]
+
+
+def test_chapter_number_can_be_updated_and_shift_actually_persists(client, headers):
+    """REGRESYON: ChapterUpdate şemasında 'number' alanı YOKTU - PUT
+    /chapters/{id} {"number": N} isteği Pydantic tarafından sessizce
+    yutuluyordu (200 dönüyor ama numara hiç değişmiyordu). Bu da "Yeni
+    Alt Başlık/Bölüm" eklerken numara kaydırma mekanizmasını (bkz.
+    frontend insertAfterNumber) tamamen işlevsiz kılıyordu - kaydırılmış
+    sanılan bölüm aslında eski numarasında kalıyor, yeni kayıt onunla
+    çakışınca "Bu numarada bir bölüm/başlık zaten var" (400) ya da ham
+    bir IntegrityError (500) çıkıyordu."""
+    c1 = client.post("/chapters/", json={"number": 1, "title": "A", "kind": "chapter"}, headers=headers).json()
+    c2 = client.post("/chapters/", json={"number": 2, "title": "B", "kind": "chapter"}, headers=headers).json()
+
+    r = client.put(f"/chapters/{c2['id']}", json={"number": 4}, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["number"] == 4  # eskiden burada hâlâ 2 dönerdi
+
+    # Numara gerçekten boşaldı - 2 ile yeni bir kayıt sorunsuz oluşabilmeli
+    r2 = client.post("/chapters/", json={"number": 2, "title": "C", "kind": "chapter"}, headers=headers)
+    assert r2.status_code == 201
+
+    # Çakışma artık ham 500 değil, temiz bir 400
+    r3 = client.put(f"/chapters/{c1['id']}", json={"number": 4}, headers=headers)
+    assert r3.status_code == 400
+    assert "zaten var" in r3.json()["detail"]
 
 
 def test_empty_paragraph_text_rejected(client, headers):

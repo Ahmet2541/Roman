@@ -65,9 +65,9 @@ def create_chapter(payload: schemas.ChapterCreate, db: Session = Depends(get_db)
 
 @router.get("/stats", response_model=schemas.WordCountStats)
 def word_count_stats(db: Session = Depends(get_db), _user=Depends(get_current_user), novel_id: int = Depends(get_novel_id)):
-    """Toplam ve bölüm başına kelime sayısı. kind'a bakmadan TÜM girdilerin
-    paragraflarını sayar - Kısım/Alt Başlık'ın da artık kendi metni
-    olabiliyor (bkz. models.Chapter), boş olanlar zaten 0 katkı yapar."""
+    """Toplam ve bölüm başına kelime sayısı. Başlık/alt başlık girdileri
+    (kind != 'chapter') paragrafsız olduğu için doğal olarak 0 kelime
+    katkısı yapar - ayrıca filtrelemeye gerek yok."""
     chapters = db.query(models.Chapter).filter(models.Chapter.novel_id == novel_id).order_by(models.Chapter.number).all()
     per_chapter = []
     total = 0
@@ -309,9 +309,8 @@ def generate_chapter_summary(
 
 def resolve_chapters_for_part(db: Session, novel_id: int, part_id: int) -> list:
     """Fihristteki bir Kısım'ın (kind='part') altına düşen TÜM gerçek
-    bölümleri (kind='chapter') VE artık kendi metnini tutan Alt Başlık/
-    Kısım girdilerini bulur - aradaki Alt Başlıklar (subtitle) şeffaftır,
-    onların altındaki bölümler de bu Kısım'a ait sayılır.
+    bölümleri (kind='chapter') bulur - aradaki Alt Başlıklar (subtitle)
+    şeffaftır, onların altındaki bölümler de bu Kısım'a ait sayılır.
     Frontend'deki buildChapterHierarchy ile BİREBİR aynı mantık - fihrist
     görünümünde hangi bölümler bir Kısım'ın altında görünüyorsa, toplu
     tarama da tam onları kapsar."""
@@ -321,10 +320,7 @@ def resolve_chapters_for_part(db: Session, novel_id: int, part_id: int) -> list:
     for e in entries:
         if e.kind == "part":
             current_part_id = e.id
-            continue
-        if current_part_id != part_id:
-            continue
-        if e.kind == "chapter" or any((p.text or "").strip() for p in e.paragraphs):
+        elif e.kind == "chapter" and current_part_id == part_id:
             result.append(e)
     return result
 
@@ -579,6 +575,19 @@ def update_chapter(chapter_id: int, payload: schemas.ChapterUpdate, db: Session 
     data = payload.model_dump(exclude_unset=True)
     if "kind" in data and data["kind"] not in ("chapter", "part", "subtitle"):
         raise HTTPException(400, "kind sadece 'chapter', 'part' ya da 'subtitle' olabilir")
+    if "number" in data and data["number"] != chapter.number:
+        # ChapterUpdate şemasında 'number' eskiden yoktu - bu isteği
+        # sessizce yutuyordu (frontend'in numara kaydırma mekanizması hiç
+        # çalışmıyordu). Şimdi çalışıyor ama iki girdi aynı numarayı
+        # isteyebilir (kaydırma sırası/zamanlaması yüzünden) - ham
+        # IntegrityError'ı (500) kullanıcıya sızdırmadan önce burada
+        # yakalayıp temiz bir 400'e çeviriyoruz.
+        cakisan = (db.query(models.Chapter)
+                   .filter(models.Chapter.novel_id == novel_id,
+                           models.Chapter.number == data["number"],
+                           models.Chapter.id != chapter_id).first())
+        if cakisan:
+            raise HTTPException(400, "Bu numarada bir bölüm/başlık zaten var")
     for field, value in data.items():
         setattr(chapter, field, value)
     db.commit()
@@ -637,18 +646,28 @@ def upsert_paragraph(
             db.add(models.ParagraphVersion(paragraph_id=paragraph.id, text=paragraph.text))
         paragraph.text = payload.text
     else:
-        # ESKİDEN: yeni paragraf sadece kind='chapter' girdilere eklenebiliyordu
-        # - Kısım/Alt Başlık "sadece yapısal ayraç" sayılıyordu. Scrivener,
-        # Ulysses gibi yazım araçlarının hiçbirinde böyle bir kısıt yok: bir
-        # klasör/grup KENDİSİ de metin tutabilir, aynı zamanda alt girdileri
-        # de olabilir - iki şey birbirini dışlamaz. O yüzden bu kısıt
-        # TAMAMEN kaldırıldı: Kısım ya da Alt Başlık'a da doğrudan paragraf
-        # yazılabilir. Fihrist/okuyucu tarafı zaten bunu destekliyordu
-        # (paragrafı olan bir başlık girdisi "kendi metnini göster" moduna
-        # geçiyordu, bkz. hasOrphanText/kindWarning) - burada kalan tek şey
-        # bu kapıyı YENİ paragraf için de açmaktı. AI bağlam/tarama
-        # katmanları (ai_context.py, style_scan.py, resolve_chapters_for_part)
-        # da artık kind'a değil gerçek paragraf varlığına bakıyor.
+        # YENİ bir paragraf sadece gerçek bir Bölüm'e eklenebilir - Kısım/
+        # Alt Başlık sadece yapısal bir ayraç, içerik tutmamalı. Bu kontrol
+        # olmadan (önceki halimiz) "Yeni Başlık (Kısım)" yanlışlıkla seçilip
+        # metin yazılırsa, o içerik fihristten hiç erişilemez hale
+        # geliyordu (Kısım satırları "ilk alt bölüme git" davranışına
+        # sahip, kendi paragrafını göstermiyordu).
+        # ÖLÇÜT TÜR DEĞİL İÇERİK: kural, boş bir başlığa yanlışlıkla metin
+        # yazılmasını önlemek içindi. Ama ZATEN paragrafı olan bir başlık
+        # girdisi (içe aktarılan romanlarda olağan; kullanıcı yapıyı
+        # sonradan da değiştirebiliyor) gerçekte metin taşıyor - oraya
+        # paragraf eklemek engellenirse PARAGRAF BÖLME, taşıma ve içe
+        # aktarma çalışmıyor. Yalnızca HİÇ paragrafı olmayan başlıklar
+        # korunur.
+        mevcut_paragraf_var = any((p.text or "").strip() for p in chapter.paragraphs)
+        if chapter.kind != "chapter" and not mevcut_paragraf_var:
+            kind_label = "Kısım" if chapter.kind == "part" else "Alt Başlık"
+            raise HTTPException(
+                400,
+                f"Bu bir {kind_label} - sadece yapısal bir ayraç, henüz metni yok. "
+                f"Metin yazmak için önce '+ Yeni' > 'Yeni Bölüm' ile gerçek bir bölüm oluştur "
+                f"(ya da bu girdinin türünü ✎ ile 'Metin Bölümü' yap).",
+            )
         paragraph = models.Paragraph(chapter_id=chapter_id, number=number, text=payload.text)
         db.add(paragraph)
     db.commit()
